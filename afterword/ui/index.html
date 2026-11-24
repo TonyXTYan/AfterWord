@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AfterWord · log</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1c1a; --muted: #77736b; --line: #e4e1d9;
+    --accent: #3b5bdb; --spoken: #2b8a3e; --queued: #8a6d00; --playing: #3b5bdb;
+    --skipped: #868e96; --error: #c92a2a; --info: #5f3dc4;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151514; --panel: #1d1d1b; --ink: #ecebe6; --muted: #9a968d; --line: #2e2d2a;
+      --accent: #748ffc; --spoken: #69db7c; --queued: #ffd43b; --playing: #748ffc;
+      --skipped: #868e96; --error: #ff8787; --info: #b197fc;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Inter", sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; background: var(--bg);
+           border-bottom: 1px solid var(--line); padding: 12px 20px;
+           display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+  h1 { font-size: 15px; margin: 0; letter-spacing: .02em; }
+  h1 span { color: var(--muted); font-weight: 400; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--skipped); }
+  .dot.live { background: var(--spoken); box-shadow: 0 0 0 3px color-mix(in srgb, var(--spoken) 25%, transparent); }
+  .dot.down { background: var(--error); }
+  .now { flex: 1; min-width: 240px; font-size: 13px; color: var(--muted);
+         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .now b { color: var(--ink); font-weight: 500; }
+  button, input, select { font: inherit; font-size: 13px; color: var(--ink); background: var(--panel);
+           border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.danger { color: var(--error); }
+  input[type=search] { width: 220px; }
+  main { padding: 12px 20px 40px; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel);
+          border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 500; }
+  tr.ev { cursor: pointer; }
+  tr.ev:hover td { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+  tr.ev.flash td { animation: flash 1.2s ease-out; }
+  @keyframes flash { from { background: color-mix(in srgb, var(--accent) 18%, transparent); } }
+  td.t { font-family: var(--mono); font-size: 12px; color: var(--muted); white-space: nowrap; }
+  td.sess { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+  td.sess small { display: block; color: var(--muted); font-family: inherit; }
+  td.text { max-width: 520px; }
+  td.text .reason { color: var(--muted); font-size: 12px; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px;
+           border: 1px solid currentColor; white-space: nowrap; }
+  .s-spoken { color: var(--spoken); } .s-queued, .s-synthesizing { color: var(--queued); }
+  .s-playing { color: var(--playing); } .s-skipped { color: var(--skipped); }
+  .s-error { color: var(--error); } .s-info { color: var(--info); }
+  .via { font-size: 11px; color: var(--muted); }
+  tr.detail td { background: color-mix(in srgb, var(--bg) 60%, var(--panel)); padding: 0; }
+  .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; padding: 14px; }
+  .detail-grid h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 6px; font-weight: 500; }
+  pre { margin: 0; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-word;
+        max-height: 360px; overflow: auto; background: var(--panel); border: 1px solid var(--line);
+        border-radius: 6px; padding: 8px; }
+  dl.timings { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; font-family: var(--mono); font-size: 12px; }
+  dl.timings dt { color: var(--muted); }
+  dl.timings dd { margin: 0; }
+  .empty { text-align: center; color: var(--muted); padding: 40px; }
+  .warn { color: var(--error); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>AfterWord <span>log</span></h1>
+  <span class="pill"><span id="dot" class="dot"></span><span id="conn">connecting…</span></span>
+  <span class="pill" id="meta"></span>
+  <div class="now" id="now">idle</div>
+  <button id="skip" title="Stop the current clip; keep the queue">Skip</button>
+  <button id="stop" class="danger" title="Stop and clear the queue">Stop all</button>
+  <select id="filter">
+    <option value="">all events</option>
+    <option value="spoken">spoken</option>
+    <option value="skipped">skipped</option>
+    <option value="error">errors</option>
+    <option value="active">queued / playing</option>
+  </select>
+  <input type="search" id="q" placeholder="filter text, session, reason">
+  <label class="pill"><input type="checkbox" id="hideSystem" checked> hide system</label>
+</header>
+<main>
+  <div class="warn" id="cfgwarn"></div>
+  <table>
+    <thead><tr><th>#</th><th>time</th><th>session</th><th>event</th><th>status</th><th>text / reason</th><th>timings</th></tr></thead>
+    <tbody id="rows"><tr><td colspan="7" class="empty">No events yet.</td></tr></tbody>
+  </table>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const events = new Map();   // id -> summary
+let open = new Set();       // expanded ids
+const detailCache = new Map();
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtTime = (ts) => { const d = new Date(ts * 1000);
+  return d.toLocaleTimeString([], {hour12: false}) + "." + String(d.getMilliseconds()).padStart(3, "0"); };
+const shortId = (s) => s ? (s.length > 12 ? s.slice(0, 8) + "…" : s) : "—";
+const base = (p) => p ? p.replace(/\/+$/, "").split("/").pop() : "";
+
+function timingsLine(t) {
+  if (!t) return "";
+  const bits = [];
+  if (t.hook_ms != null) bits.push(`hook ${t.hook_ms}ms`);
+  if (t.synth_ms != null) bits.push(`synth ${t.synth_ms}ms`);
+  if (t.rtf != null) bits.push(`rtf ${t.rtf}`);
+  if (t.first_audio_ms != null) bits.push(`first audio ${t.first_audio_ms}ms`);
+  return bits.join(" · ");
+}
+
+function matches(e) {
+  const f = $("filter").value, q = $("q").value.trim().toLowerCase();
+  if ($("hideSystem").checked && e.kind === "system") return false;
+  if (f === "active" && !["queued", "synthesizing", "playing"].includes(e.status)) return false;
+  if (f && f !== "active" && e.status !== f) return false;
+  if (q) {
+    const hay = [e.text, e.reason, e.session_id, e.cwd, e.profile, e.status, e.hook_event, e.kind].join(" ").toLowerCase();
+    if (!hay.includes(q)) return false;
+  }
+  return true;
+}
+
+function rowHtml(e) {
+  const evName = e.kind === "hook" ? (e.hook_event || "hook") : e.kind;
+  const via = e.delivery === "spool" ? ` <span class="via" title="daemon was down; imported from spool">(spooled)</span>` : "";
+  const text = e.text ? esc(e.text) : "";
+  const reason = e.reason ? `<div class="reason">${esc(e.reason)}</div>` : "";
+  const prof = e.profile ? `<small>${esc(e.profile)}</small>` : "";
+  return `<tr class="ev" data-id="${e.id}">
+    <td class="t">${e.id}</td>
+    <td class="t">${fmtTime(e.ts)}</td>
+    <td class="sess" title="${esc(e.session_id)}\n${esc(e.cwd)}">${esc(shortId(e.session_id))}<small>${esc(base(e.cwd))}</small>${prof}</td>
+    <td>${esc(evName)}${via}</td>
+    <td><span class="badge s-${esc(e.status)}">${esc(e.status)}</span></td>
+    <td class="text">${text}${reason}</td>
+    <td class="t">${esc(timingsLine(e.timings))}</td>
+  </tr>`;
+}
+
+function detailHtml(d) {
+  const t = d.timings || {};
+  const dl = Object.entries(t).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("") || "<dt>—</dt><dd></dd>";
+  const clip = d.clip ? `<p><audio controls preload="none" src="/api/clips/${d.id}"></audio></p>` : "";
+  return `<tr class="detail" data-for="${d.id}"><td colspan="7"><div class="detail-grid">
+    <div><h3>decision</h3><pre>${esc(JSON.stringify({kind: d.kind, decision: d.decision, status: d.status,
+       reason: d.reason, profile: d.profile, delivery: d.delivery, error: d.error, attrs: d.attrs}, null, 2))}</pre>
+       <h3 style="margin-top:12px">timings</h3><dl class="timings">${dl}</dl>${clip}</div>
+    <div><h3>parsed tags</h3><pre>${esc(JSON.stringify(d.parsed, null, 2))}</pre></div>
+    <div><h3>raw payload</h3><pre>${esc(JSON.stringify(d.payload, null, 2))}</pre></div>
+  </div></td></tr>`;
+}
+
+let renderQueued = false;
+function render() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => {
+    renderQueued = false;
+    const list = [...events.values()].sort((a, b) => b.id - a.id).filter(matches);
+    if (!list.length) { $("rows").innerHTML = `<tr><td colspan="7" class="empty">No events${events.size ? " match the filter" : " yet"}.</td></tr>`; return; }
+    $("rows").innerHTML = list.map(e => rowHtml(e) + (open.has(e.id) && detailCache.has(e.id) ? detailHtml(detailCache.get(e.id)) : "")).join("");
+    for (const id of flashing) { const r = document.querySelector(`tr.ev[data-id="${id}"]`); if (r) r.classList.add("flash"); }
+    flashing.clear();
+  });
+}
+const flashing = new Set();
+
+async function toggle(id) {
+  if (open.has(id)) { open.delete(id); render(); return; }
+  open.add(id);
+  try {
+    const r = await fetch(`/api/events/${id}`);
+    detailCache.set(id, await r.json());
+  } catch (e) { detailCache.set(id, {id, error: String(e)}); }
+  render();
+}
+
+$("rows").addEventListener("click", (ev) => {
+  const tr = ev.target.closest("tr.ev");
+  if (tr && !ev.target.closest("audio")) toggle(Number(tr.dataset.id));
+});
+for (const id of ["filter", "q", "hideSystem"]) $(id).addEventListener("input", render);
+
+const post = (path) => fetch(path, {method: "POST", headers: {"X-AfterWord": "1"}});
+$("skip").onclick = () => post("/api/queue/skip");
+$("stop").onclick = () => post("/api/queue/stop");
+
+function showQueue(q) {
+  const np = q.now_playing;
+  const pending = q.pending.length;
+  $("now").innerHTML = np
+    ? `▶ <b>${esc(np.text)}</b> <span>(${esc(np.profile || "default")}, ${esc(shortId(np.session_id))})</span>${pending ? ` · ${pending} queued` : ""}`
+    : (pending ? `${pending} queued` : "idle");
+}
+
+async function loadStatus() {
+  try {
+    const s = await (await fetch("/api/status")).json();
+    $("meta").textContent = `v${s.version} · pid ${s.pid} · synth ${s.synth} · player ${s.player} · profiles: ${s.config.profiles.join(", ") || "none"}`;
+    $("cfgwarn").textContent = s.config.error ? `config.toml error (using last good config): ${s.config.error}` :
+      (s.config.warnings.length ? "config warnings: " + s.config.warnings.join("; ") : "");
+    showQueue(s.queue);
+  } catch (e) { /* daemon down; the stream status shows it */ }
+}
+
+async function loadEvents() {
+  const r = await fetch("/api/events?limit=500");
+  const {events: list} = await r.json();
+  for (const e of list) events.set(e.id, e);
+  render();
+}
+
+function connect() {
+  const es = new EventSource("/api/stream");
+  es.addEventListener("open", () => {
+    $("dot").className = "dot live"; $("conn").textContent = "live";
+    loadEvents(); loadStatus();
+  });
+  es.addEventListener("error", () => { $("dot").className = "dot down"; $("conn").textContent = "daemon unreachable — retrying"; });
+  es.addEventListener("event", (m) => {
+    const e = JSON.parse(m.data);
+    if (!events.has(e.id)) flashing.add(e.id);
+    events.set(e.id, e);
+    if (open.has(e.id)) fetch(`/api/events/${e.id}`).then(r => r.json()).then(d => { detailCache.set(e.id, d); render(); });
+    render();
+  });
+  es.addEventListener("queue", (m) => showQueue(JSON.parse(m.data)));
+}
+
+connect();
+setInterval(loadStatus, 10000);
+</script>
+</body>
+</html>
