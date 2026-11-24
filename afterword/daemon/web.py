@@ -82,8 +82,79 @@ def build_app(daemon: "Daemon", port: int) -> FastAPI:
         return ev
 
     @app.get("/api/sessions")
-    async def sessions():
-        return {"sessions": state.list_sessions()}
+    async def sessions(limit: int = 100):
+        activity = await asyncio.to_thread(daemon.events.session_activity, 5000)
+        return {
+            "muted_all": daemon.muted_all,
+            "profiles": list(daemon.store.get().profiles),
+            "sessions": state.list_sessions(activity, limit),
+        }
+
+    @app.post("/api/sessions/{session_id}")
+    async def set_session(session_id: str, request: Request):
+        body = await json_body(request)
+        if not isinstance(body, dict) or not ({"profile", "muted"} & set(body)):
+            raise LabError(400, "send profile and/or muted")
+        try:
+            state.set_session(
+                session_id,
+                profile=body.get("profile") if "profile" in body else ...,
+                muted=body.get("muted") if "muted" in body else ...,
+                source="gui",
+                known_profiles=list(daemon.store.get().profiles),
+            )
+        except state.SessionError as exc:
+            raise LabError(400, str(exc)) from None
+        daemon.apply_session_change(session_id, state.get_session(session_id))
+        daemon.publish_session(session_id)
+        return {"session": daemon.session_activity_view(session_id)}
+
+    @app.post("/api/mute")
+    async def mute(request: Request):
+        body = await json_body(request)
+        if not isinstance(body, dict) or not isinstance(body.get("muted"), bool):
+            raise LabError(400, "send {\"muted\": true|false}")
+        return {"muted_all": daemon.set_muted_all(body["muted"])}
+
+    @app.post("/api/queue/remove/{event_id}")
+    async def queue_remove(event_id: int):
+        if not daemon.remove_queued(event_id):
+            raise LabError(404, f"#{event_id} is not waiting in the queue")
+        return {"removed": event_id}
+
+    @app.get("/api/history")
+    async def history(limit: int = 50, before: int | None = None):
+        return {"items": await asyncio.to_thread(daemon.events.history, limit, before)}
+
+    @app.get("/api/stats")
+    async def stats(limit: int = 200):
+        return await asyncio.to_thread(daemon.events.stats, limit)
+
+    def config_view():
+        store = daemon.store
+        try:
+            text = store.path.read_text(encoding="utf-8")[:1_000_000] if store.path.is_file() else ""
+        except OSError as exc:
+            text = f"# could not read {store.path}: {exc}"
+        return {
+            "path": str(store.path),
+            "text": text,
+            "error": store.error,
+            "warnings": list(store.warnings),
+            "loaded_at": store.loaded_at,
+            "synth": daemon.synth.name,
+            "configured_synth": store.get().daemon.synth,
+            "engine": daemon.engine.status(),
+        }
+
+    @app.get("/api/config")
+    async def config():
+        return await asyncio.to_thread(config_view)
+
+    @app.post("/api/config/reload")
+    async def config_reload():
+        daemon.store.reload(force=True)
+        return await asyncio.to_thread(config_view)
 
     @app.get("/api/queue")
     async def queue():
@@ -98,10 +169,12 @@ def build_app(daemon: "Daemon", port: int) -> FastAPI:
         return daemon.stop_all()
 
     @app.get("/api/clips/{event_id}")
-    async def clip(event_id: int):
+    async def clip(event_id: int, download: int = 0):
         path = daemon.clips_dir / f"{event_id}.wav"
         if not path.is_file():
-            raise HTTPException(404, "clip not kept")
+            raise LabError(404, "clip not kept")
+        if download:
+            return FileResponse(path, media_type="audio/wav", filename=f"afterword-{event_id}.wav")
         return FileResponse(path, media_type="audio/wav")
 
     # -- voice lab (contract: docs/lab-api.md) ---------------------------

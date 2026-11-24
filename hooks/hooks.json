@@ -1,0 +1,14 @@
+{
+  "description": "AfterWord: speak Claude's <say> lines; add the <say> instruction only while a session's voice is on.",
+  "hooks": {
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/afterword/hooks/afterword_hook.py\" session-start", "timeout": 5}]}
+    ],
+    "UserPromptSubmit": [
+      {"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/afterword/hooks/afterword_hook.py\" user-prompt-submit", "timeout": 5}]}
+    ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/afterword/hooks/afterword_hook.py\" stop", "async": true, "timeout": 10}]}
+    ]
+  }
+}

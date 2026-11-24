@@ -92,3 +92,18 @@ Packaging: `uvx afterword serve`, plus the Claude Code plugin for the hooks and 
 
 ## Licence and ethics
 MIT. Ship only built-in voices. Document that clone clips should come from the user's own voice or a voice used with consent.
+
+## Implementation notes (as built)
+- Plugin layout: the repository root is the plugin (`.claude-plugin/plugin.json`,
+  `hooks/hooks.json`, `commands/voice.md`, marketplace source `"./"`), not a
+  `plugin/` folder. A marketplace install copies only the plugin's own folder,
+  so the hook script has to live inside it.
+- `/voice`: Claude Code has a built-in `/voice` (dictation), so the command is
+  `/afterword:voice` (plugin) or `/afterword-voice` (install-hooks). The
+  `UserPromptSubmit` hook sees the raw command text before expansion and applies
+  it itself, so the change never depends on Claude writing a `<voice>` tag (the
+  tag still works).
+- `UserPromptSubmit` and `SessionStart` are synchronous (their output must reach
+  Claude first); `Stop` is async. Each turn is claimed once (`~/.afterword/seen`),
+  so a plugin plus settings.json install does not speak twice.
+- Qwen3-TTS has no speed control: `pace` is applied at playback.

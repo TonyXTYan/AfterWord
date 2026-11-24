@@ -1,0 +1,9 @@
+{
+  "name": "afterword",
+  "description": "Spoken replies for Claude Code with local Qwen3-TTS: off by default, per-session voices, triggered only by a <say> tag.",
+  "author": {"name": "Tony Yan"},
+  "homepage": "https://github.com/TonyXTYan/AfterWord",
+  "repository": "https://github.com/TonyXTYan/AfterWord",
+  "license": "MIT",
+  "keywords": ["tts", "voice", "speech", "qwen3-tts", "accessibility"]
+}

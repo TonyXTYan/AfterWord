@@ -4,28 +4,41 @@ Spoken replies for Claude Code, with local Qwen3-TTS on Apple Silicon.
 Speech is **off by default**, **set per session**, and **triggered only by a tag**
 in Claude's reply. See [DESIGN.md](DESIGN.md).
 
-Status: build steps 1–4 are done, plus the voice lab: tag parser, Stop hook
-with `say` fallback, daemon (socket, queue, event log, GUI), and the
-Qwen3-TTS backend through mlx-audio. Prompt injection, `/voice` and the plugin
-come next (step 5).
+![AfterWord demo: a spoken reply, the live log, sessions, the voice lab, history and config](docs/demo.gif)
+
+Status: the v1 build order is done: tag parser, hooks (`SessionStart`,
+`UserPromptSubmit`, `Stop`) with a `say` fallback, the daemon (queue, event log,
+Qwen3-TTS through mlx-audio), the voice command, the Claude Code plugin, and the GUI
+(log, sessions, queue, history, voice lab, config). Not built: the optional
+menu-bar icon.
 
 ## How it works
 
-Claude ends a reply with a tag:
+While a session's voice is on, a `UserPromptSubmit` hook adds about 40 tokens
+to each prompt asking Claude to end its reply with a spoken summary:
 
 ```
-<voice set="nova"/>                         turn this session's voice on (or set="off")
-<say mood="dry" lang="en" pace="1.1">…</say>  speak this
+<say mood="dry" lang="en" pace="1.1">one or two sentences</say>
 ```
 
-The `Stop` hook reads the reply, saves the session's voice to
-`~/.afterword/state/<session_id>.json`, and sends the `<say>` text to the
-daemon over `~/.afterword/afterword.sock`. The daemon renders it with the
-session's voice profile and plays it. If the daemon is down, the hook speaks
-with `say` directly (`fallback = "none"` turns that off). If Qwen3-TTS cannot
-render a line (model missing, bad voice), the daemon speaks it with `say` and
-notes why in the log. Tags inside code blocks, inline code and HTML comments
-are ignored.
+With the voice off (the default) the hook adds nothing, so it costs zero tokens.
+The `Stop` hook reads the reply and sends the `<say>` text to the daemon over
+`~/.afterword/afterword.sock`, which renders it with the session's voice profile
+and plays it. If the daemon is down, the hook speaks with `say` directly
+(`fallback = "none"` turns that off). If Qwen3-TTS cannot render a line (model
+missing, bad voice), the daemon speaks it with `say` and notes why in the log.
+Tags inside code blocks, inline code and HTML comments are ignored.
+
+Turn the voice on for a session:
+
+- at launch: `AFTERWORD_VOICE=nova claude` (the `SessionStart` hook reads it);
+- mid-session: `/afterword:voice nova` with the plugin, or `/afterword-voice nova`
+  with `install-hooks` (not bare `/voice`: that is Claude Code's own dictation
+  command). Also `off`, `on` (the last profile), `mute`, `unmute`, and no
+  argument for the current state;
+- in the GUI's Sessions page.
+
+Claude can also switch it with a `<voice set="nova"/>` tag (`set="off"` to stop).
 
 ## Run it
 
@@ -91,9 +104,32 @@ the lab asks you to confirm this for every upload or recording.
 
 ## Hook it into Claude Code
 
-Preview the change first, then write it. `--scope user` (default) edits
-`~/.claude/settings.json`; `project` and `local` edit `./.claude/`. A backup is
-written next to the file, and other hooks are left alone.
+**As a plugin (recommended).** The repository is also a Claude Code plugin
+marketplace. In a terminal:
+
+```bash
+claude plugin marketplace add TonyXTYan/AfterWord
+```
+
+```bash
+claude plugin install afterword@afterword
+```
+
+The plugin brings the three hooks and `/afterword:voice`. Its hooks run with
+whatever `python3` is on your PATH (3.9 or newer; they use only the standard
+library), so they work even before the daemon is installed: lines are then
+spoken with `say`. Try it from a clone without installing:
+
+```bash
+claude --plugin-dir /path/to/AfterWord
+```
+
+**Or with settings.json.** `install-hooks` writes the same three hooks into a
+settings file and an `/afterword-voice` command next to it (not for
+`--scope local`). Preview the change first;
+`--scope user` (default) edits `~/.claude/settings.json`, and `project` and
+`local` edit `./.claude/`. A backup is written next to the file, and other hooks
+are left alone.
 
 ```bash
 uv run afterword install-hooks --dry-run
@@ -103,10 +139,32 @@ uv run afterword install-hooks --dry-run
 uv run afterword install-hooks
 ```
 
-In a session, ask Claude to reply with `<voice set="nova"/>` to turn voice on.
-Turn-by-turn instructions to add `<say>` (UserPromptSubmit) and the `/voice`
-command arrive in build step 5; until then Claude speaks only when it writes
-the tag.
+Use one or the other. If both are installed, each turn is still handled once
+(the hooks claim each turn), but `uv run afterword install-hooks --uninstall`
+removes the settings copy.
+
+Note: `UserPromptSubmit` and `SessionStart` run synchronously (about 15-30 ms)
+because their output must reach Claude before the prompt does; `Stop` runs
+asynchronously. In `claude -p` (print mode) Claude Code may end before the async
+`Stop` hook finishes, so a line can go unspoken there; interactive sessions are
+not affected.
+
+## The GUI
+
+http://127.0.0.1:47800 has six pages:
+
+- **Log**: every hook call with its raw payload, parsed tags, decision and
+  reason (`session off`, `no <say> tag`, `daemon busy`, `duplicate`, …), and
+  timings (hook, hook to daemon, synthesis, real-time factor, first audio),
+  with p50/p95 stats. Prompt and session hooks are hidden unless you ask.
+- **Sessions**: each session's folder, voice (pick a profile or off), mute,
+  what set the voice, and its last line. **Mute all** sits in the header.
+- **Queue**: what is playing and waiting; skip, remove or stop.
+- **History**: recent spoken lines, replayable at the pace they were spoken,
+  and downloadable as WAV.
+- **Voice lab**: try voices and save profiles (below).
+- **Config**: `config.toml` as loaded, warnings or parse errors, the synth in
+  use, and model status; reload on demand.
 
 ## Files
 
@@ -120,6 +178,8 @@ the tag.
 | `~/.afterword/clips/` | last N spoken clips, replayable from the log |
 | `~/.afterword/afterwordd.log` | daemon text log (rotating) |
 | `~/.afterword/hook.log` | hook log (JSON lines; errors land here, never in Claude Code) |
+| `~/.afterword/daemon.json` | daemon settings changed from the GUI (mute all) |
+| `~/.afterword/seen/` | short-lived markers so each turn is handled once |
 
 Environment: `AFTERWORD_HOME` relocates `~/.afterword`; `AFTERWORD_FALLBACK=none`
 disables the `say` fallback; `AFTERWORD_DISABLE=1` makes the hook a no-op;
@@ -138,10 +198,11 @@ AFTERWORD_LIVE_QWEN=1 uv run pytest -q -k live
 ```
 
 The hooks (`afterword/hooks/`) are stdlib-only and run on Python 3.9+, so they
-work under macOS's stock `python3` as well as the project's 3.12. The tests
+work under macOS's stock `python3` as well as the project's 3.12. The plugin is
+the repository root: `.claude-plugin/`, `hooks/hooks.json`, `commands/voice.md`. The tests
 check this, along with the rule that the hook never fails: exit code 0, no
-output, and a bounded run time for any input. The lab's HTTP contract is in
-[docs/lab-api.md](docs/lab-api.md).
+output, and a bounded run time for any input. The HTTP contracts are in
+[docs/gui-api.md](docs/gui-api.md) and [docs/lab-api.md](docs/lab-api.md).
 
 ## Licence
 

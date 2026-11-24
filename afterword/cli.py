@@ -18,8 +18,16 @@ from afterword.hooks import common
 
 HOOK_SCRIPT = Path(__file__).resolve().parent / "hooks" / "afterword_hook.py"
 HOOK_MARKER = "afterword_hook.py"
-# Events wired up so far. UserPromptSubmit and SessionStart come later.
-HOOK_EVENTS = {"Stop": "stop"}
+# event -> (argument, extra hook fields). UserPromptSubmit and SessionStart
+# must be synchronous: their output (the <say> instruction) is read before
+# the prompt goes to Claude. Stop is async: speaking never delays Claude.
+HOOK_EVENTS = {
+    "SessionStart": ("session-start", {"timeout": 5}),
+    "UserPromptSubmit": ("user-prompt-submit", {"timeout": 5}),
+    "Stop": ("stop", {"async": True, "timeout": 10}),
+}
+VOICE_COMMAND_SRC = Path(__file__).resolve().parent.parent / "commands" / "voice.md"
+VOICE_COMMAND_MARKER = "afterword:voice-command"
 
 
 class DaemonUnreachable(Exception):
@@ -200,7 +208,7 @@ def merge_hooks(settings: dict, command: str, remove: bool = False) -> dict:
     """Add (or remove) AfterWord's hook entries. Idempotent: existing
     AfterWord entries are replaced, other hooks are left untouched."""
     hooks = settings.setdefault("hooks", {})
-    for event, arg in HOOK_EVENTS.items():
+    for event, (arg, extra) in HOOK_EVENTS.items():
         groups = hooks.get(event, [])
         kept = []
         for group in groups:
@@ -208,7 +216,7 @@ def merge_hooks(settings: dict, command: str, remove: bool = False) -> dict:
             if inner:
                 kept.append({**group, "hooks": inner})
         if not remove:
-            kept.append({"hooks": [{"type": "command", "command": f"{command} {arg}", "async": True, "timeout": 10}]})
+            kept.append({"hooks": [{"type": "command", "command": f"{command} {arg}", **extra}]})
         if kept:
             hooks[event] = kept
         else:
@@ -216,6 +224,64 @@ def merge_hooks(settings: dict, command: str, remove: bool = False) -> dict:
     if not hooks:
         settings.pop("hooks", None)
     return settings
+
+
+def voice_command_text() -> str:
+    try:
+        return VOICE_COMMAND_SRC.read_text(encoding="utf-8")
+    except OSError:  # installed without the plugin files
+        return (
+            "---\ndescription: Turn AfterWord's spoken replies on or off for this session\n"
+            "argument-hint: \"[profile | on | off | mute | unmute]\"\n"
+            "disable-model-invocation: true\n---\n"
+            f"<!-- {VOICE_COMMAND_MARKER} -->\n"
+            "The user ran AfterWord's voice command with: `$ARGUMENTS`.\n\n"
+            "AfterWord's hook has already applied it; the result is in the AfterWord note in\n"
+            "this turn's context. Reply with that result in one short sentence. Do not use\n"
+            "any tools.\n"
+        )
+
+
+VOICE_COMMAND_FILE = "afterword-voice.md"  # /afterword-voice; Claude Code has its own /voice
+
+
+def _voice_command_plan(settings_path: Path, scope: str | None, remove: bool) -> tuple[str, Path]:
+    """What install/uninstall would do with the command file:
+    ('write'|'remove'|'leave'|'skip', path)."""
+    target = settings_path.parent / "commands" / VOICE_COMMAND_FILE
+    if scope == "local" and not remove:
+        return "skip", target  # .claude/commands is shared with the project; local settings are not
+    ours = target.is_file() and VOICE_COMMAND_MARKER in target.read_text(encoding="utf-8", errors="replace")
+    if remove:
+        return ("remove" if ours else "leave"), target
+    if target.exists() and not ours:
+        return "leave", target
+    return "write", target
+
+
+def _install_voice_command(settings_path: Path, scope: str | None, remove: bool, dry_run: bool) -> None:
+    """`/afterword-voice` as a plain command next to the settings file
+    (~/.claude/commands/ for user scope). The plugin provides
+    `/afterword:voice` instead."""
+    action, target = _voice_command_plan(settings_path, scope, remove)
+    prefix = "# would " if dry_run else ""
+    if action == "skip":
+        print(f"{prefix}skip the /afterword-voice command for --scope local (use user or project scope for it)")
+        return
+    if action == "leave":
+        if target.exists():
+            print(f"{prefix}leave {target}: it is not AfterWord's")
+        return
+    if dry_run:
+        print(f"# would {action} {target}")
+        return
+    if action == "remove":
+        target.unlink()
+        print(f"removed {target}")
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(voice_command_text(), encoding="utf-8")
+    print(f"  /afterword-voice -> {target}")
 
 
 def cmd_install_hooks(args: argparse.Namespace) -> int:
@@ -237,6 +303,8 @@ def cmd_install_hooks(args: argparse.Namespace) -> int:
     if args.dry_run:
         print(f"# would write {path}")
         print(text, end="")
+        if not args.no_command:
+            _install_voice_command(path, None if args.settings else args.scope, remove=args.uninstall, dry_run=True)
         return 0
     target = path.resolve() if path.is_symlink() else path  # keep dotfile symlinks intact
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -262,7 +330,10 @@ def cmd_install_hooks(args: argparse.Namespace) -> int:
     verb = "removed from" if args.uninstall else "installed in"
     print(f"AfterWord hooks {verb} {path}")
     if not args.uninstall:
-        print(f"  Stop -> {command} stop")
+        for event, (arg, _) in HOOK_EVENTS.items():
+            print(f"  {event} -> {command} {arg}")
+    if not args.no_command:
+        _install_voice_command(path, None if args.settings else args.scope, remove=args.uninstall, dry_run=False)
     return 0
 
 
@@ -301,6 +372,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--python", help="interpreter for the hook (default: this one)")
     s.add_argument("--dry-run", action="store_true", help="print the result, write nothing")
     s.add_argument("--uninstall", action="store_true", help="remove AfterWord's hooks")
+    s.add_argument("--no-command", action="store_true", help="do not install the /afterword-voice command file")
     s.set_defaults(func=cmd_install_hooks)
     return p
 

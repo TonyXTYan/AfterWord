@@ -56,6 +56,7 @@ class Daemon:
         self.synth = self._make_synth(cfg.daemon.synth)
         self.lab = Lab(home, store, self.engine, self.voice_clips, active_synth=lambda: self.synth.name)
         self._stopping = False
+        self.muted_all = self._load_daemon_state().get("muted_all") is True
         # [qwen] edits apply on every reload, not just when a message plays.
         store.on_reload(lambda c: self.engine.configure(c.qwen.repos(), c.qwen.keep_loaded))
         try:
@@ -68,6 +69,7 @@ class Daemon:
         self.started_at = time.time()
         self.http_url: str | None = None
         self._skip_current = False
+        self._skip_reason: str | None = None
         self._uvicorn = None
         self._stop_event = asyncio.Event()
 
@@ -86,8 +88,12 @@ class Daemon:
                 ack = {"ok": False, "error": "read timeout"}
             else:
                 ack = self.dispatch(line, t_recv)
+                if b'"no_ack": true' in line:
+                    return  # fire-and-forget: the sender has already gone
             writer.write(json.dumps(ack).encode() + b"\n")
             await writer.drain()
+        except (ConnectionResetError, BrokenPipeError):
+            log.debug("client left before the ack")
         except Exception:
             log.exception("socket connection failed")
         finally:
@@ -126,7 +132,7 @@ class Daemon:
         if t_hook is not None:
             timings["hook_ms"] = round(((t_sent or t_recv) - t_hook) * 1000, 1)
             timings["hook_to_daemon_ms"] = round((t_recv - t_hook) * 1000, 1)
-        decision = msg.get("decision") if msg.get("decision") in ("speak", "skip") else "error"
+        decision = msg.get("decision") if msg.get("decision") in ("speak", "skip", "info") else "error"
         reason = _str_or_none(msg.get("reason"), 200)
         text = _str_or_none(msg.get("text"), MAX_TEXT_CHARS) or ""
         attrs = msg.get("attrs") if isinstance(msg.get("attrs"), dict) else {}
@@ -150,8 +156,11 @@ class Daemon:
             delivery="socket",
             error=_str_or_none(msg.get("config_error")),
         )
+        if msg.get("state_changed") is True and fields["session_id"]:
+            self.publish_session(fields["session_id"])
         if decision != "speak":
-            event = self.events.insert(status="error" if decision == "error" else "skipped", reason=reason, **fields)
+            status = {"error": "error", "info": "info"}.get(decision, "skipped")
+            event = self.events.insert(status=status, reason=reason, **fields)
             return {"ok": True, "event_id": event["id"], "status": event["status"], "reason": reason}
         return self._enqueue(fields, t_hook)
 
@@ -189,6 +198,10 @@ class Daemon:
 
     def _enqueue(self, fields: dict[str, Any], t_hook: float | None) -> dict[str, Any]:
         self.queue.max_size = self.store.get().daemon.max_queue
+        muted = self._muted_reason(fields.get("session_id"))
+        if muted:
+            event = self.events.insert(status="skipped", reason=muted, **fields)
+            return {"ok": True, "event_id": event["id"], "status": "skipped", "reason": muted}
         event = self.events.insert(status="queued", **fields)
         item = QueueItem(
             event_id=event["id"],
@@ -282,6 +295,11 @@ class Daemon:
 
     async def _play_item(self, item: QueueItem) -> None:
         self._refresh_backends()
+        muted = self._muted_reason(item.session_id) if item.session_id != "cli-test" else (
+            "all muted" if self.muted_all else None)
+        if muted:
+            self.events.update(item.event_id, status="skipped", reason=muted)
+            return
         cfg = self.store.get()
         profile = cfg.profile(item.profile)
         text = item.text
@@ -310,7 +328,8 @@ class Daemon:
         if abs(result.playback_rate - 1.0) > 0.005:
             timings["playback_rate"] = result.playback_rate
         if self._skip_current:
-            self.events.update(item.event_id, status="skipped", reason="skipped by user", clip=str(out), merge_timings=timings)
+            reason, self._skip_reason = self._skip_reason or "skipped by user", None
+            self.events.update(item.event_id, status="skipped", reason=reason, clip=str(out), merge_timings=timings)
             self._prune_clips(cfg.daemon.history)
             return
         t_play = time.time()
@@ -322,7 +341,8 @@ class Daemon:
         if finished and not self._skip_current:
             self.events.update(item.event_id, status="spoken", reason=note, merge_timings=done)
         else:
-            self.events.update(item.event_id, status="skipped", reason="stopped by user", merge_timings=done)
+            reason, self._skip_reason = self._skip_reason or "stopped by user", None
+            self.events.update(item.event_id, status="skipped", reason=reason, merge_timings=done)
         self._prune_clips(cfg.daemon.history)
 
     def models_in_use(self) -> list[str]:
@@ -358,6 +378,8 @@ class Daemon:
             clips = sorted(self.clips_dir.glob("*.wav"), key=lambda p: p.stat().st_mtime, reverse=True)
             for old in clips[keep:]:
                 old.unlink(missing_ok=True)
+                if old.stem.isdigit():
+                    self.events.forget_clip(int(old.stem))
         except OSError:
             log.warning("clip pruning failed", exc_info=True)
 
@@ -382,6 +404,78 @@ class Daemon:
         current = self.skip()
         self._publish_queue()
         return {"current": current, "dropped": [i.event_id for i in dropped]}
+
+    def apply_session_change(self, session_id: str, state: dict[str, Any]) -> list[int]:
+        """After a session is muted or turned off, drop its waiting lines and
+        stop its current one. Returns the affected event ids."""
+        reason = "session muted" if state.get("muted") is True else ("session off" if not state.get("profile") else None)
+        if reason is None:
+            return []
+        affected = []
+        for item in list(self.queue._items):
+            if item.session_id == session_id:
+                self.queue.remove(item.event_id)
+                self.events.update(item.event_id, status="skipped", reason=reason)
+                affected.append(item.event_id)
+        now = self.queue.now_playing
+        if now is not None and now.session_id == session_id:
+            self._skip_reason = reason
+            self.skip()
+            affected.append(now.event_id)
+        if affected:
+            self._publish_queue()
+        return affected
+
+    def _muted_reason(self, session_id: str | None) -> str | None:
+        if self.muted_all:
+            return "all muted"
+        if session_id and common.load_state(session_id).get("muted") is True:
+            return "session muted"
+        return None
+
+    def remove_queued(self, event_id: int) -> bool:
+        item = self.queue.remove(event_id)
+        if item is None:
+            return False
+        self.events.update(event_id, status="skipped", reason="removed by user")
+        self._publish_queue()
+        return True
+
+    # -- mute and sessions --------------------------------------------------
+
+    def _daemon_state_path(self) -> Path:
+        return self.home / "daemon.json"
+
+    def _load_daemon_state(self) -> dict[str, Any]:
+        try:
+            data = json.loads(common.read_regular_file(self._daemon_state_path(), 65536).decode("utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def set_muted_all(self, muted: bool) -> bool:
+        self.muted_all = bool(muted)
+        state = self._load_daemon_state()
+        state["muted_all"] = self.muted_all
+        tmp = self._daemon_state_path().with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(state))
+        os.replace(tmp, self._daemon_state_path())
+        if self.muted_all:
+            self.stop_all()
+        self.events.publish("mute", {"muted_all": self.muted_all})
+        return self.muted_all
+
+    def session_activity_view(self, session_id: str) -> dict[str, Any]:
+        from . import state
+
+        activity = self.events.session_activity_for(session_id)
+        return state.session_view(session_id, state.get_session(session_id), activity)
+
+    def publish_session(self, session_id: str) -> None:
+        try:
+            self.events.publish("sessions", {"session_id": session_id, "session": self.session_activity_view(session_id)})
+        except Exception:
+            log.warning("could not publish session %s", session_id, exc_info=True)
 
     def _publish_queue(self) -> None:
         self.events.publish("queue", self.queue.snapshot())
@@ -408,6 +502,7 @@ class Daemon:
                 "fallback": cfg.daemon.fallback,
             },
             "queue": self.queue.snapshot(),
+            "muted_all": self.muted_all,
             "events": self.events.count(),
         }
 

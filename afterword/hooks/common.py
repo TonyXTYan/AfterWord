@@ -179,6 +179,38 @@ def _mini_value(raw: str) -> Any:
         return raw
 
 
+def _mini_split_key(header: str) -> list:
+    """Split a dotted table header, keeping quoted parts whole:
+    profiles."nova.v2" -> ["profiles", "nova.v2"]."""
+    parts = []
+    buf = ""
+    quote = None
+    for ch in header:
+        if quote:
+            if ch == quote:
+                quote = None
+            else:
+                buf += ch
+        elif ch in "\"'":
+            quote = ch
+        elif ch == ".":
+            parts.append(buf.strip())
+            buf = ""
+        else:
+            buf += ch
+    parts.append(buf.strip())
+    return parts
+
+
+def muted_all() -> bool:
+    """Mute-all as set from the GUI (persisted by the daemon)."""
+    try:
+        data = json.loads(read_regular_file(home() / "daemon.json", 65536).decode("utf-8"))
+    except Exception:
+        return False
+    return isinstance(data, dict) and data.get("muted_all") is True
+
+
 def _mini_toml(text: str) -> Dict[str, Any]:
     root: Dict[str, Any] = {}
     cur = root
@@ -191,8 +223,7 @@ def _mini_toml(text: str) -> Dict[str, Any]:
                 cur = {}  # arrays of tables are unsupported: park their keys
                 continue
             cur = root
-            for part in line[1:-1].split("."):
-                key = part.strip().strip('"')
+            for key in _mini_split_key(line[1:-1]):
                 nxt = cur.get(key)
                 if not isinstance(nxt, dict):
                     nxt = {}

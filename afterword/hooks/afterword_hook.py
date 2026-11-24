@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """AfterWord's single Claude Code hook entry point.
 
-    afterword_hook.py <event>          # event: stop (others reserved)
+    afterword_hook.py <event>     # stop | user-prompt-submit | session-start
 
 Reads the hook payload (JSON) from stdin. Contract with Claude Code:
 
 * never fails: every error is caught and logged, the exit code is always 0;
 * never blocks: hard deadline via an interval timer, short socket timeouts,
   the `say` fallback is spawned detached and not waited for;
-* never prints to stdout for Stop (stdout is reserved for hook output).
+* stdout carries hook output only: nothing for Stop and SessionStart, and for
+  UserPromptSubmit the additionalContext JSON, only while voice is on (so a
+  session with voice off costs zero tokens).
 
 Stdlib-only, Python 3.9+.
 """
@@ -237,7 +239,7 @@ class DaemonUnreachable(Exception):
     pass
 
 
-def _send_to_daemon(message: dict) -> dict:
+def _send_to_daemon(message: dict, wait_ack: bool = True) -> dict:
     """Send one JSON line, wait briefly for a one-line JSON ack.
 
     Raises DaemonUnreachable if we could not connect (safe to fall back).
@@ -260,6 +262,8 @@ def _send_to_daemon(message: dict) -> dict:
             # ensure_ascii: lone surrogates go out as \\u escapes instead of
             # raising UnicodeEncodeError.
             sock.sendall(json.dumps(message).encode("ascii") + b"\n")
+            if not wait_ack:
+                return {"ok": True, "sent": True}
             buf = b""
             while b"\n" not in buf and len(buf) < 65536:
                 chunk = sock.recv(4096)
@@ -334,8 +338,10 @@ def handle_stop(payload: dict) -> dict:
     state = c.load_state(session_id)
     voice = parsed.voice
     state_changed = False
-    if voice is not None and voice.profile != state.get("profile"):
+    if voice is not None and voice.profile != state.get("profile") and not _already_claimed("stop", session_id, payload, message):
         state["profile"] = voice.profile
+        if voice.profile:
+            state["last_profile"] = voice.profile
         state["cwd"] = payload.get("cwd")
         state["source"] = "voice-tag"
         state_changed = True
@@ -348,7 +354,10 @@ def handle_stop(payload: dict) -> dict:
     profile = state.get("profile")
     say = parsed.say
     text = ""
-    if not profile:
+    duplicate = bool(session_id) and not claim("stop", session_id, _turn_key(payload, message), _turn_ttl(payload))
+    if duplicate:
+        decision, reason = "skip", "duplicate: another AfterWord hook already handled this reply"
+    elif not profile:
         decision, reason = "skip", "session off"
     elif say is None:
         decision, reason = "skip", "no <say> tag"
@@ -386,6 +395,11 @@ def handle_stop(payload: dict) -> dict:
             _log("error", "daemon did not acknowledge", ack=ack)
     except DaemonUnreachable as exc:
         outcome["delivered"] = "spool"
+        muted = "all muted" if c.muted_all() else ("session muted" if state.get("muted") is True else None)
+        if decision == "speak" and muted:
+            decision, reason = "skip", muted
+            request["decision"], request["reason"] = decision, reason
+            outcome["decision"], outcome["reason"] = decision, reason
         if decision == "speak" and c.fallback_mode(cfg) == "say":
             try:
                 _say_fallback(text)
@@ -407,9 +421,301 @@ def handle_stop(payload: dict) -> dict:
     return outcome
 
 
+# --------------------------------------------------------------------------- #
+# De-duplication                                                              #
+# --------------------------------------------------------------------------- #
+
+CLAIM_TTL_S = 600
+
+
+CLAIM_TTL_NO_ID_S = 15  # without a per-turn id, only catch parallel duplicates
+
+
+def claim(kind: str, session_id: str, key: str, ttl: float = CLAIM_TTL_S) -> bool:
+    """True the first time (kind, session, key) is seen; False for a second
+    AfterWord hook handling the same turn (e.g. installed both as a plugin
+    and in settings.json). Atomic across parallel hook processes."""
+    import hashlib
+
+    c = _common
+    d = c.home() / "seen"
+    try:
+        d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except OSError:
+        return True  # cannot record: never drop speech because of this
+    digest = hashlib.sha256(("%s\0%s" % (session_id, key)).encode("utf-8", "replace")).hexdigest()[:24]
+    path = d / ("%s-%s" % (kind, digest))
+    try:
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        os.close(fd)
+        claimed = True
+    except FileExistsError:
+        try:
+            claimed = time.time() - path.stat().st_mtime > ttl  # stale marker: reuse
+            if claimed:
+                os.utime(str(path), None)
+        except OSError:
+            claimed = True
+    except OSError:
+        claimed = True
+    _prune_claims(d)
+    return claimed
+
+
+def _prune_claims(d) -> None:
+    now = time.time()
+    try:
+        with os.scandir(str(d)) as it:
+            for entry in it:
+                try:
+                    if now - entry.stat(follow_symlinks=False).st_mtime > CLAIM_TTL_S:
+                        os.unlink(entry.path)
+                except OSError:
+                    pass
+    except OSError:
+        pass
+
+
+def _already_claimed(kind: str, session_id: str, payload: dict, text: object) -> bool:
+    """Peek (without claiming) whether another hook took this turn, so a
+    duplicate does not also rewrite state."""
+    import hashlib
+
+    if not session_id:
+        return False
+    digest = hashlib.sha256(("%s\0%s" % (session_id, _turn_key(payload, text))).encode("utf-8", "replace")).hexdigest()[:24]
+    path = _common.home() / "seen" / ("%s-%s" % (kind, digest))
+    try:
+        return time.time() - path.stat().st_mtime <= _turn_ttl(payload)
+    except OSError:
+        return False
+
+
+def _turn_ttl(payload: dict) -> float:
+    return CLAIM_TTL_S if isinstance(payload.get("prompt_id"), str) and payload.get("prompt_id") else CLAIM_TTL_NO_ID_S
+
+
+def _turn_key(payload: dict, text: object) -> str:
+    pid = payload.get("prompt_id")
+    return "%s\0%s" % (pid if isinstance(pid, str) else "", text if isinstance(text, str) else "")
+
+
+# --------------------------------------------------------------------------- #
+# UserPromptSubmit / SessionStart (build step 5)                              #
+# --------------------------------------------------------------------------- #
+
+_LANG_NAMES = {
+    "en": "English", "zh": "Chinese", "ja": "Japanese", "ko": "Korean", "de": "German",
+    "fr": "French", "es": "Spanish", "it": "Italian", "pt": "Portuguese", "ru": "Russian",
+}
+
+
+def _profile_names(cfg: dict) -> list:
+    profiles = cfg.get("profiles") if isinstance(cfg, dict) else None
+    if not isinstance(profiles, dict):
+        return []
+    return [k for k, v in profiles.items() if isinstance(v, dict)]
+
+
+def _profile_language(cfg: dict, profile: str) -> str:
+    lang = ""
+    try:
+        lang = str(cfg["profiles"][profile].get("lang") or "")
+    except (KeyError, TypeError, AttributeError):
+        pass
+    lang = lang.strip().lower().replace("_", "-")
+    if not lang or lang == "auto":
+        return "the language of the conversation"
+    return _LANG_NAMES.get(lang.split("-", 1)[0], lang.capitalize())
+
+
+def say_instruction(cfg: dict, profile: str) -> str:
+    """The ~40-token note added to each prompt while a session's voice is on."""
+    return (
+        "AfterWord voice is on (profile %s). End your reply with <say>1-2 plain spoken "
+        "sentences summing it up, in %s</say> (optional mood=\"...\"; no markdown inside)."
+        % (profile, _profile_language(cfg, profile))
+    )
+
+
+def _voice_command(prompt: object):
+    """'/afterword:voice nova' (plugin) or '/afterword-voice nova'
+    (install-hooks) -> 'nova'; no argument -> ''. None otherwise."""
+    import re
+
+    if not isinstance(prompt, str):
+        return None
+    # Not a bare /voice: Claude Code has a built-in /voice (dictation).
+    m = re.match(r"\s*/afterword[:-]voice(?:\s+(.*?))?\s*\Z", prompt, re.S)
+    if not m:
+        return None
+    return (m.group(1) or "").strip()
+
+
+def apply_voice_command(session_id: str, arg: str, cfg: dict, state: dict, cwd: object):
+    """Apply /voice <arg>. Returns (note for Claude, state changed?)."""
+    import tags
+
+    names = _profile_names(cfg)
+    listed = ", ".join(names) if names else "none configured"
+    word = arg.strip()
+    low = word.lower()
+    current = state.get("profile")
+    changed = False
+
+    def describe():
+        voice = current or "off"
+        return "AfterWord voice for this session: %s%s. Profiles: %s." % (
+            voice, " (muted)" if state.get("muted") else "", listed)
+
+    if low in ("", "status"):
+        return describe() + " Tell the user this in one short sentence.", False
+    if low in ("off", "stop", "none"):
+        state["profile"] = None
+        changed = current is not None
+        note = "AfterWord voice is now off for this session. Confirm in one short sentence."
+    elif low in ("mute", "unmute"):
+        state["muted"] = low == "mute"
+        changed = True
+        note = "AfterWord voice is %s for this session. Confirm in one short sentence." % (
+            "muted (still on, nothing is played)" if low == "mute" else "unmuted")
+    else:
+        target = word
+        if low == "on":
+            target = state.get("last_profile") or (names[0] if names else "")
+        if not target or not tags.PROFILE_NAME_RE.match(target) or (names and target not in names):
+            shown = word if len(word) <= 64 else word[:64] + "..."
+            return ("AfterWord has no voice profile %r; the voice is unchanged. "
+                    "Tell the user, and list the profiles: %s." % (shown, listed)), False
+        state["profile"] = target
+        state["last_profile"] = target
+        changed = target != current
+        note = "AfterWord voice is now on for this session with profile %s. Confirm in one short sentence." % target
+    if session_id:
+        state["source"] = "voice-command"
+        if isinstance(cwd, str):
+            state["cwd"] = cwd
+        _common.save_state(session_id, state)
+    return note, changed
+
+
+def _notify(event: str, payload: dict, profile, reason: str, state_changed: bool) -> str:
+    """Log a non-Stop hook call with the daemon (fire and forget), or spool it."""
+    c = _common
+    request = {
+        "v": 1,
+        "type": "hook",
+        "event": event,
+        "t_hook": _T0,
+        "t_sent": time.time(),
+        "session_id": payload.get("session_id") if isinstance(payload.get("session_id"), str) else "",
+        "cwd": payload.get("cwd"),
+        "profile": profile,
+        "decision": "info",
+        "reason": reason,
+        "text": "",
+        "state_changed": state_changed,
+        "no_ack": True,
+        "payload": c.cap_strings(payload, limit=4 * 1024),
+    }
+    try:
+        _send_to_daemon(request, wait_ack=False)
+        return "daemon"
+    except DaemonUnreachable as exc:
+        request["unreachable"] = str(exc)
+        try:
+            c.append_jsonl(c.spool_path(), request, c.SPOOL_MAX_BYTES, rotate=False)
+        except Exception as sexc:
+            _log("error", "could not spool event", error=repr(sexc))
+        return "spool"
+
+
+def _emit(obj: dict) -> None:
+    """Write hook output to stdout in one unbuffered write."""
+    import json
+
+    data = (json.dumps(obj) + "\n").encode("utf-8")
+    while data:
+        n = os.write(1, data)
+        data = data[n:]
+
+
+def _read_cfg() -> dict:
+    try:
+        return _common.read_config_raw()
+    except Exception as exc:
+        _log("error", "config unreadable, using defaults", error="%s: %s" % (type(exc).__name__, exc))
+        return {}
+
+
+def handle_user_prompt(payload: dict) -> dict:
+    session_id = payload.get("session_id") if isinstance(payload.get("session_id"), str) else ""
+    if session_id and not claim("prompt", session_id, _turn_key(payload, payload.get("prompt")), _turn_ttl(payload)):
+        return {"decision": "none", "reason": "duplicate: another AfterWord hook already handled this prompt"}
+    cfg = _read_cfg()
+    state = _common.load_state(session_id)
+    notes = []
+    changed = False
+    command = _voice_command(payload.get("prompt"))
+    if command is not None:
+        note, changed = apply_voice_command(session_id, command, cfg, state, payload.get("cwd"))
+        notes.append(note)
+    profile = state.get("profile") if isinstance(state.get("profile"), str) else None
+    if profile:
+        notes.append(say_instruction(cfg, profile))
+    if notes:
+        _emit({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": " ".join(notes)}})
+    if command is not None:
+        shown = command if len(command) <= 64 else command[:64] + "..."
+        reason = "/voice %s -> %s" % (shown or "(status)", profile or "off")
+    elif profile:
+        reason = "added <say> instruction (%s)" % profile
+    else:
+        reason = "voice off: nothing added"
+    delivered = _notify("UserPromptSubmit", payload, profile, reason, changed)
+    return {"decision": "inject" if notes else "none", "reason": reason, "profile": profile,
+            "delivered": delivered, "context_chars": sum(len(n) for n in notes)}
+
+
+def handle_session_start(payload: dict) -> dict:
+    import tags
+
+    session_id = payload.get("session_id") if isinstance(payload.get("session_id"), str) else ""
+    source = payload.get("source")
+    env = os.environ.get("AFTERWORD_VOICE")
+    state = _common.load_state(session_id)
+    changed = False
+    reason = "no AFTERWORD_VOICE"
+    if env is not None and session_id:
+        value = env.strip()
+        profile = None if value.lower() in ("", "off", "none", "0") else value
+        has_state = _common.state_file(session_id).is_file()
+        if profile is not None and not tags.PROFILE_NAME_RE.match(profile):
+            reason = "ignored invalid AFTERWORD_VOICE=%r" % value[:40]
+        elif source in ("startup", "fork") or not has_state:
+            state["profile"] = profile
+            if profile:
+                state["last_profile"] = profile
+            state["source"] = "env"
+            if isinstance(payload.get("cwd"), str):
+                state["cwd"] = payload["cwd"]
+            _common.save_state(session_id, state)
+            changed = True
+            reason = "voice seeded from AFTERWORD_VOICE=%s" % (profile or "off")
+        else:
+            reason = "kept the session's voice on %s" % source
+    profile = state.get("profile") if isinstance(state.get("profile"), str) else None
+    delivered = _notify("SessionStart", payload, profile, reason, changed)
+    return {"decision": "none", "reason": reason, "profile": profile, "delivered": delivered}
+
+
 _EVENTS = {
     "stop": "Stop",
     "Stop": "Stop",
+    "user-prompt-submit": "UserPromptSubmit",
+    "UserPromptSubmit": "UserPromptSubmit",
+    "session-start": "SessionStart",
+    "SessionStart": "SessionStart",
 }
 
 
@@ -430,8 +736,11 @@ def run(argv: list) -> dict:
     event = _EVENTS.get(str(event), str(event))
     if event == "Stop":
         result = handle_stop(payload)
+    elif event == "UserPromptSubmit":
+        result = handle_user_prompt(payload)
+    elif event == "SessionStart":
+        result = handle_session_start(payload)
     else:
-        # UserPromptSubmit / SessionStart arrive in a later build step.
         result = {"decision": "ignored", "reason": "unsupported event %s" % event}
     elapsed_ms = round((time.time() - _T0) * 1000, 1)
     result["elapsed_ms"] = elapsed_ms

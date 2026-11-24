@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS events (
     error       TEXT
 );
 CREATE INDEX IF NOT EXISTS events_session ON events(session_id);
+CREATE INDEX IF NOT EXISTS events_clip ON events(id) WHERE clip IS NOT NULL;
 """
 
 JSON_FIELDS = ("attrs", "parsed", "payload", "timings")
@@ -47,6 +48,19 @@ COLUMNS = (
     "reason", "text", "attrs", "parsed", "payload", "timings", "delivery", "clip", "error",
 )
 SUMMARY_COLUMNS = tuple(c for c in ("id",) + COLUMNS if c != "payload")
+STAT_KEYS = ("hook_ms", "hook_to_daemon_ms", "synth_ms", "rtf", "first_audio_ms")
+
+
+def _summary_stats(values: list[float]) -> dict[str, Any]:
+    if not values:
+        return {"n": 0, "p50": None, "p95": None, "max": None}
+    v = sorted(values)
+
+    def pct(p: float) -> float:
+        i = min(len(v) - 1, max(0, round(p * (len(v) - 1))))
+        return round(v[i], 3)
+
+    return {"n": len(v), "p50": pct(0.5), "p95": pct(0.95), "max": round(v[-1], 3)}
 
 
 def setup_text_logging(home: Path, level: int = logging.INFO, stderr: bool = True) -> None:
@@ -168,6 +182,124 @@ class EventLog:
             )
             return cur.rowcount
 
+    def session_activity(self, limit: int = 500) -> dict[str, dict[str, Any]]:
+        """Per-session activity from hook events: newest time, counts, and
+        the newest event."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT session_id, MAX(ts) AS last_seen, COUNT(*) AS events, "
+                "SUM(status = 'spoken') AS spoken, MAX(id) AS last_id "
+                "FROM events WHERE kind = 'hook' AND session_id IS NOT NULL AND session_id != '' "
+                "GROUP BY session_id ORDER BY last_seen DESC LIMIT ?",
+                (max(1, min(int(limit), 5000)),),
+            ).fetchall()
+            last_ids = [r["last_id"] for r in rows]
+            last = {}
+            if last_ids:
+                marks = ",".join("?" * len(last_ids))
+                for r in self._db.execute(
+                    f"SELECT id, ts, status, reason, text, cwd FROM events WHERE id IN ({marks})", last_ids
+                ).fetchall():
+                    last[r["id"]] = dict(r)
+        out = {}
+        for r in rows:
+            ev = last.get(r["last_id"], {})
+            out[r["session_id"]] = {
+                "last_seen": r["last_seen"],
+                "events": r["events"],
+                "spoken": r["spoken"] or 0,
+                "cwd": ev.get("cwd"),
+                "last_event": {k: ev.get(k) for k in ("id", "ts", "status", "reason", "text")} if ev else None,
+            }
+        return out
+
+    def session_activity_for(self, session_id: str) -> dict[str, Any] | None:
+        """One session's activity (uses the session_id index)."""
+        with self._lock:
+            r = self._db.execute(
+                "SELECT MAX(ts) AS last_seen, COUNT(*) AS events, SUM(status = 'spoken') AS spoken, MAX(id) AS last_id "
+                "FROM events WHERE session_id = ? AND kind = 'hook'",
+                (session_id,),
+            ).fetchone()
+            if not r or not r["events"]:
+                return None
+            ev = self._db.execute(
+                "SELECT id, ts, status, reason, text, cwd FROM events WHERE id = ?", (r["last_id"],)
+            ).fetchone()
+        ev = dict(ev) if ev else {}
+        return {
+            "last_seen": r["last_seen"], "events": r["events"], "spoken": r["spoken"] or 0, "cwd": ev.get("cwd"),
+            "last_event": {k: ev.get(k) for k in ("id", "ts", "status", "reason", "text")} if ev else None,
+        }
+
+    def forget_clip(self, event_id: int) -> None:
+        """The clip file was pruned: stop listing it in history."""
+        with self._lock:
+            self._db.execute("UPDATE events SET clip = NULL WHERE id = ?", (event_id,))
+
+    def history(self, limit: int = 50, before_id: int | None = None) -> list[dict[str, Any]]:
+        """Events that still have their audio clip on disk, newest first."""
+        limit = max(1, min(int(limit), 500))
+        out: list[dict[str, Any]] = []
+        cursor = before_id
+        while len(out) < limit:
+            sql = "SELECT id, ts, session_id, cwd, profile, text, status, timings, clip FROM events WHERE clip IS NOT NULL"
+            args: list[Any] = []
+            if cursor is not None:
+                sql += " AND id < ?"
+                args.append(int(cursor))
+            sql += " ORDER BY id DESC LIMIT ?"
+            args.append(limit * 2)
+            with self._lock:
+                rows = self._db.execute(sql, args).fetchall()
+            if not rows:
+                break
+            for r in rows:
+                cursor = r["id"]
+                if not Path(r["clip"]).is_file():
+                    continue
+                t = json.loads(r["timings"]) if r["timings"] else {}
+                out.append({
+                    "id": r["id"], "ts": r["ts"], "session_id": r["session_id"], "cwd": r["cwd"],
+                    "profile": r["profile"], "text": r["text"], "status": r["status"],
+                    "audio_s": t.get("audio_s"), "playback_rate": t.get("playback_rate", 1.0),
+                    "synth_backend": t.get("synth_backend"),
+                    "url": f"/api/clips/{r['id']}", "download_url": f"/api/clips/{r['id']}?download=1",
+                })
+                if len(out) >= limit:
+                    break
+        return out
+
+    def stats(self, limit: int = 200) -> dict[str, Any]:
+        limit = max(1, min(int(limit), 5000))
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT status, reason, timings FROM events WHERE kind IN ('hook', 'test') AND status != 'info' "
+                "ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        by_status: dict[str, int] = {}
+        by_reason: dict[str, int] = {}
+        series: dict[str, list[float]] = {k: [] for k in STAT_KEYS}
+        for r in rows:
+            by_status[r["status"]] = by_status.get(r["status"], 0) + 1
+            if r["reason"]:
+                by_reason[r["reason"]] = by_reason.get(r["reason"], 0) + 1
+            try:
+                t = json.loads(r["timings"]) if r["timings"] else {}
+            except ValueError:
+                t = {}
+            for k in STAT_KEYS:
+                v = t.get(k)
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    series[k].append(float(v))
+        return {
+            "count": len(rows),
+            "by_status": by_status,
+            "by_reason": dict(sorted(by_reason.items(), key=lambda kv: -kv[1])[:20]),
+            "timings": {k: _summary_stats(v) for k, v in series.items()},
+        }
+
     def count(self) -> int:
         with self._lock:
             return self._db.execute("SELECT COUNT(*) FROM events").fetchone()[0]
@@ -261,7 +393,7 @@ def ingest_spool(events: EventLog, spool: Path | None = None) -> int:
 
 
 def _import_record(events: EventLog, rec: dict[str, Any]) -> bool:
-    decision = rec.get("decision") if rec.get("decision") in ("speak", "skip") else "error"
+    decision = rec.get("decision") if rec.get("decision") in ("speak", "skip", "info") else "error"
     fallback = rec.get("fallback")
     if decision == "speak":
         status = "spoken" if fallback == "say" else ("error" if fallback == "error" else "skipped")
@@ -271,6 +403,8 @@ def _import_record(events: EventLog, rec: dict[str, Any]) -> bool:
         }.get(fallback, "daemon down: fallback disabled")
     elif decision == "skip":
         status, reason = "skipped", _s(rec.get("reason"), 200)
+    elif decision == "info":
+        status, reason = "info", _s(rec.get("reason"), 200)
     else:
         status, reason = "error", "error: malformed spool record"
     t_hook = rec.get("t_hook")

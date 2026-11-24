@@ -1,0 +1,11 @@
+{
+  "name": "afterword",
+  "owner": {"name": "Tony Yan"},
+  "plugins": [
+    {
+      "name": "afterword",
+      "source": "./",
+      "description": "Spoken replies for Claude Code with local Qwen3-TTS."
+    }
+  ]
+}

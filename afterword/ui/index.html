@@ -51,7 +51,8 @@
   td.t { font-family: var(--mono); font-size: 12px; color: var(--muted); white-space: nowrap; }
   td.sess { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
   td.sess small { display: block; color: var(--muted); font-family: inherit; }
-  td.text { max-width: 520px; }
+  td.text { min-width: 300px; max-width: 560px; }
+  #rows td.t:last-child { white-space: normal; max-width: 260px; line-height: 1.6; }
   td.text .reason { color: var(--muted); font-size: 12px; }
   .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px;
            border: 1px solid currentColor; white-space: nowrap; }
@@ -80,7 +81,85 @@
   .tabs a + a { border-left: 1px solid var(--line); }
   .tabs a.on { color: var(--ink); background: var(--soft); font-weight: 600; }
   .logonly { display: contents; }
-  body.lab .logonly { display: none; }
+  body:not(.tab-log) .logonly { display: none; }
+  .tabs a .cnt { display: inline-block; min-width: 16px; margin-left: 5px; padding: 0 4px; border-radius: 999px; font-size: 11px;
+                 text-align: center; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-weight: 600; }
+  .tabs a .cnt:empty { display: none; }
+  button.toggle[aria-pressed="true"] { color: var(--error); font-weight: 600;
+           border-color: color-mix(in srgb, var(--error) 45%, var(--line)); background: color-mix(in srgb, var(--error) 8%, var(--panel)); }
+  #hdr-msg { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ---- shared page layout ---- */
+  .page { display: flex; flex-direction: column; gap: 14px; }
+  .page table td { vertical-align: middle; }
+  td.ell, .ell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td.num { font-family: var(--mono); font-size: 12px; text-align: right; white-space: nowrap; }
+  th.num { text-align: right; }
+  .nowrap { white-space: nowrap; }
+  a.plain { color: inherit; text-decoration: none; }
+  a.plain:hover { text-decoration: underline; }
+  a.btn { font-size: 12px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink);
+          text-decoration: none; background: var(--panel); white-space: nowrap; }
+  a.btn:hover { border-color: var(--muted); }
+  .steps { margin: 6px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+  .empty-panel { color: var(--muted); padding: 18px 16px; }
+  .empty-panel b { color: var(--ink); }
+
+  /* sessions */
+  #s-table td.sess { font-family: var(--mono); font-size: 12px; }
+  .scroll-x { overflow-x: auto; min-width: 0; }
+  #s-table td.last { max-width: 360px; min-width: 160px; }
+  #s-table td.last .ell { display: block; }
+  #s-table td.last .reason { color: var(--muted); font-size: 12px; }
+  #s-table select { max-width: 160px; }
+  #s-table tr.off td.prof select { color: var(--muted); }
+  #s-table tr.pending { opacity: .65; }
+
+  /* queue */
+  .np-text { font-size: 15px; white-space: pre-wrap; word-break: break-word; margin: 2px 0 6px; }
+  #q-table td.text { max-width: 560px; white-space: pre-wrap; word-break: break-word; }
+
+  /* history */
+  .hitem { display: grid; grid-template-columns: minmax(220px, 320px) minmax(0, 1fr); gap: 4px 14px; align-items: start;
+           border-top: 1px solid var(--line); padding: 9px 0; min-width: 0; }
+  .hitem:first-child { border-top: 0; padding-top: 0; }
+  @media (max-width: 760px) { .hitem { grid-template-columns: minmax(0, 1fr); } }
+  .hitem audio { width: 100%; height: 30px; }
+  .hitem .txt { font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+  .hitem.playing { box-shadow: inset 3px 0 0 var(--accent); padding-left: 8px; }
+  .hitem .ctl { display: flex; gap: 6px; align-items: center; min-width: 0; }
+
+  /* stats */
+  details.panel > summary { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600;
+                            cursor: pointer; display: flex; gap: 8px; align-items: center; list-style: none; }
+  details.panel > summary::-webkit-details-marker { display: none; }
+  details.panel > summary::before { content: "▸"; font-size: 10px; }
+  details.panel[open] > summary::before { content: "▾"; }
+  details.panel[open] > summary { margin-bottom: 10px; }
+  details.panel > summary .hint, details.panel > summary .msg { text-transform: none; letter-spacing: 0; font-weight: 400; }
+  #view-log > details.panel { margin-bottom: 12px; }
+  .stats { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(200px, 1fr) minmax(360px, 2fr); gap: 14px; align-items: start; }
+  @media (max-width: 980px) { .stats { grid-template-columns: minmax(0, 1fr); } }
+  .stats h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 6px; font-weight: 500; }
+  .counts { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+  .counts div { display: flex; gap: 8px; align-items: center; min-width: 0; }
+  .counts .n { font-family: var(--mono); min-width: 34px; text-align: right; color: var(--ink); }
+  .counts .k { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  table.mini { border: 0; border-radius: 0; background: none; }
+  table.mini th, table.mini td { padding: 3px 8px; }
+  table.mini td:first-child, table.mini th:first-child { padding-left: 0; }
+
+  /* config */
+  .cfg-meta { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 5px 12px; font-size: 13px; align-items: baseline; }
+  .cfg-meta > .lbl { font-size: 12px; color: var(--muted); }
+  ul.warnings { margin: 0; padding-left: 18px; font-size: 12px; color: var(--queued); }
+  ul.warnings li { word-break: break-word; }
+  .toml { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: auto; max-height: 70vh; background: var(--panel); }
+  .toml pre { border: 0; border-radius: 0; max-height: none; overflow: visible; white-space: pre; word-break: normal;
+              padding: 8px 10px; background: none; line-height: 1.5; tab-size: 4; }
+  .toml pre.gut { color: var(--muted); text-align: right; user-select: none; -webkit-user-select: none; position: sticky; left: 0;
+                  background: color-mix(in srgb, var(--bg) 70%, var(--panel)); border-right: 1px solid var(--line); min-width: 44px; }
+  .toml pre.src { flex: 1; min-width: 0; }
 
   /* ---- voice lab ---- */
   #view-lab { display: flex; flex-direction: column; gap: 14px; }
@@ -193,11 +272,13 @@
 <header>
   <h1>AfterWord</h1>
   <nav class="tabs" aria-label="views">
-    <a href="#log" id="tab-log">Log</a><a href="#lab" id="tab-lab">Voice lab</a>
+    <a href="#log" id="tab-log">Log</a><a href="#sessions" id="tab-sessions">Sessions</a><a href="#queue" id="tab-queue">Queue<span class="cnt" id="tab-queue-n"></span></a><a href="#history" id="tab-history">History</a><a href="#lab" id="tab-lab">Voice lab</a><a href="#config" id="tab-config">Config</a>
   </nav>
   <span class="pill"><span id="dot" class="dot"></span><span id="conn">connecting…</span></span>
   <span class="pill" id="meta"></span>
   <div class="now" id="now">idle</div>
+  <span class="msg" id="hdr-msg"></span>
+  <button id="muteall" class="toggle" aria-pressed="false" title="Mute every session (voices stay on; lines are logged as skipped)">Mute all</button>
   <button id="skip" title="Stop the current clip; keep the queue">Skip</button>
   <button id="stop" class="danger" title="Stop and clear the queue">Stop all</button>
   <span class="logonly">
@@ -210,14 +291,50 @@
   </select>
   <input type="search" id="q" placeholder="filter text, session, reason">
   <label class="pill"><input type="checkbox" id="hideSystem" checked> hide system</label>
+  <label class="pill" title="UserPromptSubmit / SessionStart hook calls (status info), one per prompt"><input type="checkbox" id="showHooks"> show prompt/session hooks</label>
   </span>
 </header>
 <main id="view-log">
   <div class="warn" id="cfgwarn"></div>
+  <details class="panel" id="st-panel" open>
+    <summary>Timings <span class="hint" id="st-scope"></span><span class="grow"></span><span class="msg" id="st-msg"></span></summary>
+    <div class="stats" id="st-body"><span class="hint">Loading…</span></div>
+  </details>
   <table>
     <thead><tr><th>#</th><th>time</th><th>session</th><th>event</th><th>status</th><th>text / reason</th><th>timings</th></tr></thead>
     <tbody id="rows"><tr><td colspan="7" class="empty">No events yet.</td></tr></tbody>
   </table>
+</main>
+
+<main id="view-sessions" class="page" hidden>
+  <div class="banner" id="s-muted" hidden><b>All sessions are muted.</b> Voices stay on and lines are logged as skipped (“all muted”). Use <b>All muted</b> in the header to unmute.</div>
+  <div class="banner" id="s-err" hidden></div>
+  <section class="panel" aria-label="sessions">
+    <h2>Sessions <span class="hint" id="s-count" style="text-transform:none;letter-spacing:0;font-weight:400"></span><span class="grow"></span><span class="msg" id="s-msg"></span><button id="s-refresh">Refresh</button></h2>
+    <div id="s-body"><span class="hint">Loading…</span></div>
+  </section>
+</main>
+
+<main id="view-queue" class="page" hidden>
+  <section class="panel" aria-label="now playing">
+    <h2>Now playing <span class="grow"></span><span class="msg" id="q-msg"></span>
+      <button id="q-skip" title="Stop the current clip; keep the queue">Skip</button>
+      <button id="q-stop" class="danger" title="Stop and clear the queue">Stop all</button></h2>
+    <div id="q-now"><span class="hint">Nothing playing.</span></div>
+  </section>
+  <section class="panel" aria-label="pending">
+    <h2>Pending <span class="hint" id="q-count" style="text-transform:none;letter-spacing:0;font-weight:400"></span></h2>
+    <div id="q-pending"><span class="hint">Queue is empty.</span></div>
+  </section>
+</main>
+
+<main id="view-history" class="page" hidden>
+  <div class="banner" id="h-err" hidden></div>
+  <section class="panel" aria-label="history">
+    <h2>History <span class="hint" id="h-count" style="text-transform:none;letter-spacing:0;font-weight:400"></span><span class="grow"></span><span class="msg" id="h-msg"></span><button id="h-refresh" title="Reload the list from the newest clip">Refresh</button></h2>
+    <div class="list" id="h-list"><span class="hint">Loading…</span></div>
+    <div class="bar"><button id="h-more" hidden>Load more</button><span class="hint" id="h-end"></span></div>
+  </section>
 </main>
 
 <main id="view-lab" hidden>
@@ -360,6 +477,23 @@
     </div>
   </div>
 </main>
+
+<main id="view-config" class="page" hidden>
+  <div class="banner" id="c-err" hidden></div>
+  <section class="panel" aria-label="config file">
+    <h2>Config <span class="grow"></span><span class="msg" id="c-msg"></span><button id="c-reload" title="Re-read config.toml now">Reload</button></h2>
+    <div class="cfg-meta" id="c-meta"><span class="hint">Loading…</span></div>
+    <div class="hint" style="margin-top:8px">Edit the file in your editor; the daemon picks up changes automatically (Reload forces it). The voice lab’s profile editor writes to the same file. If the file has a parse error, the daemon keeps using the last good config.</div>
+  </section>
+  <section class="panel" aria-label="engine status">
+    <h2>Engine</h2>
+    <div class="engine" id="c-engine"><span class="hint">Loading…</span></div>
+  </section>
+  <section class="panel" aria-label="config.toml">
+    <h2>config.toml <span class="hint" id="c-lines" style="text-transform:none;letter-spacing:0;font-weight:400"></span><span class="grow"></span><span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">read-only</span></h2>
+    <div class="toml" id="c-toml"><pre class="gut"></pre><pre class="src"></pre></div>
+  </section>
+</main>
 <script>
 const $ = (id) => document.getElementById(id);
 const events = new Map();   // id -> summary
@@ -393,9 +527,87 @@ function applyRate(a, rate) {
   a.addEventListener("loadedmetadata", () => { a.playbackRate = rate; });
 }
 
+// ---------- shared helpers (all pages) ----------
+// Build DOM safely: strings only ever become text nodes / attribute values.
+function h(tag, props, ...kids) {
+  const el = document.createElement(tag);
+  if (props) for (const [k, v] of Object.entries(props)) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k === "text") el.textContent = String(v);
+    else if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
+    else if (typeof v === "boolean") el[k] = v;
+    else el.setAttribute(k, String(v));
+  }
+  for (const c of kids.flat(Infinity)) if (c != null && c !== false) el.append(c instanceof Node ? c : String(c));
+  return el;
+}
+async function api(method, path, body, opt = {}) {
+  const init = {method, headers: {}};
+  if (method !== "GET" && method !== "HEAD") init.headers["X-AfterWord"] = "1";
+  if (opt.raw !== undefined) { init.body = opt.raw; init.headers["Content-Type"] = opt.type || "application/octet-stream"; }
+  else if (body !== undefined) { init.body = JSON.stringify(body); init.headers["Content-Type"] = "application/json"; }
+  let r;
+  try { r = await fetch(path, init); }
+  catch (e) { return {ok: false, status: 0, data: null, error: "Daemon unreachable."}; }
+  let data = null, raw = "";
+  try { raw = await r.text(); } catch { /* body unreadable */ }
+  try { data = raw ? JSON.parse(raw) : null; } catch { /* non-JSON body */ }
+  if (r.ok) return {ok: true, status: r.status, data};
+  // Errors are {"error": "..."}; fall back to FastAPI-style "detail", then a
+  // plain-text body, then the status code.
+  let msg = data && typeof data === "object" ? (data.error || data.detail) : null;
+  if (msg && typeof msg !== "string") msg = JSON.stringify(msg);
+  if (!msg && raw && !data && !/^\s*</.test(raw)) msg = raw.trim().slice(0, 300);
+  if (!msg) msg = `HTTP ${r.status}`;
+  else if (r.status >= 500 && r.status !== 503) msg = `${msg} (HTTP ${r.status})`;
+  if (r.status === 429) msg = `Engine busy, try again in a moment. (${msg})`;
+  return {ok: false, status: r.status, data, error: msg};
+}
+function note(id, text, kind = "info") { const el = typeof id === "string" ? $(id) : id; el.className = "msg " + kind; el.textContent = text || ""; }
+// A short-lived message (cleared after ms unless replaced meanwhile).
+function flashNote(id, text, kind = "info", ms = 5000) {
+  const el = typeof id === "string" ? $(id) : id;
+  note(el, text, kind); el.title = text || "";
+  const tok = (el._tok = (el._tok || 0) + 1);
+  setTimeout(() => { if (el._tok === tok) { note(el, ""); el.title = ""; } }, ms);
+}
+const isNum = (v) => typeof v === "number" && Number.isFinite(v);
+const cls = (s) => String(s ?? "").replace(/[^A-Za-z0-9_-]/g, "");
+function relTime(ts) {
+  if (!isNum(ts)) return "—";
+  const s = Date.now() / 1000 - ts;
+  if (s < 0) return "just now";
+  if (s < 5) return "just now";
+  if (s < 60) return `${Math.floor(s)}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}
+const fmtDateTime = (ts) => isNum(ts) ? new Date(ts * 1000).toLocaleString([], {hour12: false}) : "—";
+// A relative-time label that the ticker below keeps current.
+const relSpan = (ts, props = {}) => h("span", {...props, "data-ts": isNum(ts) ? ts : null, title: props.title || fmtDateTime(ts)}, relTime(ts));
+setInterval(() => {
+  for (const el of document.querySelectorAll("[data-ts]")) el.textContent = relTime(Number(el.dataset.ts));
+}, 10000);
+const fmtDur = (s) => !isNum(s) ? "—" : s < 60 ? `${s.toFixed(1)} s` : `${Math.floor(s / 60)}m ${String(Math.floor(s % 60)).padStart(2, "0")}s`;
+// Only same-origin clip URLs are used for <audio>/<a href>; anything else falls back to the id.
+function clipUrl(url, id, download) {
+  if (typeof url === "string" && /^\/api\/clips\/\d+(\?download=1)?$/.test(url)) return url;
+  return Number.isInteger(Number(id)) ? `/api/clips/${Number(id)}${download ? "?download=1" : ""}` : null;
+}
+const audioInUse = (a) => !!a && (!a.paused || (a.currentTime > 0 && !a.ended));
+// One clip at a time across the whole page: starting one pauses the others.
+document.addEventListener("play", (ev) => {
+  if (!(ev.target instanceof HTMLMediaElement)) return;
+  for (const a of document.querySelectorAll("audio")) if (a !== ev.target && !a.paused) a.pause();
+}, true);
+
 function matches(e) {
   const f = $("filter").value, q = $("q").value.trim().toLowerCase();
   if ($("hideSystem").checked && e.kind === "system") return false;
+  // UserPromptSubmit / SessionStart calls are logged as hook rows with status "info" (one per prompt).
+  if (!$("showHooks").checked && e.kind === "hook" && e.status === "info") return false;
   if (f === "active" && !["queued", "synthesizing", "playing"].includes(e.status)) return false;
   if (f && f !== "active" && e.status !== f) return false;
   if (q) {
@@ -411,12 +623,12 @@ function rowHtml(e) {
   const text = e.text ? esc(e.text) : "";
   const reason = e.reason ? `<div class="reason">${esc(e.reason)}</div>` : "";
   const prof = e.profile ? `<small>${esc(e.profile)}</small>` : "";
-  return `<tr class="ev" data-id="${e.id}">
-    <td class="t">${e.id}</td>
-    <td class="t">${fmtTime(e.ts)}</td>
+  return `<tr class="ev" data-id="${esc(e.id)}">
+    <td class="t">${esc(e.id)}</td>
+    <td class="t">${esc(fmtTime(e.ts))}</td>
     <td class="sess" title="${esc(e.session_id)}\n${esc(e.cwd)}">${esc(shortId(e.session_id))}<small>${esc(base(e.cwd))}</small>${prof}</td>
     <td>${esc(evName)}${via}</td>
-    <td><span class="badge s-${esc(e.status)}">${esc(e.status)}</span></td>
+    <td><span class="badge s-${esc(cls(e.status))}">${esc(e.status)}</span></td>
     <td class="text">${text}${reason}</td>
     <td class="t">${esc(timingsLine(e.timings))}</td>
   </tr>`;
@@ -426,8 +638,9 @@ function detailHtml(d) {
   const t = d.timings || {};
   const dl = Object.entries(t).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("") || "<dt>—</dt><dd></dd>";
   const rate = replayRate(t);
-  const clip = d.clip ? `<p><audio controls preload="none" src="/api/clips/${esc(d.id)}"${rate != null ? ` data-rate="${rate}"` : ""}></audio>${rate != null ? ` <span class="via">plays at ${rate}× (the pace it was heard at)</span>` : ""}</p>` : "";
-  return `<tr class="detail" data-for="${d.id}"><td colspan="7"><div class="detail-grid">
+  const src = d.clip ? clipUrl(null, d.id) : null;
+  const clip = src ? `<p><audio controls preload="none" src="${esc(src)}"${rate != null ? ` data-rate="${esc(rate)}"` : ""}></audio>${rate != null ? ` <span class="via">plays at ${esc(rate)}× (the pace it was heard at)</span>` : ""}</p>` : "";
+  return `<tr class="detail" data-for="${esc(d.id)}"><td colspan="7"><div class="detail-grid">
     <div><h3>decision</h3><pre>${esc(JSON.stringify({kind: d.kind, decision: d.decision, status: d.status,
        reason: d.reason, profile: d.profile, delivery: d.delivery, error: d.error, attrs: d.attrs}, null, 2))}</pre>
        <h3 style="margin-top:12px">timings</h3><dl class="timings">${dl}</dl>${clip}</div>
@@ -435,18 +648,68 @@ function detailHtml(d) {
     <div><h3>raw payload</h3><pre>${esc(JSON.stringify(d.payload, null, 2))}</pre></div>
   </div></td></tr>`;
 }
+function trFrom(html) {
+  const t = document.createElement("template");
+  t.innerHTML = html.trim();
+  return t.content.firstElementChild;
+}
 
+// The log table is reconciled by event id rather than rebuilt: a row is only
+// replaced when its summary changed, and an expanded row's detail (with its
+// <audio>) is left alone while that audio is playing or paused mid-way, so a
+// live SSE update never cuts off a clip being listened to.
+const rowNodes = new Map();   // id -> {tr, sig, det, detSig}
+let emptyRow = null;
 let renderQueued = false;
 function render() {
   if (renderQueued) return;
   renderQueued = true;
   requestAnimationFrame(() => {
     renderQueued = false;
+    const tbody = $("rows");
     const list = [...events.values()].sort((a, b) => b.id - a.id).filter(matches);
-    if (!list.length) { $("rows").innerHTML = `<tr><td colspan="7" class="empty">No events${events.size ? " match the filter" : " yet"}.</td></tr>`; return; }
-    $("rows").innerHTML = list.map(e => rowHtml(e) + (open.has(e.id) && detailCache.has(e.id) ? detailHtml(detailCache.get(e.id)) : "")).join("");
-    for (const a of $("rows").querySelectorAll("audio[data-rate]")) applyRate(a, Number(a.dataset.rate));
-    for (const id of flashing) { const r = document.querySelector(`tr.ev[data-id="${id}"]`); if (r) r.classList.add("flash"); }
+    const want = [];
+    const keep = new Set();
+    for (const e of list) {
+      let n = rowNodes.get(e.id);
+      if (!n) { n = {tr: null, sig: null, det: null, detSig: null}; rowNodes.set(e.id, n); }
+      const sig = JSON.stringify(e);
+      if (n.sig !== sig || !n.tr) {
+        const tr = trFrom(rowHtml(e));
+        if (n.tr && n.tr.parentNode) n.tr.replaceWith(tr);
+        n.tr = tr; n.sig = sig;
+      }
+      want.push(n.tr);
+      keep.add(e.id);
+      if (open.has(e.id) && detailCache.has(e.id)) {
+        const d = detailCache.get(e.id);
+        const dsig = JSON.stringify(d);
+        if (!n.det || (n.detSig !== dsig && !audioInUse(n.det.querySelector("audio")))) {
+          const det = trFrom(detailHtml(d));
+          for (const a of det.querySelectorAll("audio[data-rate]")) applyRate(a, Number(a.dataset.rate));
+          // When a held-back clip finishes, re-render so the detail catches up.
+          for (const a of det.querySelectorAll("audio")) a.addEventListener("ended", render);
+          if (n.det && n.det.parentNode) n.det.replaceWith(det);
+          n.det = det; n.detSig = dsig;
+        }
+        want.push(n.det);
+      } else if (n.det) { n.det.remove(); n.det = null; n.detSig = null; }
+    }
+    for (const [id, n] of rowNodes) if (!keep.has(id)) { n.tr && n.tr.remove(); n.det && n.det.remove(); rowNodes.delete(id); }
+    if (!list.length) {
+      emptyRow = emptyRow || trFrom(`<tr><td colspan="7" class="empty"></td></tr>`);
+      emptyRow.firstElementChild.textContent = `No events${events.size ? " match the filter" : " yet"}.`;
+      want.push(emptyRow);
+    }
+    const wanted = new Set(want);
+    for (const c of [...tbody.children]) if (!wanted.has(c)) c.remove();
+    // Put nodes in order, moving only the ones that are out of place.
+    let cur = tbody.firstChild;
+    for (const node of want) {
+      if (node === cur) cur = cur.nextSibling;
+      else tbody.insertBefore(node, cur);
+    }
+    for (const id of flashing) { const n = rowNodes.get(id); if (n && n.tr) n.tr.classList.add("flash"); }
     flashing.clear();
   });
 }
@@ -466,19 +729,57 @@ $("rows").addEventListener("click", (ev) => {
   const tr = ev.target.closest("tr.ev");
   if (tr && !ev.target.closest("audio")) toggle(Number(tr.dataset.id));
 });
-for (const id of ["filter", "q", "hideSystem"]) $(id).addEventListener("input", render);
+for (const id of ["filter", "q", "hideSystem", "showHooks"]) $(id).addEventListener("input", render);
 
-const post = (path) => fetch(path, {method: "POST", headers: {"X-AfterWord": "1"}});
-$("skip").onclick = () => post("/api/queue/skip");
-$("stop").onclick = () => post("/api/queue/stop");
+// Header actions (shown on every tab).
+async function queueAction(path, label, msgId = "hdr-msg") {
+  const r = await api("POST", path);
+  if (!r.ok) flashNote(msgId, `${label} failed: ${r.error}`, "err");
+  return r;
+}
+$("skip").onclick = () => queueAction("/api/queue/skip", "Skip");
+$("stop").onclick = () => queueAction("/api/queue/stop", "Stop all");
 
 function showQueue(q) {
+  if (!q || typeof q !== "object") return;
   const np = q.now_playing;
-  const pending = q.pending.length;
+  const pending = Array.isArray(q.pending) ? q.pending.length : 0;
   $("now").innerHTML = np
     ? `▶ <b>${esc(np.text)}</b> <span>(${esc(np.profile || "default")}, ${esc(shortId(np.session_id))})</span>${pending ? ` · ${pending} queued` : ""}`
     : (pending ? `${pending} queued` : "idle");
+  const total = (np ? 1 : 0) + pending;
+  $("tab-queue-n").textContent = total ? String(total) : "";
+  Queue.update(q);
 }
+
+// ---------- mute all (header) ----------
+const MuteAll = (() => {
+  let muted = null;   // null = unknown (endpoint missing or not loaded yet)
+  function paint() {
+    const b = $("muteall");
+    b.setAttribute("aria-pressed", String(muted === true));
+    b.textContent = muted ? "All muted" : "Mute all";
+    b.title = muted ? "All sessions are muted (lines are logged as skipped). Click to unmute."
+      : "Mute every session (voices stay on; lines are logged as skipped)";
+    $("s-muted").hidden = muted !== true;
+  }
+  function set(v) { if (typeof v === "boolean" && v !== muted) { muted = v; paint(); } }
+  async function click() {
+    const b = $("muteall");
+    b.disabled = true;
+    const r = await api("POST", "/api/mute", {muted: !muted});
+    b.disabled = false;
+    if (!r.ok) return flashNote("hdr-msg", `Mute all failed: ${r.error}`, "err");
+    set(r.data && r.data.muted_all);
+  }
+  async function load() {
+    const r = await api("GET", "/api/sessions?limit=1");
+    if (r.ok && r.data) set(r.data.muted_all);
+  }
+  $("muteall").addEventListener("click", click);
+  paint();
+  return {set, load, get: () => muted};
+})();
 
 async function loadStatus() {
   try {
@@ -490,6 +791,16 @@ async function loadStatus() {
   } catch (e) { /* daemon down; the stream status shows it */ }
 }
 
+const EVENTS_KEPT = 3000;  // a long-lived tab keeps the newest rows only
+function trimEvents() {
+  if (events.size <= EVENTS_KEPT) return;
+  const ids = [...events.keys()].sort((a, b) => a - b);
+  for (const id of ids.slice(0, events.size - EVENTS_KEPT)) {
+    if (open.has(id)) continue;
+    events.delete(id); detailCache.delete(id);
+  }
+}
+
 async function loadEvents() {
   const r = await fetch("/api/events?limit=500");
   const {events: list} = await r.json();
@@ -497,28 +808,484 @@ async function loadEvents() {
   render();
 }
 
+// One EventSource for every tab. Pages subscribe with sse.on(type, fn).
+const sse = {
+  subs: {},
+  on(type, fn) { (this.subs[type] ||= []).push(fn); },
+  emit(type, data) { for (const fn of this.subs[type] || []) { try { fn(data); } catch (e) { console.error(e); } } },
+};
 function connect() {
   const es = new EventSource("/api/stream");
+  const parse = (m) => { try { return JSON.parse(m.data); } catch { return null; } };
   es.addEventListener("open", () => {
     $("dot").className = "dot live"; $("conn").textContent = "live";
-    loadEvents(); loadStatus();
+    loadEvents(); loadStatus(); MuteAll.load();
+    sse.emit("open");
   });
-  es.addEventListener("error", () => { $("dot").className = "dot down"; $("conn").textContent = "daemon unreachable — retrying"; });
+  es.addEventListener("error", () => {
+    $("dot").className = "dot down"; $("conn").textContent = "daemon unreachable — retrying";
+    // Nothing is playing while the daemon is down; the next "open" resyncs.
+    showQueue({now_playing: null, pending: [], max_size: 0});
+    $("now").textContent = "daemon unreachable";
+  });
   es.addEventListener("event", (m) => {
-    const e = JSON.parse(m.data);
+    const e = parse(m);
+    if (!e || e.id == null) return;
     if (!events.has(e.id)) flashing.add(e.id);
     events.set(e.id, e);
-    if (open.has(e.id)) fetch(`/api/events/${e.id}`).then(r => r.json()).then(d => { detailCache.set(e.id, d); render(); });
+    trimEvents();
+    if (open.has(e.id)) fetch(`/api/events/${e.id}`).then(r => r.json()).then(d => { detailCache.set(e.id, d); render(); }).catch(() => {});
     render();
+    sse.emit("event", e);
   });
-  es.addEventListener("queue", (m) => showQueue(JSON.parse(m.data)));
+  es.addEventListener("queue", (m) => { const q = parse(m); if (q) showQueue(q); });
+  es.addEventListener("sessions", (m) => { const d = parse(m); if (d) sse.emit("sessions", d); });
+  es.addEventListener("mute", (m) => { const d = parse(m); if (d) MuteAll.set(d.muted_all); });
 }
+
+// ===================================================================
+// Timings panel (on the Log page): GET /api/stats
+// ===================================================================
+const Stats = (() => {
+  const METRICS = [
+    ["hook_ms", "hook", "ms"], ["hook_to_daemon_ms", "hook → daemon", "ms"], ["synth_ms", "synthesis", "ms"],
+    ["rtf", "real-time factor", ""], ["first_audio_ms", "first audio", "ms"],
+  ];
+  let visible = false, timer = null, loading = false;
+  const fmt = (v, unit) => {
+    if (!isNum(v)) return "—";
+    if (unit === "ms") return v >= 10000 ? (v / 1000).toFixed(1) + " s" : (v < 10 ? v.toFixed(1) : Math.round(v)) + " ms";
+    return v.toFixed(2);
+  };
+  function counts(title, obj, badge) {
+    const entries = Object.entries(obj && typeof obj === "object" ? obj : {}).filter(([, n]) => isNum(n)).sort((a, b) => b[1] - a[1]);
+    return h("div", null, h("h3", null, title),
+      entries.length ? h("div", {class: "counts"}, entries.map(([k, n]) => h("div", null,
+        h("span", {class: "n"}, String(n)),
+        badge ? h("span", {class: "badge s-" + cls(k)}, k) : h("span", {class: "k", title: k}, k))))
+        : h("span", {class: "hint"}, "none"));
+  }
+  function renderStats(d) {
+    const t = (d && d.timings) || {};
+    $("st-scope").textContent = isNum(d.count) ? `over the newest ${d.count} hook/test events` : "";
+    const table = h("table", {class: "mini"},
+      h("thead", null, h("tr", null, h("th", null, "timing"), h("th", {class: "num"}, "n"), h("th", {class: "num"}, "p50"),
+        h("th", {class: "num"}, "p95"), h("th", {class: "num"}, "max"))),
+      h("tbody", null, METRICS.map(([key, label, unit]) => {
+        const m = t[key] || {};
+        return h("tr", null, h("td", {title: key}, label), h("td", {class: "num"}, isNum(m.n) ? String(m.n) : "—"),
+          h("td", {class: "num"}, fmt(m.p50, unit)), h("td", {class: "num"}, fmt(m.p95, unit)), h("td", {class: "num"}, fmt(m.max, unit)));
+      })));
+    $("st-body").replaceChildren(counts("by status", d.by_status, true), counts("by reason", d.by_reason, false),
+      h("div", null, h("h3", null, "latency"), table));
+  }
+  async function load() {
+    if (loading) return;
+    loading = true;
+    const r = await api("GET", "/api/stats?limit=200");
+    loading = false;
+    if (!r.ok || !r.data) { note("st-msg", `stats unavailable: ${r.error || "empty response"}`, "err"); return; }
+    note("st-msg", "");
+    renderStats(r.data);
+  }
+  // Remember collapsed/open per browser (a convenience only).
+  try { if (localStorage.getItem("aw.stats.open") === "0") $("st-panel").open = false; } catch { /* storage blocked */ }
+  $("st-panel").addEventListener("toggle", () => {
+    try { localStorage.setItem("aw.stats.open", $("st-panel").open ? "1" : "0"); } catch { /* storage blocked */ }
+    if ($("st-panel").open && visible) load();
+  });
+  document.addEventListener("visibilitychange", () => { if (visible && document.visibilityState === "visible") load(); });
+  return {
+    show() {
+      visible = true; load();
+      if (!timer) timer = setInterval(() => { if (visible && document.visibilityState === "visible") load(); }, 30000);
+    },
+    hide() { visible = false; },
+  };
+})();
+
+const LogPage = {
+  show() { Stats.show(); render(); },
+  hide() { Stats.hide(); },
+};
+
+// ===================================================================
+// Sessions (#sessions): GET/POST /api/sessions, live from SSE "sessions"
+// ===================================================================
+const Sessions = (() => {
+  const SOURCES = {"env": "AFTERWORD_VOICE", "voice-tag": "<voice> tag", "voice-command": "/voice", "gui": "this GUI"};
+  let visible = false, stale = true, loadedOnce = false;
+  let data = new Map(), profiles = [];
+  const rows = new Map();     // session_id -> {tr, sig}
+  const pending = new Set();  // session ids with a POST in flight
+  const notes = new Map();    // session_id -> {text, kind}
+  let timer = null, hovering = false;
+
+  async function load() {
+    const r = await api("GET", "/api/sessions?limit=100");
+    stale = false;
+    if (!r.ok || !r.data) {
+      $("s-err").hidden = false;
+      $("s-err").replaceChildren(h("b", null, "Couldn't load sessions"), `: ${r.error || "empty response"}`);
+      if (!loadedOnce) $("s-body").replaceChildren(h("span", {class: "hint"}, "No session data."));
+      return;
+    }
+    $("s-err").hidden = true;
+    loadedOnce = true;
+    profiles = Array.isArray(r.data.profiles) ? r.data.profiles.filter(p => typeof p === "string") : [];
+    const next = new Map();
+    for (const s of Array.isArray(r.data.sessions) ? r.data.sessions : [])
+      if (s && typeof s.session_id === "string") next.set(s.session_id, s);
+    data = next;
+    MuteAll.set(r.data.muted_all);
+    renderAll();
+  }
+  function loadSoon() {
+    if (!visible) { stale = true; return; }
+    if (timer) return;                     // at most one reload per second during a burst
+    timer = setTimeout(() => { timer = null; load(); }, 1000);
+  }
+  function upsert(msg) {
+    if (!msg || typeof msg.session_id !== "string") return;
+    const prev = data.get(msg.session_id) || {};
+    const s = msg.session && typeof msg.session === "object" ? msg.session : {};
+    data.set(msg.session_id, {...prev, ...s, session_id: msg.session_id});
+    if (visible && loadedOnce) renderAll();
+  }
+
+  async function change(id, body) {
+    pending.add(id); notes.delete(id); renderAll();
+    const r = await api("POST", "/api/sessions/" + encodeURIComponent(id), body);
+    pending.delete(id);
+    if (!r.ok) notes.set(id, {text: r.error, kind: "err"});
+    else if (r.data && r.data.session && typeof r.data.session === "object") {
+      data.set(id, {...(data.get(id) || {}), ...r.data.session, session_id: id});
+      const what = "profile" in body ? (body.profile ? `voice on: ${body.profile}` : "voice off") : (body.muted ? "muted" : "unmuted");
+      notes.set(id, {text: what, kind: "ok"});
+      setTimeout(() => { const n = notes.get(id); if (n && n.text === what) { notes.delete(id); if (visible) renderAll(); } }, 3000);
+    }
+    renderAll();
+  }
+
+  function rowFor(s) {
+    const id = s.session_id;
+    const busy = pending.has(id);
+    const on = typeof s.profile === "string" && s.profile !== "";
+    const sel = h("select", {"aria-label": "voice profile", "data-k": "profile", disabled: busy,
+      title: on ? `voice on with profile ${s.profile}` : "voice off"});
+    sel.append(h("option", {value: ""}, "off"));
+    for (const p of profiles) sel.append(h("option", {value: p}, p));
+    if (on && !profiles.includes(s.profile)) sel.append(h("option", {value: s.profile}, `${s.profile} (not in config)`));
+    sel.value = on ? s.profile : "";
+    sel.addEventListener("change", () => change(id, {profile: sel.value || null}));
+    const mute = h("button", {class: "small toggle", "data-k": "mute", "aria-pressed": String(!!s.muted), disabled: busy,
+      title: s.muted ? "Muted: lines are logged but not played. Click to unmute." : "Keep the voice on but play nothing"},
+      s.muted ? "Muted" : "Mute");
+    mute.addEventListener("click", () => change(id, {muted: !s.muted}));
+    const le = s.last_event && typeof s.last_event === "object" ? s.last_event : null;
+    const n = notes.get(id);
+    const src = typeof s.source === "string" ? s.source : null;
+    const idLink = h("a", {class: "plain", href: "#log", title: `${id}\nshow this session in the log`}, shortId(id));
+    idLink.addEventListener("click", () => { $("q").value = id; render(); });
+    return h("tr", {class: [on ? "" : "off", busy ? "pending" : ""].join(" ").trim()},
+      h("td", {class: "sess"}, idLink),
+      h("td", {class: "ell", style: "max-width:180px", title: s.cwd || ""}, base(s.cwd || "") || "—"),
+      h("td", {class: "prof nowrap"}, sel),
+      h("td", {class: "nowrap"}, mute, n ? h("div", {class: "msg " + n.kind, style: "max-width:220px;white-space:normal"}, n.text) : null),
+      h("td", {class: "nowrap muted", title: src || ""}, src ? (SOURCES[src] || src) : "—"),
+      h("td", {class: "nowrap"}, relSpan(s.last_seen)),
+      h("td", {class: "num", title: `${s.events ?? 0} events logged, ${s.spoken ?? 0} spoken`}, `${isNum(s.events) ? s.events : 0} / ${isNum(s.spoken) ? s.spoken : 0}`),
+      h("td", {class: "last"}, le ? [
+        h("div", {class: "row", style: "flex-wrap:nowrap"},
+          le.status ? h("span", {class: "badge s-" + cls(le.status)}, String(le.status)) : null,
+          h("span", {class: "ell", title: le.text || ""}, le.text || "")),
+        le.reason ? h("div", {class: "reason ell", title: le.reason}, le.reason) : null,
+      ] : h("span", {class: "muted"}, "—")));
+  }
+
+  function emptyState() {
+    return h("div", {class: "empty-panel"},
+      h("div", null, h("b", null, "No sessions yet."), " Sessions appear here after their first Claude Code hook call. Voice is off by default; turn it on in any of three ways:"),
+      h("ol", {class: "steps"},
+        h("li", null, "Launch with a profile: ", h("code", null, "AFTERWORD_VOICE=nova claude")),
+        h("li", null, "Inside a running session: ", h("code", null, "/voice nova"), " (", h("code", null, "/voice off"), " to stop)"),
+        h("li", null, "Here: pick a profile in a session’s voice column once it shows up.")),
+      h("div", {class: "hint", style: "margin-top:8px"}, profiles.length ? `Profiles in config: ${profiles.join(", ")}.` : "No profiles configured yet: make one in the Voice lab."));
+  }
+
+  function renderAll() {
+    $("s-count").textContent = loadedOnce && data.size ? `${data.size} · newest activity first` : "";
+    if (!loadedOnce) return;
+    if (!data.size) { rows.clear(); $("s-body").replaceChildren(emptyState()); return; }
+    let table = $("s-table");
+    if (!table) {
+      table = h("table", {id: "s-table"},
+        h("thead", null, h("tr", null, ["session", "folder", "voice", "mute", "set by", "last seen", "events / spoken", "last line"].map(t => h("th", {class: "nowrap"}, t)))),
+        h("tbody"));
+      // Don't reshuffle rows under the pointer: newest-first order is applied when it leaves.
+      table.addEventListener("mouseenter", () => { hovering = true; });
+      table.addEventListener("mouseleave", () => { hovering = false; renderAll(); });
+      $("s-body").replaceChildren(h("div", {class: "scroll-x"}, table));
+    }
+    const tbody = table.tBodies[0];
+    const recency = (s) => s.last_seen || s.updated || 0;
+    const shown = new Map([...tbody.children].map((tr, i) => [tr, i]));
+    const pos = (s) => { const r = rows.get(s.session_id); return r && shown.has(r.tr) ? shown.get(r.tr) : -1; };
+    const list = [...data.values()].sort((a, b) => {
+      if (hovering) {
+        const pa = pos(a), pb = pos(b);
+        if (pa !== pb && (pa < 0 || pb < 0)) return pa < 0 ? -1 : 1;   // new rows on top
+        if (pa >= 0 && pb >= 0) return pa - pb;
+      }
+      return recency(b) - recency(a);
+    });
+    const focusK = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.k : null;
+    const want = [];
+    for (const s of list) {
+      const sig = JSON.stringify([s, profiles, pending.has(s.session_id), notes.get(s.session_id) || null]);
+      let r = rows.get(s.session_id);
+      if (!r || r.sig !== sig) {
+        const tr = rowFor(s);
+        const hadFocus = r && r.tr.contains(document.activeElement);
+        if (r && r.tr.parentNode) r.tr.replaceWith(tr);
+        r = {tr, sig};
+        rows.set(s.session_id, r);
+        if (hadFocus && focusK) { const f = tr.querySelector(`[data-k="${focusK}"]`); if (f && !f.disabled) f.focus(); }
+      }
+      want.push(r.tr);
+    }
+    const ids = new Set(list.map(s => s.session_id));
+    for (const [id, r] of rows) if (!ids.has(id)) { r.tr.remove(); rows.delete(id); }
+    let cur = tbody.firstChild;
+    for (const node of want) { if (node === cur) cur = cur.nextSibling; else tbody.insertBefore(node, cur); }
+  }
+
+  sse.on("sessions", upsert);
+  sse.on("event", loadSoon);
+  sse.on("open", () => { if (visible) load(); else stale = true; });
+  $("s-refresh").addEventListener("click", async () => { note("s-msg", "refreshing…", "run"); await load(); note("s-msg", ""); });
+  return {
+    show() { visible = true; if (stale || !loadedOnce) load(); else renderAll(); },
+    hide() { visible = false; },
+  };
+})();
+
+// ===================================================================
+// Queue (#queue): live from SSE "queue"
+// ===================================================================
+const Queue = (() => {
+  let snap = {now_playing: null, pending: [], max_size: null};
+  let visible = false;
+  // The contract has no start time for the current line, so elapsed is
+  // counted from when this page first saw it at the head of the queue
+  // (or from now_playing.started_at, if the daemon ever sends one).
+  const seen = new Map();   // event_id -> first time seen as now_playing (s)
+  let tick = null;
+
+  function update(q) {
+    if (!q || typeof q !== "object") return;
+    snap = {now_playing: q.now_playing && typeof q.now_playing === "object" ? q.now_playing : null,
+            pending: Array.isArray(q.pending) ? q.pending : [], max_size: q.max_size};
+    const np = snap.now_playing;
+    if (np && !seen.has(np.event_id)) seen.set(np.event_id, Date.now() / 1000);
+    for (const id of [...seen.keys()]) if (!np || id !== np.event_id) seen.delete(id);
+    if (visible) renderAll();
+  }
+  function startedAt(np) { return isNum(np.started_at) ? np.started_at : seen.get(np.event_id); }
+  function elapsedText(np) {
+    const t0 = startedAt(np);
+    return isNum(t0) ? fmtDur(Math.max(0, Date.now() / 1000 - t0)) : "—";
+  }
+  const sess = (sid) => h("span", {class: "mono", title: sid || ""}, shortId(sid));
+  const evStatus = (id) => { const e = events.get(id); return e && e.status ? e.status : null; };
+
+  async function remove(id, btn) {
+    if (!Number.isInteger(Number(id))) return;
+    btn.disabled = true;
+    const r = await api("POST", `/api/queue/remove/${encodeURIComponent(String(Number(id)))}`);
+    if (!r.ok) {
+      btn.disabled = false;
+      flashNote("q-msg", r.status === 404 ? `#${id} is no longer pending.` : `Remove failed: ${r.error}`, "err");
+    } else flashNote("q-msg", `Removed #${id}.`, "ok", 3000);
+    // The SSE "queue" event normally follows; re-read in case it doesn't.
+    const q = await api("GET", "/api/queue");
+    if (q.ok && q.data) showQueue(q.data);
+  }
+
+  function renderAll() {
+    const np = snap.now_playing;
+    if (!np) $("q-now").replaceChildren(h("span", {class: "hint"}, "Nothing playing."));
+    else {
+      const st = evStatus(np.event_id);
+      $("q-now").replaceChildren(
+        h("div", {class: "np-text"}, np.text || ""),
+        h("div", {class: "kv", style: "align-items:center"},
+          h("span", null, "profile ", h("b", null, np.profile || "default")),
+          h("span", null, "session ", h("b", {title: np.session_id || ""}, shortId(np.session_id))),
+          h("span", null, "event ", h("b", null, "#" + np.event_id)),
+          st ? h("span", null, "status ", h("span", {class: "badge s-" + cls(st)}, st)) : null,
+          h("span", {title: "since this page saw it start"}, "elapsed ", h("b", {id: "q-elapsed"}, elapsedText(np))),
+          h("span", null, "queued ", relSpan(np.enqueued_at))));
+    }
+    $("q-skip").disabled = !np;
+    const p = snap.pending;
+    $("q-count").textContent = `${p.length}${isNum(snap.max_size) ? " / " + snap.max_size : ""} waiting · plays top to bottom`;
+    if (!p.length) { $("q-pending").replaceChildren(h("span", {class: "hint"}, "Queue is empty.")); }
+    else {
+      $("q-pending").replaceChildren(h("table", {id: "q-table"},
+        h("thead", null, h("tr", null, ["#", "text", "profile", "session", "waiting", ""].map(t => h("th", null, t)))),
+        h("tbody", null, p.map((it, i) => {
+          const btn = h("button", {class: "small danger", title: `Drop #${it.event_id} from the queue`}, "Remove");
+          btn.addEventListener("click", () => remove(it.event_id, btn));
+          return h("tr", null,
+            h("td", {class: "t", title: `event #${it.event_id}`}, String(i + 1)),
+            h("td", {class: "text"}, it.text || ""),
+            h("td", {class: "ell", style: "max-width:160px", title: it.profile || "default"}, it.profile || "default"),
+            h("td", {class: "nowrap"}, sess(it.session_id)),
+            h("td", {class: "nowrap muted"}, relSpan(it.enqueued_at)),
+            h("td", {class: "nowrap"}, btn));
+        }))));
+    }
+    $("q-stop").disabled = !np && !p.length;
+  }
+
+  $("q-skip").addEventListener("click", () => queueAction("/api/queue/skip", "Skip", "q-msg"));
+  $("q-stop").addEventListener("click", () => queueAction("/api/queue/stop", "Stop all", "q-msg"));
+  // Status of the head item (synthesizing -> playing) comes from event rows.
+  sse.on("event", (e) => { if (visible && snap.now_playing && e.id === snap.now_playing.event_id) renderAll(); });
+  return {
+    update,
+    show() {
+      visible = true; renderAll();
+      api("GET", "/api/queue").then(r => { if (r.ok && r.data) showQueue(r.data); });
+      if (!tick) tick = setInterval(() => {
+        const el = $("q-elapsed");
+        if (visible && el && snap.now_playing) el.textContent = elapsedText(snap.now_playing);
+      }, 500);
+    },
+    hide() { visible = false; },
+  };
+})();
+
+// ===================================================================
+// History (#history): GET /api/history, newest first, "load more" via before
+// ===================================================================
+const History = (() => {
+  const PAGE = 50;
+  let visible = false, stale = true, loading = false, more = false, loadedOnce = false;
+  const items = new Map();   // id -> {data, node, audio}
+  let timer = null;
+
+  const fetchPage = (before) => {
+    const q = new URLSearchParams({limit: String(PAGE)});
+    if (before != null) q.set("before", String(before));
+    return api("GET", "/api/history?" + q);
+  };
+  function itemNode(d) {
+    const id = Number(d.id);
+    const src = clipUrl(d.url, id, false), dl = clipUrl(d.download_url, id, true);
+    const audio = h("audio", {controls: true, preload: "none"});
+    const r = Number(d.playback_rate);
+    applyRate(audio, Number.isFinite(r) && r >= 0.25 && r <= 4 ? r : 1);
+    if (src) audio.src = src;
+    const node = h("div", {class: "hitem"},
+      h("div", {class: "ctl"}, audio,
+        dl ? h("a", {class: "btn", href: dl, download: `afterword-${id}.wav`, title: "Download the WAV"}, "Download") : null),
+      h("div", {style: "min-width:0"},
+        h("div", {class: "txt"}, d.text || ""),
+        h("div", {class: "kv", style: "margin-top:3px"},
+          h("span", null, relSpan(d.ts, {title: fmtDateTime(d.ts)}), " · ", fmtDateTime(d.ts)),
+          h("span", null, "profile ", h("b", null, d.profile || "default")),
+          h("span", {title: `${d.session_id || ""}\n${d.cwd || ""}`}, "session ", h("b", null, shortId(d.session_id)),
+            d.cwd ? " " + base(d.cwd) : ""),
+          h("span", null, "audio ", h("b", null, isNum(d.audio_s) ? d.audio_s.toFixed(1) + " s" : "—")),
+          replayRate({playback_rate: d.playback_rate}) != null ? h("span", {title: "played at this pace; replays match it"}, "pace ", h("b", null, Number(d.playback_rate).toFixed(2) + "×")) : null,
+          d.synth_backend ? h("span", null, "synth ", h("b", null, d.synth_backend)) : null,
+          h("span", null, "#" + id))));
+    audio.addEventListener("play", () => node.classList.add("playing"));
+    for (const ev of ["pause", "ended"]) audio.addEventListener(ev, () => node.classList.remove("playing"));
+    return {data: d, node, audio};
+  }
+  function merge(list, {prune = false} = {}) {
+    const fresh = list.filter(d => d && Number.isInteger(Number(d.id)));
+    const ids = new Set(fresh.map(d => Number(d.id)));
+    if (prune) {
+      // A fresh newest page replaces the list: anything older may have had its
+      // audio pruned by the daemon, and "Load more" pages the rest back in.
+      // A clip that is playing stays until it ends.
+      for (const [id, it] of items) if (!ids.has(id) && !audioInUse(it.audio)) { it.node.remove(); items.delete(id); }
+    }
+    for (const d of fresh) if (!items.has(Number(d.id))) items.set(Number(d.id), itemNode(d));
+    paint();
+  }
+  function paint() {
+    const box = $("h-list");
+    const order = [...items.keys()].sort((a, b) => b - a).map(id => items.get(id).node);
+    if (!order.length) {
+      box.replaceChildren(h("span", {class: "hint"}, "No clips kept yet. Spoken lines appear here while their audio is on disk (the newest 50 by default)."));
+    } else {
+      for (const c of [...box.children]) if (!c.classList.contains("hitem")) c.remove();
+      let cur = box.firstChild;
+      for (const node of order) { if (node === cur) cur = cur.nextSibling; else box.insertBefore(node, cur); }
+    }
+    $("h-count").textContent = order.length ? `${order.length} clip${order.length === 1 ? "" : "s"} · newest first` : "";
+    $("h-more").hidden = !more;
+    $("h-end").textContent = loadedOnce && !more && order.length ? "End of kept clips." : "";
+  }
+  async function loadNewest() {
+    if (loading) return;
+    loading = true;
+    const r = await fetchPage(null);
+    loading = false; stale = false;
+    if (!r.ok || !r.data) {
+      $("h-err").hidden = false;
+      $("h-err").replaceChildren(h("b", null, "Couldn't load history"), `: ${r.error || "empty response"}`);
+      if (!loadedOnce) $("h-list").replaceChildren(h("span", {class: "hint"}, "No history data."));
+      return;
+    }
+    $("h-err").hidden = true;
+    const list = Array.isArray(r.data.items) ? r.data.items : [];
+    more = list.length >= PAGE;
+    loadedOnce = true;
+    merge(list, {prune: true});
+  }
+  async function loadMore() {
+    if (loading || !items.size) return;
+    loading = true;
+    $("h-more").disabled = true;
+    const r = await fetchPage(Math.min(...items.keys()));
+    loading = false;
+    $("h-more").disabled = false;
+    if (!r.ok || !r.data) return flashNote("h-msg", `Load more failed: ${r.error}`, "err");
+    const list = Array.isArray(r.data.items) ? r.data.items : [];
+    more = list.length >= PAGE;
+    merge(list);
+  }
+  async function fullRefresh() {
+    for (const it of items.values()) { it.audio.pause(); it.node.remove(); }
+    items.clear(); loadedOnce = false; more = false;
+    $("h-list").replaceChildren(h("span", {class: "hint"}, "Loading…"));
+    await loadNewest();
+  }
+  $("h-more").addEventListener("click", loadMore);
+  $("h-refresh").addEventListener("click", fullRefresh);
+  sse.on("event", (e) => {
+    if (e.status !== "spoken") return;
+    if (!visible) { stale = true; return; }
+    clearTimeout(timer); timer = setTimeout(loadNewest, 1200);
+  });
+  sse.on("open", () => { stale = true; if (visible) loadNewest(); });
+  return {
+    show() { visible = true; if (stale || !loadedOnce) loadNewest(); },
+    hide() { visible = false; },
+  };
+})();
 
 connect();
 setInterval(loadStatus, 10000);
 
 // ===================================================================
-// Voice lab (#lab). Everything below is scoped; it shares only $ and esc.
+// Voice lab (#lab). Scoped; it shares $, esc, h, api and note with the other pages.
 // All server/user strings go into the DOM via textContent (see h()).
 // ===================================================================
 const Lab = (() => {
@@ -543,50 +1310,14 @@ const Lab = (() => {
   const sig = {};           // last-rendered JSON per section, to avoid needless re-renders
   const results = new Map();// preview id -> response
 
-  // ---------- helpers ----------
-  function h(tag, props, ...kids) {
-    const el = document.createElement(tag);
-    if (props) for (const [k, v] of Object.entries(props)) {
-      if (v == null || v === false) continue;
-      if (k === "class") el.className = v;
-      else if (k === "text") el.textContent = String(v);
-      else if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
-      else if (typeof v === "boolean") el[k] = v;
-      else el.setAttribute(k, String(v));
-    }
-    for (const c of kids.flat(Infinity)) if (c != null && c !== false) el.append(c instanceof Node ? c : String(c));
-    return el;
-  }
+  // ---------- helpers (h, api and note are shared, defined above) ----------
   const cap = (s) => { s = String(s ?? ""); return s ? s[0].toUpperCase() + s.slice(1) : s; };
   const num = (v, d = 0) => (v == null || v === "" || isNaN(Number(v))) ? null : Number(v).toFixed(d);
   const clampPace = (p) => Math.min(2, Math.max(0.5, Number(p) || 1));
-  function note(id, text, kind = "info") { const el = typeof id === "string" ? $(id) : id; el.className = "msg " + kind; el.textContent = text || ""; }
   const sameJSON = (key, val) => { const s = JSON.stringify(val ?? null); if (sig[key] === s) return true; sig[key] = s; return false; };
   const radios = () => [...document.querySelectorAll('input[name="b-src"]')];
   const srcValue = () => (radios().find(r => r.checked) || {}).value || "builtin";
 
-  async function api(method, path, body, opt = {}) {
-    const init = {method, headers: {}};
-    if (method !== "GET" && method !== "HEAD") init.headers["X-AfterWord"] = "1";
-    if (opt.raw !== undefined) { init.body = opt.raw; init.headers["Content-Type"] = opt.type || "application/octet-stream"; }
-    else if (body !== undefined) { init.body = JSON.stringify(body); init.headers["Content-Type"] = "application/json"; }
-    let r;
-    try { r = await fetch(path, init); }
-    catch (e) { return {ok: false, status: 0, data: null, error: "Daemon unreachable."}; }
-    let data = null, raw = "";
-    try { raw = await r.text(); } catch { /* body unreadable */ }
-    try { data = raw ? JSON.parse(raw) : null; } catch { /* non-JSON body */ }
-    if (r.ok) return {ok: true, status: r.status, data};
-    // Lab errors are {"error": "..."} (e.g. 500 "render failed: ..."); fall back to
-    // FastAPI-style "detail", then to a plain-text body, then to the status code.
-    let msg = data && typeof data === "object" ? (data.error || data.detail) : null;
-    if (msg && typeof msg !== "string") msg = JSON.stringify(msg);
-    if (!msg && raw && !data && !/^\s*</.test(raw)) msg = raw.trim().slice(0, 300);
-    if (!msg) msg = `HTTP ${r.status}`;
-    else if (r.status >= 500 && r.status !== 503) msg = `${msg} (HTTP ${r.status})`;
-    if (r.status === 429) msg = `Engine busy, try again in a moment. (${msg})`;
-    return {ok: false, status: r.status, data, error: msg};
-  }
 
   async function withBusy(msgId, label, fn) {
     if (busy) { note(msgId, "Another render is running; wait for it to finish.", "err"); return undefined; }
@@ -1240,8 +1971,8 @@ const Lab = (() => {
   }
 
   // ---------- engine strip ----------
-  function renderEngine(eng, fetchErr) {
-    const box = $("engine");
+  // box/afterWarm let the Config page reuse this strip in its own element.
+  function renderEngine(eng, fetchErr, box = $("engine"), afterWarm = null) {
     if (fetchErr) {
       box.replaceChildren(h("div", {class: "banner"}, h("b", null, "Voice lab API unavailable"), ` (${fetchErr}). `,
         "The daemon may be an older version without the lab endpoints, or not running."));
@@ -1271,7 +2002,7 @@ const Lab = (() => {
       else state = h("span", {class: "badge idle"}, "on disk");
       const btn = h("button", {class: "small", disabled: !m.downloaded || m.loaded || eng.available === false,
         title: m.loaded ? "Already in memory" : "Load it now so the next render is fast"}, m.loaded ? "Loaded" : "Warm");
-      btn.addEventListener("click", () => warm(key, btn, msg));
+      btn.addEventListener("click", () => warm(key, btn, msg, afterWarm));
       kids.push(h("div", {class: "model", title: m.repo || ""},
         h("div", {class: "nm"}, info.label, h("span", {class: "muted", style: "font-weight:400"}, info.use), h("span", {class: "grow"}), btn),
         h("div", {class: "st"}, state, m.load_ms != null ? `  load ${(m.load_ms / 1000).toFixed(1)} s` : "",
@@ -1283,13 +2014,14 @@ const Lab = (() => {
       `${missing.join(", ")} not downloaded: renders that need ${missing.length > 1 ? "them" : "it"} return 503. Download with `, h("code", null, pull), "."));
     box.replaceChildren(...kids);
   }
-  async function warm(model, btn, msg) {
+  async function warm(model, btn, msg, afterWarm = null) {
     btn.disabled = true;
     const t0 = performance.now();
     const iv = setInterval(() => note(msg, `warming… ${((performance.now() - t0) / 1000).toFixed(1)} s`, "run"), 100);
     const r = await api("POST", "/api/lab/warm", {model});
     clearInterval(iv);
     if (!r.ok) { note(msg, r.error, "err"); btn.disabled = false; return; }
+    if (afterWarm) { afterWarm(r.data); return; }
     if (cat && r.data) { cat.engine = r.data; renderEngine(cat.engine); syncSource(); }
     await refresh();
   }
@@ -1395,21 +2127,101 @@ const Lab = (() => {
 
   return {
     show() { visible = true; if (!started) { started = true; init(); } refresh(); },
+    engineStrip(box, eng, afterWarm) { renderEngine(eng, null, box, afterWarm); },
     hide() { visible = false; },
   };
 })();
 
+// ===================================================================
+// Config (#config): GET /api/config, POST /api/config/reload
+// ===================================================================
+const Config = (() => {
+  let visible = false, timer = null, loading = false;
+  let textSig = null, metaSig = null, engSig = null;
+
+  function renderCfg(d) {
+    const err = typeof d.error === "string" && d.error ? d.error : null;
+    $("c-err").hidden = !err;
+    if (err) $("c-err").replaceChildren(h("b", null, "config.toml has an error"), " — the daemon keeps using the last good config: ",
+      h("span", {class: "mono"}, err));
+    const warnings = Array.isArray(d.warnings) ? d.warnings.map(String) : [];
+    const mSig = JSON.stringify([d.path, d.loaded_at, d.synth, d.configured_synth, warnings]);
+    if (mSig !== metaSig) {
+      metaSig = mSig;
+      const differ = d.synth != null && d.configured_synth != null && d.synth !== d.configured_synth;
+      $("c-meta").replaceChildren(
+        h("span", {class: "lbl"}, "path"), h("span", null, h("code", null, d.path || "—")),
+        h("span", {class: "lbl"}, "loaded"), h("span", null, fmtDateTime(d.loaded_at), " (", relSpan(d.loaded_at), ")"),
+        h("span", {class: "lbl"}, "synth"), h("span", null,
+          h("b", null, d.synth || "—"), " in use",
+          differ ? h("span", {class: "warn"}, ` · config asks for “${d.configured_synth}” (not available, so falling back)`)
+                 : h("span", {class: "muted"}, ` · configured: ${d.configured_synth || "—"}`)),
+        h("span", {class: "lbl"}, "warnings"),
+        warnings.length ? h("ul", {class: "warnings"}, warnings.map(w => h("li", null, w))) : h("span", {class: "muted"}, "none"));
+    }
+    const eSig = JSON.stringify(d.engine ?? null);
+    if (eSig !== engSig) {
+      engSig = eSig;
+      if (d.engine && typeof d.engine === "object") Lab.engineStrip($("c-engine"), d.engine, () => load());
+      else $("c-engine").replaceChildren(h("span", {class: "hint"}, "No engine status in the response."));
+    }
+    const text = typeof d.text === "string" ? d.text : "";
+    if (text !== textSig) {
+      textSig = text;
+      const [gut, src] = $("c-toml").children;
+      if (!text) {
+        gut.textContent = ""; src.textContent = "";
+        src.append(h("span", {class: "muted"}, "(file is empty or missing: built-in defaults are in use)"));
+        $("c-lines").textContent = "";
+      } else {
+        const lines = text.replace(/\n$/, "").split("\n");
+        gut.textContent = lines.map((_, i) => i + 1).join("\n");
+        src.textContent = lines.join("\n");
+        $("c-lines").textContent = `${lines.length} line${lines.length === 1 ? "" : "s"}`;
+      }
+    }
+  }
+  async function load(reload = false) {
+    if (loading) return;
+    loading = true;
+    if (reload) { $("c-reload").disabled = true; note("c-msg", "reloading…", "run"); }
+    const r = reload ? await api("POST", "/api/config/reload") : await api("GET", "/api/config");
+    loading = false;
+    $("c-reload").disabled = false;
+    if (!r.ok || !r.data) {
+      if (reload) flashNote("c-msg", `Reload failed: ${r.error || "empty response"}`, "err", 8000);
+      else note("c-msg", `config unavailable: ${r.error || "empty response"}`, "err");
+      return;
+    }
+    if (reload) flashNote("c-msg", r.data.error ? "Reloaded: the file has an error (see above)." : "Reloaded.", r.data.error ? "err" : "ok", 4000);
+    else if ($("c-msg").classList.contains("err")) note("c-msg", "");
+    renderCfg(r.data);
+  }
+  $("c-reload").addEventListener("click", () => load(true));
+  return {
+    show() {
+      visible = true; load();
+      // Pick up hot reloads while the page is open (unchanged text is not re-rendered).
+      if (!timer) timer = setInterval(() => { if (visible && document.visibilityState === "visible") load(); }, 10000);
+    },
+    hide() { visible = false; },
+  };
+})();
+
+const PAGES = {log: LogPage, sessions: Sessions, queue: Queue, history: History, lab: Lab, config: Config};
+const TITLES = {log: "log", sessions: "sessions", queue: "queue", history: "history", lab: "voice lab", config: "config"};
 function route() {
-  const tab = location.hash === "#lab" ? "lab" : "log";
-  $("view-log").hidden = tab !== "log";
-  $("view-lab").hidden = tab !== "lab";
-  document.body.classList.toggle("lab", tab === "lab");
-  for (const t of ["log", "lab"]) {
+  const name = location.hash.replace(/^#/, "");
+  const tab = Object.hasOwn(PAGES, name) ? name : "log";
+  for (const t of Object.keys(PAGES)) {
+    $("view-" + t).hidden = t !== tab;
+    document.body.classList.toggle("tab-" + t, t === tab);
     $("tab-" + t).classList.toggle("on", t === tab);
     if (t === tab) $("tab-" + t).setAttribute("aria-current", "page"); else $("tab-" + t).removeAttribute("aria-current");
   }
-  document.title = tab === "lab" ? "AfterWord · voice lab" : "AfterWord · log";
-  if (tab === "lab") Lab.show(); else Lab.hide();
+  document.title = "AfterWord · " + TITLES[tab];
+  for (const [t, page] of Object.entries(PAGES)) if (t !== tab) page.hide();
+  PAGES[tab].show();
 }
 window.addEventListener("hashchange", route);
 route();
