@@ -1,0 +1,18 @@
+{
+  "name": "afterword",
+  "description": "Spoken replies for Codex with local Qwen3-TTS: off by default, per-session voices, triggered only by a <say> tag.",
+  "author": {"name": "Tony Yan"},
+  "homepage": "https://github.com/TonyXTYan/AfterWord",
+  "repository": "https://github.com/TonyXTYan/AfterWord",
+  "license": "MIT",
+  "keywords": ["tts", "voice", "speech", "qwen3-tts", "accessibility"],
+  "hooks": "./hooks/codex-hooks.json",
+  "interface": {
+    "displayName": "AfterWord",
+    "shortDescription": "Speak <say> lines aloud with a local voice",
+    "longDescription": "Speaks the <say> lines in Codex replies with local Qwen3-TTS voices, one voice per session, off until you turn it on. Needs the AfterWord daemon (uv run afterword serve).",
+    "developerName": "Tony Yan",
+    "category": "Productivity",
+    "capabilities": ["Interactive"]
+  }
+}

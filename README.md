@@ -1,25 +1,36 @@
 # AfterWord
 
-Spoken replies for Claude Code, with local Qwen3-TTS on Apple Silicon.
+Spoken replies for Claude Code (and Codex), with local Qwen3-TTS on Apple Silicon.
 Speech is **off by default**, **set per session**, and **triggered only by a tag**
-in Claude's reply. See [DESIGN.md](DESIGN.md).
+in Claude's reply. See [DESIGN.md](DESIGN.md) (v1) and
+[docs/design-v2.md](docs/design-v2.md) (pronunciations, a voice per language,
+streaming and early speaking, spoken alerts, the seed explorer).
 
 ![AfterWord demo: a spoken reply, the live log, sessions, the voice lab, history and config](docs/demo.gif)
 
 Status: the v1 build order is done: tag parser, hooks (`SessionStart`,
-`UserPromptSubmit`, `Stop`) with a `say` fallback, the daemon (queue, event log,
+`UserPromptSubmit`, `Stop`, `MessageDisplay` for early speaking, and
+`PermissionRequest` / `Notification` for spoken alerts) with a `say` fallback, the daemon (queue, event log,
 Qwen3-TTS through mlx-audio), the voice command, the Claude Code plugin, and the GUI
-(log, sessions, queue, history, voice lab, config). Not built: the optional
+(log, sessions, queue, history, voice lab, config). The v2 features of
+[docs/design-v2.md](docs/design-v2.md) are built too: pronunciations, a voice
+per language with several `<say>` blocks per reply, streaming playback and
+early speaking, spoken alerts, and the seed explorer. Not built: the optional
 menu-bar icon.
 
 ## How it works
 
-While a session's voice is on, a `UserPromptSubmit` hook adds about 40 tokens
-to each prompt asking Claude to end its reply with a spoken summary:
+While a session's voice is on, a `UserPromptSubmit` hook adds about 45 tokens
+to each prompt asking Claude for a spoken summary at the end of its reply (or
+at the start, where it will be heard sooner):
 
 ```
 <say mood="dry" lang="en" pace="1.1">one or two sentences</say>
 ```
+
+A reply can carry up to four `<say>` blocks; they are spoken in order, one
+after another (extra ones are dropped). Each is cut to the profile's
+`max_chars`, and all of them together to twice that.
 
 With the voice off (the default) the hook adds nothing, so it costs zero tokens.
 The `Stop` hook reads the reply and sends the `<say>` text to the daemon over
@@ -35,10 +46,14 @@ Turn the voice on for a session:
 - mid-session: `/afterword:voice nova` with the plugin, or `/afterword-voice nova`
   with `install-hooks` (not bare `/voice`: that is Claude Code's own dictation
   command). Also `off`, `on` (the last profile), `mute`, `unmute`, and no
-  argument for the current state;
+  argument for the current state. In Codex, type it without the slash:
+  `afterword:voice nova` (Codex rejects slash commands it doesn't know);
 - in the GUI's Sessions page.
 
 Claude can also switch it with a `<voice set="nova"/>` tag (`set="off"` to stop).
+The tag counts wherever it appears in the turn, also in a message written
+before a tool call; `<say>` blocks in that same message are not spoken
+if the voice was off until then.
 
 ## Run it
 
@@ -87,7 +102,192 @@ say_voice = "Samantha"       # macOS voice used if Qwen3-TTS is unavailable
 | `design:<description>` | VoiceDesign | a voice described in words; can drift between lines, so freeze one into a clip for a stable voice |
 | `say:<MacVoice>` | macOS `say` | no model needed |
 
-One voice is used for every language, so the accent stays the same.
+One voice speaks every language, so the accent stays the same, unless you
+give a language a voice of its own:
+
+```toml
+[profiles.tutor]
+voice = "clone:tutor-en"
+lang = "en"                  # the primary language
+say_voice = "Daniel"
+
+[profiles.tutor.langs.zh]    # any of: voice, ref_text, style, pace, say_voice, seed
+voice = "clone:tutor-zh"
+say_voice = "Tingting"
+```
+
+A field left out comes from the profile (except `ref_text`, which a language
+with its own `voice` does not take from the profile, and `say_voice` for
+Chinese, Japanese and Korean: an English `say` voice reads those as silence,
+so they get the language's `say:` voice, else Tingting, Kyoko or Yuna).
+Language keys are ISO codes (`zh`, `ja`, …) or names (`chinese`). The tables
+can also be written inline (`langs = { zh = { voice = "…" } }`). For such a
+profile:
+
+- a `<say lang="zh">` block is spoken with the `zh` voice;
+- a `<say>` without `lang` is split by script and each part gets its voice:
+  Chinese characters → `zh`, kana → `ja`, Hangul → `ko`, the rest → the
+  primary language. The line is cut only at sentence or clause boundaries,
+  and a clause that mixes scripts goes to whichever has more (Chinese
+  characters against English words). So
+  `Not quite. 别急嘛，用 Python 再试一次。 Try again.` is spoken as English,
+  Chinese (`Python` included), English, while `The word 你好 means hello.`
+  stays one English line (use `<say lang="zh">你好</say>` to hear the word
+  in the Chinese voice) and `Next word: 苹果, which means apple.` is English,
+  Chinese, English;
+- the prompt note lists the languages
+  (`Add <say lang="en|zh">…</say>, one per language if you like`);
+- with the daemon down, the hook's `say` fallback speaks each part with its
+  language's `say_voice`.
+
+In the voice lab, the profile editor's "Voice per language" rows add, change
+and remove these tables; ▶ on a row plays that language's sample sentence
+with its voice.
+
+### Playback: streaming
+
+A line starts playing while it is still being rendered: the Qwen3-TTS model
+streams about one second of audio at a time, and with a warm model the first
+sound comes about a quarter of a second after rendering starts, instead of
+after the whole line. Audio goes straight to the default output device
+(through PortAudio, which comes with mlx-audio); pace is applied on the way
+with a time-stretch that keeps the pitch. Skip and stop cut the sound at once
+and stop the render. Lines rendered with macOS `say` (a `say:` voice, or the
+fallback when Qwen3-TTS fails) are played through the same stream.
+
+Live speech always goes before voice lab work (previews and the lab's
+model warm-ups), so a long lab session never delays a reply by more than the
+lab render or model load already running; the seed explorer's renders are
+stopped at once (within about a quarter of a second) and resumed once the
+daemon has finished speaking.
+
+If the audio device cannot be opened, or PortAudio is not installed, the
+daemon renders each whole line first (each part of a line with several
+voices, joined into one clip) and plays it with `afplay`, as before,
+and says why once in `afterwordd.log`. `[daemon] stream = false` chooses that
+way on purpose. Either way the line is kept in History. If the device stops
+working part-way through a line (headphones unplugged), the render stops too,
+the line is marked as an error with the part that was heard, and the next
+line tries the device again.
+
+### Early speaking
+
+A `<say>` is spoken as soon as Claude has written it, not only when the whole
+reply is finished. A `MessageDisplay` hook sees the reply as it reaches the
+screen (a few lines at a time in the terminal; in `claude -p` each message
+once it is complete, which is still before a tool it calls runs), and sends
+every newly closed `<say>` block to the daemon at once. So a line Claude
+writes first ("Running the tests now.") plays while the tests run, and when
+the reply ends, the `Stop` hook speaks only the blocks not already heard
+(the Log shows `Stop` as skipped, `spoken early`, when nothing was left).
+Lines of one reply play one after another; a new prompt still replaces lines
+of the previous one that are waiting.
+
+Blocks inside code are still ignored: a block is spoken only once it can no
+longer turn out to be inside a code span or an HTML comment, or nested in
+another `<say>` (so an unclosed `<!--` or a stray `<say>` earlier in the
+message holds the rest of it back until the message is complete). Early
+speaking does nothing while a session's voice is off (the hook exits after
+reading the session state), or when the daemon is down (then `Stop` speaks
+the line, or falls back to `say`, as before). Once a `<voice>` tag has
+appeared in a message, the rest of that message is left to `Stop`; a block
+written *before* the tag may already have been spoken with the old voice
+(say `<voice set="off"/>` first if you ask Claude to go quiet).
+`[daemon] early_say = false` turns it off.
+
+Claude only writes text before a tool call when asked to; the prompt note
+says "open with it to be heard sooner", and Haiku does not always follow it.
+
+### Pronunciations
+
+Words the voice gets wrong can be rewritten before they are spoken, in
+`config.toml` or from the Config page of the GUI (add, edit, delete, and ▶ to
+hear an entry):
+
+```toml
+[pronounce]                 # every line
+"SQLite" = "sequel lite"
+"kubectl" = "cube control"
+"uv" = "you vee"
+"__init__" = "dunder init"
+
+[profiles.tutor.pronounce]  # this profile only; overrides global entries
+"GIF" = "jif"
+```
+
+The longest match wins and replacements are never matched again. A key that
+begins or ends with a letter or digit only matches whole words, so `uv` leaves
+`uvicorn` alone (Chinese, Japanese and Korean characters count as word
+breaks: `用uv安装` still matches). Only an edge that is a letter or digit is
+guarded: `C++` must start a word (it skips `ABC++`) but may be followed by
+anything (`C++17`), while keys that begin and end with punctuation or CJK
+characters, such as `->` or `张三`, match anywhere. An all-lowercase key
+ignores case; a key with a capital letter matches exactly. Quote keys that are
+not plain letters, digits, `_` or `-`. The log keeps what Claude wrote and
+shows what was spoken ("spoken as: …"). The list also applies to voice lab
+previews (tick "skip pronunciations" to hear the text as typed; after you Load
+a profile into the builder, its own entries apply too) and to the `say`
+fallback when the daemon is down.
+
+An entry the daemon cannot use (not a string, too long, past 500 entries) is
+listed as a warning on the Config page and left in `config.toml` untouched
+when you save from the GUI, so you can fix it by hand.
+
+### Spoken alerts
+
+Off by default. When on, AfterWord says a short line when Claude needs you,
+even in a session whose voice is off (that is the point), but never in a
+muted session or while everything is muted:
+
+```toml
+[alerts]
+enabled = true
+profile = ""                 # "" = the session's profile if its voice is on, else the first profile
+events = ["permission", "input", "done"]   # also "idle"
+done_after_s = 60            # "done": a turn this long finished with nothing spoken
+permission_when = "away"     # "away" = after Claude Code's ~6 s prompt timer; "now" = immediately
+```
+
+- **permission**: Claude asks to use a tool. With `"away"` the line comes
+  when Claude Code's own "waiting for permission" notification fires (about
+  6 s without a keystroke), so a prompt you answer at once stays quiet; with
+  `"now"` it comes at once. The line can name what is waiting: "shop-api
+  needs your OK to remove node_modules directory." (the tool's description,
+  or the tool and the first words of its input). Claude Code does not say
+  which request a notification is about, so the line names the action only
+  when it can tell (the notification names the tool, the request was not
+  made together with another one for the same tool, and Claude has not
+  written anything since); otherwise it just says the project needs your OK.
+- **input**: a question or form is waiting (`elicitation_dialog`,
+  `elicitation_url_dialog`, `agent_needs_input`).
+- **idle**: Claude finished about a minute ago and you have not typed.
+- **done**: a turn that took at least `done_after_s` finished and nothing was
+  spoken for it. Phrases with `{minutes}` are used only for turns of a minute
+  or more.
+
+Alerts wait in the same queue as speech but never replace a line; a newer
+alert of a session replaces its older waiting one, and an alert that waited
+more than 30 s is dropped. They are logged as `alert` rows and left out of the
+timing stats. With the daemon down, the hook says a fixed phrase with `say`
+(unless `fallback = "none"`).
+
+Phrases are picked at random (never one of the last three for that event)
+from pools per language in `~/.afterword/alerts.json`; English and Chinese
+ones are built in, and the pool matching the speaking profile's language is
+used (English if there is none). Placeholders: `{project}` (the folder name),
+`{action}` and `{tool}` (permission), `{minutes}` (done). Edit them on the
+Config page (one phrase per line, ▶ hear one), or let Claude write some in the
+profile's language and style:
+
+```bash
+uv run afterword alerts generate --profile nova --count 12
+```
+
+This runs `claude -p --model haiku` once (about 20 s) and merges the checked
+phrases into `alerts.json`; the Config page's "Generate phrases" button does
+the same. Give a profile a character for it with `persona = "a dry-witted
+butler"` in its `[profiles.<name>]` table (used only here).
+`uv run afterword alerts show` lists the pools in use.
 
 ### Voice lab
 
@@ -98,6 +298,23 @@ A/B; save the settings as a profile (written into `config.toml`, keeping your
 comments); and manage clone clips (upload a file or record from the
 microphone). To get a stable designed voice, design it, then "Freeze as clip"
 and use `clone:<name>`.
+
+**Explore seeds.** The same description gives a different voice with every
+seed, so the lab can render seed after seed for you: set up the voice in the
+builder, type a line, press Start in "Explore seeds", and listen through the
+takes with the keyboard (`space` play, `j`/`k` next/previous, `s` star, `x`
+drop; with auto-advance on, the next take plays when one ends). The daemon
+keeps a few takes ready ahead of the one you are on, shows each take's pitch
+(median and range, so you can filter for lower or higher voices), pauses
+after 10 minutes without you moving on and stops after 500 takes. Live
+speech still goes first: a reply that comes in stops the take being rendered,
+and the explorer waits until the reply has been said before it picks that
+take up again. With a pitch filter set, takes outside it are skipped and the
+explorer keeps rendering until one fits. Starred takes are kept across
+daemon restarts. "Stability check" renders a star's voice and seed on three
+other sentences (one in another language) and shows how far the pitch drifts;
+"Freeze & save" turns the star into a clip and saves a profile that clones it
+with the take's language, pace and seed.
 
 Clone clips must be your own voice or a voice used with the speaker's consent;
 the lab asks you to confirm this for every upload or recording.
@@ -115,7 +332,7 @@ claude plugin marketplace add TonyXTYan/AfterWord
 claude plugin install afterword@afterword
 ```
 
-The plugin brings the three hooks and `/afterword:voice`. Its hooks run with
+The plugin brings the six hooks and `/afterword:voice`. Its hooks run with
 whatever `python3` is on your PATH (3.9 or newer; they use only the standard
 library), so they work even before the daemon is installed: lines are then
 spoken with `say`. Try it from a clone without installing:
@@ -124,7 +341,7 @@ spoken with `say`. Try it from a clone without installing:
 claude --plugin-dir /path/to/AfterWord
 ```
 
-**Or with settings.json.** `install-hooks` writes the same three hooks into a
+**Or with settings.json.** `install-hooks` writes the same six hooks into a
 settings file and an `/afterword-voice` command next to it (not for
 `--scope local`). Preview the change first;
 `--scope user` (default) edits `~/.claude/settings.json`, and `project` and
@@ -144,10 +361,41 @@ Use one or the other. If both are installed, each turn is still handled once
 removes the settings copy.
 
 Note: `UserPromptSubmit` and `SessionStart` run synchronously (about 15-30 ms)
-because their output must reach Claude before the prompt does; `Stop` runs
-asynchronously. In `claude -p` (print mode) Claude Code may end before the async
+because their output must reach Claude before the prompt does; `Stop`,
+`MessageDisplay`, `PermissionRequest` and `Notification` run asynchronously,
+so they never delay Claude or hold the screen (and the `PermissionRequest`
+hook never answers a permission prompt). If you used `install-hooks` before,
+run it again to add the new hooks. In `claude -p` (print mode) Claude Code may end before the async
 `Stop` hook finishes, so a line can go unspoken there; interactive sessions are
 not affected.
+
+## Hook it into Codex
+
+The same repository is a Codex plugin too (`.codex-plugin/plugin.json`, with
+its own `hooks/codex-hooks.json`). In a terminal:
+
+```bash
+codex plugin marketplace add TonyXTYan/AfterWord
+```
+
+```bash
+codex plugin add afterword@afterword
+```
+
+Codex asks you to review and trust the plugin's hooks when it starts (until
+then they don't run). To update later, run `codex plugin marketplace upgrade`,
+then the `add` command again; changed hooks are reviewed again.
+
+Codex has four of the six hooks: `SessionStart`, `UserPromptSubmit`, `Stop` and
+`PermissionRequest`, all synchronous (about 15-40 ms; `codex exec` can exit
+before an async hook finishes). Codex has no `MessageDisplay` or `Notification`
+event, so there is no early speaking, and no spoken alerts for idle or waiting
+input. "Done" alerts work, and permission alerts are spoken as soon as Codex
+asks, whatever `permission_when` says (Codex can't tell AfterWord later that
+the prompt is still waiting). Voice profiles, `<say>`
+blocks, pronunciations, a voice per language and the GUI are the same as for
+Claude Code. Turn the voice on with `AFTERWORD_VOICE=nova codex`, by typing
+`afterword:voice nova` as a prompt, or from the GUI's Sessions page.
 
 ## The GUI
 
@@ -155,8 +403,8 @@ http://127.0.0.1:47800 has six pages:
 
 - **Log**: every hook call with its raw payload, parsed tags, decision and
   reason (`session off`, `no <say> tag`, `daemon busy`, `duplicate`, …), and
-  timings (hook, hook to daemon, synthesis, real-time factor, first audio),
-  with p50/p95 stats. Prompt and session hooks are hidden unless you ask.
+  timings (hook, hook to daemon, synthesis, real-time factor, first chunk,
+  first audio, and whether it was streamed), with p50/p95 stats. Prompt and session hooks are hidden unless you ask.
 - **Sessions**: each session's folder, voice (pick a profile or off), mute,
   what set the voice, and its last line. **Mute all** sits in the header.
 - **Queue**: what is playing and waiting; skip, remove or stop.
@@ -164,26 +412,35 @@ http://127.0.0.1:47800 has six pages:
   and downloadable as WAV.
 - **Voice lab**: try voices and save profiles (below).
 - **Config**: `config.toml` as loaded, warnings or parse errors, the synth in
-  use, and model status; reload on demand.
+  use, and model status; reload on demand. Its Pronunciations table edits the
+  `[pronounce]` lists (global or per profile) and writes them back into
+  `config.toml`, keeping your comments. Its Spoken alerts panel turns alerts
+  on and off, picks the events, voice and timing, and edits, generates and
+  plays the phrase pools.
 
 ## Files
 
 | Path | What |
 |---|---|
-| `~/.afterword/config.toml` | daemon settings, `[qwen]` models, voice profiles (hot-reloaded; written on first `serve`) |
+| `~/.afterword/config.toml` | daemon settings, `[qwen]` models, voice profiles, pronunciations (hot-reloaded; written on first `serve`) |
+| `~/.afterword/alerts.json` | spoken alert phrases per language and event (optional; built-in English and Chinese ones otherwise) |
 | `~/.afterword/voices/` | clone clips (`<name>.wav` + `<name>.txt` transcript) |
-| `~/.afterword/lab/` | voice lab previews (cleared when the daemon restarts) |
-| `~/.afterword/state/` | per-session voice state (written by the hook) |
+| `~/.afterword/lab/` | voice lab previews and seed-explorer takes (cleared when the daemon restarts) |
+| `~/.afterword/lab/starred/`, `lab/starred.json` | starred takes (kept) |
+| `~/.afterword/state/` | per-session voice state (written by the hook; with alerts on, also the turn's start time and pending permissions). A file with no voice, mute or earlier voice in it is removed after 7 days without changes |
 | `~/.afterword/events.db` | event log (SQLite) shown in the UI |
 | `~/.afterword/clips/` | last N spoken clips, replayable from the log |
 | `~/.afterword/afterwordd.log` | daemon text log (rotating) |
 | `~/.afterword/hook.log` | hook log (JSON lines; errors land here, never in Claude Code) |
 | `~/.afterword/daemon.json` | daemon settings changed from the GUI (mute all) |
 | `~/.afterword/seen/` | short-lived markers so each turn is handled once |
+| `~/.afterword/stream/` | the text of messages being written, per session, for early speaking (pruned after 10 minutes) |
 
 Environment: `AFTERWORD_HOME` relocates `~/.afterword`; `AFTERWORD_FALLBACK=none`
 disables the `say` fallback; `AFTERWORD_DISABLE=1` makes the hook a no-op;
-`AFTERWORD_SYNTH=say|null` and `AFTERWORD_PLAYER=null` override the backends.
+`AFTERWORD_CLAUDE_CMD` is the `claude` used by `alerts generate`;
+`AFTERWORD_SYNTH=say|null` and `AFTERWORD_PLAYER=null` override the backends
+(`null` plays nothing, in real time; for tests).
 
 ## Development
 
@@ -199,7 +456,8 @@ AFTERWORD_LIVE_QWEN=1 uv run pytest -q -k live
 
 The hooks (`afterword/hooks/`) are stdlib-only and run on Python 3.9+, so they
 work under macOS's stock `python3` as well as the project's 3.12. The plugin is
-the repository root: `.claude-plugin/`, `hooks/hooks.json`, `commands/voice.md`. The tests
+the repository root: `.claude-plugin/`, `hooks/hooks.json` and `commands/voice.md` for
+Claude Code, and `.codex-plugin/plugin.json` with `hooks/codex-hooks.json` for Codex. The tests
 check this, along with the rule that the hook never fails: exit code 0, no
 output, and a bounded run time for any input. The HTTP contracts are in
 [docs/gui-api.md](docs/gui-api.md) and [docs/lab-api.md](docs/lab-api.md).

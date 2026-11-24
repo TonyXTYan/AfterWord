@@ -18,8 +18,9 @@ from typing import TYPE_CHECKING
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
+from . import alerts as alerting
 from . import state
-from .lab import LabError
+from .lab import LabError, pronounce_view, save_pronounce
 from .voices import CLIP_MAX_BYTES
 
 if TYPE_CHECKING:
@@ -156,6 +157,118 @@ def build_app(daemon: "Daemon", port: int) -> FastAPI:
         daemon.store.reload(force=True)
         return await asyncio.to_thread(config_view)
 
+    @app.get("/api/pronounce")
+    async def pronounce_get():
+        return await asyncio.to_thread(pronounce_view, daemon.store)
+
+    @app.post("/api/pronounce")
+    async def pronounce_set(request: Request):
+        body = await json_body(request)
+        return await asyncio.to_thread(save_pronounce, daemon.store, body)
+
+    # -- spoken alerts (contract: docs/gui-api.md, "Alerts") ---------------
+
+    generating = asyncio.Lock()
+
+    def alerts_view():
+        cfg = daemon.store.get()
+        phrases = daemon.alerts
+        pools = phrases.pools()
+        return {
+            "settings": cfg.alerts.as_dict(),
+            "events": list(alerting.ALERT_EVENTS),
+            "placeholders": {k: list(v) for k, v in alerting.PLACEHOLDERS.items()},
+            "limits": {"phrase": alerting.PHRASE_MAX, "pool": alerting.POOL_MAX, "count": alerting.COUNT_MAX},
+            "profiles": [{"name": p.name, "lang": p.lang, "pool_lang": alerting.pool_lang(p), "style": p.style,
+                          "persona": p.persona} for p in cfg.profiles.values()],
+            "default_profile": alerting.alert_profile_name(cfg, None),
+            "pools": pools,
+            "custom": {lang: sorted(e for e, v in ev.items() if v) for lang, ev in phrases.file_pools.items()},
+            "builtin_langs": sorted(alerting.BUILTIN),
+            "path": str(phrases.path),
+            "error": phrases.error,
+            "warnings": list(phrases.warnings) + [w for w in daemon.store.warnings if w.startswith("alerts")],
+            "generating": generating.locked(),
+        }
+
+    def alert_error(exc: alerting.AlertError) -> LabError:
+        return LabError(400, str(exc))
+
+    @app.get("/api/alerts")
+    async def alerts_get():
+        return await asyncio.to_thread(alerts_view)
+
+    @app.post("/api/alerts")
+    async def alerts_set(request: Request):
+        body = await json_body(request)
+        try:
+            fields = alerting.settings_body(body)
+            await asyncio.to_thread(alerting.write_settings, daemon.store.path, fields, list(daemon.store.get().profiles))
+        except alerting.AlertError as exc:
+            raise alert_error(exc) from None
+        daemon.store.reload(force=True)
+        return await asyncio.to_thread(alerts_view)
+
+    @app.post("/api/alerts/phrases")
+    async def alerts_phrases(request: Request):
+        body = await json_body(request)
+        if not isinstance(body, dict) or not isinstance(body.get("lang"), str) \
+                or not (body.get("pools") is None or isinstance(body.get("pools"), dict)):
+            raise LabError(400, "send {\"lang\": \"en\", \"pools\": {event: [phrase, ...]}} (pools null: built-in)")
+        try:
+            await asyncio.to_thread(daemon.alerts.save_lang, body["lang"], body.get("pools"))
+        except alerting.AlertError as exc:
+            raise alert_error(exc) from None
+        return await asyncio.to_thread(alerts_view)
+
+    @app.post("/api/alerts/generate")
+    async def alerts_generate(request: Request):
+        body = await json_body(request)
+        if not isinstance(body, dict):
+            raise LabError(400, "expected a JSON object")
+        if generating.locked():
+            raise LabError(409, "phrases are already being generated")
+        async with generating:
+            try:
+                result = await asyncio.to_thread(
+                    alerting.generate, daemon.store.get(), daemon.alerts, body.get("profile") or None,
+                    body.get("count", 12), body.get("persona"), daemon.alert_runner,
+                )
+            except alerting.AlertError as exc:
+                raise LabError(502 if isinstance(exc, alerting.GenerateFailed) else 400, str(exc)) from None
+        return result
+
+    @app.post("/api/alerts/hear")
+    async def alerts_hear(request: Request):
+        body = await json_body(request)
+        if not isinstance(body, dict) or body.get("event") not in alerting.ALERT_EVENTS:
+            raise LabError(400, f"send {{\"event\": one of {', '.join(alerting.ALERT_EVENTS)}}}")
+        cfg = daemon.store.get()
+        event = body["event"]
+        name = body.get("profile") or alerting.alert_profile_name(cfg, None)
+        if not isinstance(name, str) or name not in cfg.profiles:
+            raise LabError(404, f"no profile named {name!r}" if name else "no profiles configured")
+        lang = alerting.pool_lang(cfg.profiles[name])
+        phrase = body.get("phrase")
+        if phrase is not None:
+            why = alerting.check_phrase(phrase, event)
+            if why:
+                raise LabError(400, f"phrase: {why}")
+            used = alerting.lang_code(body.get("lang")) or lang  # the pool it was written for
+        else:
+            pool = daemon.alerts.pool(lang, event)
+            used = lang if pool else "en"
+            pool = pool or daemon.alerts.pool("en", event)
+            import random
+
+            phrase = random.choice(pool)
+        text = alerting.fill(phrase.strip(), alerting.SAMPLE_VALUES.get(used, alerting.SAMPLE_VALUES["en"]), used)
+        preview = {"text": text, "profile": name}
+        if used != lang:
+            preview["lang"] = used
+        res = await daemon.lab.preview(preview)
+        return {**res, "phrase": phrase, "alert_text": text, "event": event, "alert_profile": name}
+
     @app.get("/api/queue")
     async def queue():
         return daemon.queue.snapshot()
@@ -252,6 +365,45 @@ def build_app(daemon: "Daemon", port: int) -> FastAPI:
     @app.post("/api/lab/warm")
     async def lab_warm(request: Request):
         return await daemon.lab.warm(await json_body(request))
+
+    # -- seed explorer, stars, stability check (docs/lab-api.md) ---------
+
+    @app.get("/api/lab/explore")
+    async def lab_explore_get():
+        return daemon.lab.explore_view()
+
+    @app.post("/api/lab/explore")
+    async def lab_explore_start(request: Request):
+        return await daemon.lab.explore_start(await json_body(request))
+
+    @app.post("/api/lab/explore/cursor")
+    async def lab_explore_cursor(request: Request):
+        return daemon.lab.explore_cursor(await json_body(request))
+
+    @app.post("/api/lab/explore/stop")
+    async def lab_explore_stop():
+        return daemon.lab.explore_stop()
+
+    @app.get("/api/lab/stars")
+    async def lab_stars():
+        return daemon.lab.stars_view()
+
+    @app.post("/api/lab/stars")
+    async def lab_star(request: Request):
+        body = await json_body(request)
+        return await asyncio.to_thread(daemon.lab.star, body)
+
+    @app.get("/api/lab/stars/{name}")
+    async def lab_star_audio(name: str):
+        return FileResponse(daemon.lab.star_path(name.removesuffix(".wav")), media_type="audio/wav")
+
+    @app.delete("/api/lab/stars/{star_id}")
+    async def lab_unstar(star_id: str):
+        return await asyncio.to_thread(daemon.lab.unstar, star_id)
+
+    @app.post("/api/lab/stability")
+    async def lab_stability(request: Request):
+        return await daemon.lab.stability(await json_body(request))
 
     @app.get("/api/stream")
     async def stream(request: Request):

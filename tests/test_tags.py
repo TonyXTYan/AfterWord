@@ -48,7 +48,7 @@ def test_multiline_say_collapses_whitespace():
 def test_last_nonempty_say_wins():
     r = parse("<say>first</say> middle <say>second</say> <say>  </say>")
     assert r.say.text == "second"
-    assert len(r.says) == 3
+    assert [t.text for t in r.says] == ["first", "second"]  # empty ones are not kept
     assert any("empty" in w for w in r.warnings)
 
 
@@ -121,6 +121,26 @@ def test_markdown_stripped_from_say():
 def test_nested_say_does_not_crash():
     r = parse("<say><say>inner</say></say>")
     assert r.say.text == "inner"
+    assert [t.text for t in r.says] == ["inner"]  # spoken once, not "inner inner"
+
+
+def test_nested_say_keeps_only_the_outer_block():
+    r = parse("Hi. <say>Outer start <say>inner bit</say> outer end.</say> <say>two</say>")
+    assert [t.text for t in r.says] == ["Outer start inner bit outer end.", "two"]
+    assert any("nested" in w for w in r.warnings)
+    r = parse("<say>Hello there <say>inner bit</say> and more</say>")
+    assert r.say.text == "Hello there inner bit and more" and len(r.says) == 1
+    # A bare <say> mentioned in prose stays unpaired: the real block counts.
+    assert [t.text for t in parse("Type <say> to start. <say>real</say>").says] == ["real"]
+
+
+def test_to_dict_previews_long_blocks():
+    from afterword.hooks import tags
+
+    long = "word " * 2000
+    d = parse("<say>%s</say><say>%s</say>" % (long, long)).to_dict()
+    assert all(len(s["text"]) == tags.SEGMENT_PREVIEW for s in d["segments"])
+    assert d["segments"][0]["chars"] == len(long.strip())
 
 
 # --------------------------------------------------------------------------- #
@@ -218,6 +238,7 @@ def test_to_dict_is_json_ready():
     d = parse('<voice set="nova"/><say pace="1.2">x</say>').to_dict()
     assert json.loads(json.dumps(d)) == {
         "say": {"text": "x", "attrs": {"pace": 1.2}},
+        "segments": [{"text": "x", "chars": 1, "attrs": {"pace": 1.2}}],
         "voice": {"set": "nova"},
         "say_count": 1,
         "voice_count": 1,

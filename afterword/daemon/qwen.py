@@ -4,7 +4,12 @@ and kept warm.
 All MLX work (loading, rendering) runs on a single dedicated thread, so the
 asyncio loop never blocks and MLX state is only touched from one thread. The
 daemon's playback queue and the voice lab share that thread; work runs one
-item at a time in submission order.
+item at a time, live speech (priority LIVE) before lab work (LAB), then in
+submission order. A job can carry a cancel event, checked at every chunk.
+Live speech renders stream (`stream=True`): each chunk is handed to an
+`on_chunk` callback as soon as the model yields it. A lab job submitted as
+`preemptible` (the seed explorer's) is stopped at its next chunk when live
+speech is queued, and fails with RenderPreempted so its owner can retry.
 
 The thread is a daemon thread: a render in progress never keeps the process
 alive after shutdown. Queued work is cancelled at shutdown, and a running
@@ -17,6 +22,7 @@ import concurrent.futures
 import importlib.util
 import json
 import logging
+import math
 import queue
 import random
 import threading
@@ -39,6 +45,11 @@ DEFAULT_REPOS = {
 PULL_COMMAND = "uv run afterword models pull"
 MAX_PENDING = 4
 WARMUP_TEXT = "Ready."
+STREAMING_INTERVAL = 1.0  # seconds of audio per streamed chunk (first audio ~0.24 s warm)
+
+# Priority classes: lower runs first; arrival order within a class.
+LIVE = 0  # the playback queue (and engine housekeeping)
+LAB = 1  # voice lab previews and warm-ups
 
 # Qwen3-TTS emits 12.5 codec tokens per second of audio. Cap each render at
 # a generous multiple of how long the text could plausibly take to say, so a
@@ -72,6 +83,33 @@ class EngineBusy(RuntimeError):
 
 class EngineStopped(RuntimeError):
     pass
+
+
+class RenderCancelled(RuntimeError):
+    """The job's cancel event was set (skip/stop)."""
+
+
+class RenderPreempted(RenderCancelled):
+    """A preemptible lab render was stopped because live speech was queued."""
+
+
+class _Either:
+    """Set when any of its events is set (a job's own cancel or its preempt)."""
+
+    def __init__(self, *events: threading.Event):
+        self.events = events
+
+    def is_set(self) -> bool:
+        return any(e.is_set() for e in self.events)
+
+
+def attach_partial(exc: BaseException, partial: Any) -> None:
+    """Record on an exception what a render did before it stopped (its
+    timings; see `partial` on RenderCancelled and render failures)."""
+    try:
+        exc.partial = partial  # type: ignore[attr-defined]
+    except Exception:
+        pass
 
 
 def mlx_audio_available() -> tuple[bool, str | None]:
@@ -132,6 +170,7 @@ class RenderResult:
     load_s: float
     seed: int
     model: str
+    first_chunk_s: float | None = None  # generation start to the first chunk
 
 
 @dataclass
@@ -147,6 +186,12 @@ class _Job:
     fn: Callable
     args: tuple
     future: concurrent.futures.Future
+    priority: int = LAB
+    seq: int = 0
+    cancel: Any = None  # threading.Event or _Either
+    kwargs: dict = field(default_factory=dict)
+    preempt: threading.Event | None = None  # set by a LIVE render submitted while this runs
+    live: bool = False  # a LIVE render (live speech)
 
 
 class QwenEngine:
@@ -157,9 +202,14 @@ class QwenEngine:
         self.keep_loaded = max(1, keep_loaded)
         self._models: OrderedDict[str, _Loaded] = OrderedDict()
         self._lock = threading.Lock()
-        self._jobs: queue.Queue[_Job | None] = queue.Queue()
+        self._jobs: queue.PriorityQueue[tuple[int, int, _Job | None]] = queue.PriorityQueue()
+        self._seq = 0
         self._pending = 0
         self._busy = False
+        self._current: _Job | None = None  # the running job (written under _lock)
+        self._live = 0  # LIVE renders queued or running
+        self._live_ended = 0.0  # time.monotonic() when the last LIVE render ended
+        self.preemptions = 0
         self._stopping = False
         self._last_load_ms: dict[str, float] = {}
         self._errors: dict[str, str] = {}
@@ -187,7 +237,7 @@ class QwenEngine:
                 changed = True
         if changed:
             try:
-                self._submit(self._trim, limit=False)
+                self._submit(self._trim, limit=False, priority=LIVE)
             except EngineStopped:
                 pass
 
@@ -240,52 +290,154 @@ class QwenEngine:
     # Submitting work                                                    #
     # ------------------------------------------------------------------ #
 
-    def _submit(self, fn, *args, limit: bool = True) -> concurrent.futures.Future:
+    def _submit(
+        self, fn, *args, limit: bool = True, priority: int = LAB,
+        cancel: Any = None, preempt: threading.Event | None = None, **kwargs,
+    ) -> concurrent.futures.Future:
+        """Queue `fn(*args, **kwargs)` for the engine thread. `limit` applies
+        MAX_PENDING (lab work); `priority` LIVE jobs run before LAB ones. A
+        LIVE render stops a running preemptible job (one with `preempt`)."""
         with self._lock:
             if self._stopping:
                 raise EngineStopped("the engine is shutting down")
             if limit and self._pending >= MAX_PENDING:
                 raise EngineBusy(f"{self._pending} renders already waiting")
             self._pending += 1
+            self._seq += 1
             future: concurrent.futures.Future = concurrent.futures.Future()
-            self._jobs.put(_Job(fn, args, future))
+            live = fn == self._render and priority <= LIVE
+            job = _Job(fn, args, future, priority, self._seq, cancel, kwargs, preempt, live)
+            self._jobs.put((priority, self._seq, job))
+            if live:
+                self._live += 1
+                current = self._current
+                if current is not None and current.preempt is not None and not current.preempt.is_set():
+                    current.preempt.set()
+                    self.preemptions += 1
+                    log.info("live speech pre-empts the running lab render")
         return future
+
+    def live_quiet_s(self) -> float:
+        """Seconds since the last LIVE render ended; 0.0 while one is queued
+        or running, inf when there has been none."""
+        with self._lock:
+            if self._live:
+                return 0.0
+            if not self._live_ended:
+                return math.inf
+            return max(0.0, time.monotonic() - self._live_ended)
+
+    def check_ready(self, kind: str) -> None:
+        """Raise EngineUnavailable / ModelNotDownloaded now, without loading,
+        when a render of `kind` would fail that way."""
+        available, error = self._available()
+        if not available:
+            raise EngineUnavailable(error)
+        repo = self.repos[kind]
+        if self._snapshot(repo) is None:
+            raise ModelNotDownloaded(
+                f"Qwen3-TTS model {repo} is not downloaded (or the download is incomplete); "
+                f"run `{PULL_COMMAND} {kind}`"
+            )
 
     def _run(self) -> None:
         while True:
-            job = self._jobs.get()
+            _, _, job = self._jobs.get()
             if job is None:
                 return
-            with self._lock:
-                self._pending -= 1
+            try:
+                self._run_job(job)
+            finally:
+                if job.live:
+                    with self._lock:
+                        self._live -= 1
+                        self._live_ended = time.monotonic()
+
+    def _run_job(self, job: _Job) -> None:
+        with self._lock:
+            self._pending -= 1
+            # A preemptible job taken off the queue just as live speech was
+            # queued (a LIVE render waiting means one was submitted after
+            # this job was dequeued): pre-empt it before it starts.
+            if job.preempt is not None and self._live and not job.preempt.is_set():
+                job.preempt.set()
+                self.preemptions += 1
+            self._current = job
+        try:
             if not job.future.set_running_or_notify_cancel():
-                continue  # cancelled while queued
+                return  # cancelled while queued
             if self._stopping:
                 job.future.set_exception(EngineStopped("the engine is shutting down"))
-                continue
+                return
+            if job.preempt is not None and job.preempt.is_set():
+                job.future.set_exception(RenderPreempted("pre-empted by live speech before it started"))
+                return
+            if job.cancel is not None and job.cancel.is_set():
+                job.future.set_exception(RenderCancelled("cancelled before it started"))
+                return
             self._busy = True
             try:
-                result = job.fn(*job.args)
+                result = job.fn(*job.args, **job.kwargs)
             except BaseException as exc:
+                if (isinstance(exc, RenderCancelled) and job.preempt is not None and job.preempt.is_set()
+                        and not isinstance(exc, RenderPreempted)):
+                    new = RenderPreempted("pre-empted by live speech")
+                    attach_partial(new, getattr(exc, "partial", None))
+                    exc = new
                 job.future.set_exception(exc)
             else:
                 job.future.set_result(result)
-            finally:
-                self._busy = False
+        finally:
+            with self._lock:
+                self._current = None
+            self._busy = False
 
-    def render(self, req: RenderRequest, limit: bool = True) -> RenderResult:
+    def submit_render(
+        self,
+        req: RenderRequest,
+        *,
+        limit: bool = True,
+        priority: int = LAB,
+        cancel: threading.Event | None = None,
+        on_chunk: Callable[[Any, int], None] | None = None,
+        stream: bool = False,
+        preemptible: bool = False,
+    ) -> concurrent.futures.Future:
+        """Queue a render. With `stream`, the model streams and every chunk
+        goes to `on_chunk(audio, sample_rate)` on the engine thread as it
+        arrives (an exception from it stops the render). `cancel` is checked
+        before the job starts and at every chunk (RenderCancelled).
+        `preemptible` (lab work only): a LIVE render submitted while this one
+        runs stops it at its next chunk (RenderPreempted); stream it, or the
+        model only yields once, at the end."""
+        extra: dict[str, Any] = {}
+        if on_chunk is not None:
+            extra["on_chunk"] = on_chunk
+        if stream:
+            extra["stream"] = True
+        preempt = threading.Event() if preemptible and priority > LIVE else None
+        check: Any = cancel
+        if preempt is not None:
+            check = _Either(cancel, preempt) if cancel is not None else preempt
+        if check is not None:
+            extra["cancel_event"] = check
+        return self._submit(self._render, req, limit=limit, priority=priority, cancel=check, preempt=preempt, **extra)
+
+    def render(self, req: RenderRequest, limit: bool = True, priority: int = LAB, **kw) -> RenderResult:
         """Blocking render (call from a worker thread, not the event loop)."""
-        return self._submit(self._render, req, limit=limit).result()
+        return self.submit_render(req, limit=limit, priority=priority, **kw).result()
 
-    async def render_async(self, req: RenderRequest) -> RenderResult:
+    async def render_async(self, req: RenderRequest, priority: int = LAB) -> RenderResult:
         import asyncio
 
-        return await asyncio.wrap_future(self._submit(self._render, req))
+        return await asyncio.wrap_future(self.submit_render(req, priority=priority))
 
-    async def warm_async(self, kind: str) -> float:
+    async def warm_async(self, kind: str, priority: int = LAB) -> float:
+        """Load `kind` (not counted against MAX_PENDING). The daemon's
+        start-up warm-up passes LIVE; the lab's uses the LAB default."""
         import asyncio
 
-        return await asyncio.wrap_future(self._submit(self._ensure_timed, kind, limit=False))
+        return await asyncio.wrap_future(self._submit(self._ensure_timed, kind, limit=False, priority=priority))
 
     def shutdown(self, wait: float = 0.0) -> None:
         """Cancel queued work and stop the thread. A render in progress stops
@@ -295,14 +447,14 @@ class QwenEngine:
             drained = []
             while True:
                 try:
-                    drained.append(self._jobs.get_nowait())
+                    drained.append(self._jobs.get_nowait()[2])
                 except queue.Empty:
                     break
             self._pending = 0
         for job in drained:
             if job is not None:
                 job.future.cancel()
-        self._jobs.put(None)
+        self._jobs.put((-1, 0, None))
         if wait:
             self._thread.join(wait)
 
@@ -329,15 +481,8 @@ class QwenEngine:
             return loaded.model, 0.0
         if loaded is not None:
             self._unload(kind)  # config now points at another repo
-        available, error = self._available()
-        if not available:
-            raise EngineUnavailable(error)
+        self.check_ready(kind)
         path = self._snapshot(repo)
-        if path is None:
-            raise ModelNotDownloaded(
-                f"Qwen3-TTS model {repo} is not downloaded (or the download is incomplete); "
-                f"run `{PULL_COMMAND} {kind}`"
-            )
         while len(self._models) >= self.keep_loaded:
             self._unload(next(iter(self._models)))
         t = time.perf_counter()
@@ -394,7 +539,13 @@ class QwenEngine:
             pass
         log.info("unloaded %s", kind)
 
-    def _render(self, req: RenderRequest) -> RenderResult:
+    def _render(
+        self,
+        req: RenderRequest,
+        on_chunk: Callable[[Any, int], None] | None = None,
+        stream: bool = False,
+        cancel_event: Any = None,
+    ) -> RenderResult:
         import numpy as np
 
         kind = req.voice.model
@@ -409,6 +560,8 @@ class QwenEngine:
         t = time.perf_counter()
         max_tokens = max_tokens_for(req.text)
         common = dict(text=req.text, language=req.language, temperature=req.temperature, max_tokens=max_tokens)
+        if stream:
+            common.update(stream=True, streaming_interval=STREAMING_INTERVAL)
         if req.voice.kind == "builtin":
             speaker = req.voice.value
             supported = {s.lower(): s for s in model.get_supported_speakers()}
@@ -429,17 +582,42 @@ class QwenEngine:
                 temperature=req.temperature,
                 max_tokens=max_tokens,
                 split_pattern="",
+                **({"stream": True, "streaming_interval": STREAMING_INTERVAL} if stream else {}),
             )
+        sample_rate = int(model.sample_rate)
         chunks = []
-        for r in gen:
-            if self._stopping:
-                raise EngineStopped("the engine is shutting down")
-            chunks.append(np.asarray(r.audio, dtype=np.float32).reshape(-1))
+        first_chunk_s = None
+        try:
+            for r in gen:
+                if self._stopping:
+                    raise EngineStopped("the engine is shutting down")
+                if cancel_event is not None and cancel_event.is_set():
+                    raise RenderCancelled("cancelled")
+                chunk = np.asarray(r.audio, dtype=np.float32).reshape(-1)
+                if first_chunk_s is None:
+                    first_chunk_s = time.perf_counter() - t
+                chunks.append(chunk)
+                if on_chunk is not None and chunk.size:
+                    on_chunk(chunk, sample_rate)
+        except Exception as exc:
+            # A cancelled or failed render still took time: keep its timings
+            # (and the audio made so far) for the event log.
+            audio = np.concatenate(chunks) if chunks else np.zeros(0, dtype=np.float32)
+            attach_partial(exc, RenderResult(
+                audio, sample_rate, time.perf_counter() - t, load_s, seed, kind, first_chunk_s))
+            raise
+        finally:
+            close = getattr(gen, "close", None)
+            if close is not None:
+                try:
+                    close()
+                except Exception:
+                    pass
         audio = np.concatenate(chunks) if chunks else np.zeros(0, dtype=np.float32)
         synth_s = time.perf_counter() - t
         if audio.size == 0:
             raise RuntimeError("Qwen3-TTS returned no audio")
-        return RenderResult(audio, int(model.sample_rate), synth_s, load_s, seed, kind)
+        return RenderResult(audio, sample_rate, synth_s, load_s, seed, kind, first_chunk_s)
 
 
 def build_request(

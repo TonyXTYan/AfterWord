@@ -1,0 +1,17 @@
+{
+  "description": "AfterWord for Codex: same hook script as Claude Code. Stop and PermissionRequest run synchronously (Codex can end the process before an async hook finishes); MessageDisplay and Notification don't exist in Codex.",
+  "hooks": {
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "python3 \"${PLUGIN_ROOT}/afterword/hooks/afterword_hook.py\" session-start codex", "timeout": 5}]}
+    ],
+    "UserPromptSubmit": [
+      {"hooks": [{"type": "command", "command": "python3 \"${PLUGIN_ROOT}/afterword/hooks/afterword_hook.py\" user-prompt-submit codex", "timeout": 5}]}
+    ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "python3 \"${PLUGIN_ROOT}/afterword/hooks/afterword_hook.py\" stop codex", "timeout": 10}]}
+    ],
+    "PermissionRequest": [
+      {"hooks": [{"type": "command", "command": "python3 \"${PLUGIN_ROOT}/afterword/hooks/afterword_hook.py\" permission-request codex", "timeout": 10}]}
+    ]
+  }
+}

@@ -126,6 +126,140 @@ def test_message_read_from_transcript_when_payload_lacks_it(aw_home, say_stub, t
     assert said == "from transcript"
 
 
+def _turn_transcript(tmp_path, earlier_texts):
+    """A transcript whose current turn has the given assistant messages, each
+    followed by a tool call and its result (an earlier turn says "nova")."""
+    transcript = tmp_path / "turn.jsonl"
+    lines = [
+        {"type": "user", "message": {"role": "user", "content": "first prompt"}},
+        {"type": "assistant", "message": {"id": "old", "content": [{"type": "text", "text": '<voice set="nova"/>'}]}},
+        {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "second prompt"}]}},
+    ]
+    for i, text in enumerate(earlier_texts):
+        mid = "m%d" % i
+        lines.append({"type": "assistant", "message": {"id": mid, "content": [{"type": "text", "text": text}]}})
+        lines.append({"type": "assistant", "message": {"id": mid, "content": [
+            {"type": "tool_use", "id": "t%d" % i, "name": "Bash", "input": {"command": "sleep 1"}}]}})
+        lines.append({"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "t%d" % i, "content": "ok"}]}})
+    transcript.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+    return str(transcript)
+
+
+def test_voice_tag_written_before_a_tool_call_turns_the_session_on(aw_home, say_stub, tmp_path):
+    # Stop's last_assistant_message is only the final message; a <voice> tag
+    # in a message before a tool call comes from the transcript.
+    path = _turn_transcript(tmp_path, ['<voice set="ember"/>\nChecking that now.'])
+    proc, elapsed = run_hook(stop_payload("Done. <say>after the tool</say>", transcript_path=path))
+    assert_clean_exit(proc, elapsed)
+    said = wait_for(lambda: say_stub.exists() and say_stub.read_text().strip())
+    assert said.endswith("after the tool")
+    state = json.loads((Path(aw_home) / "state" / "sess-1.json").read_text())
+    assert state["profile"] == "ember"
+
+
+def test_turn_voice_ignores_earlier_turns_and_code_and_prefers_the_final_message(aw_home, say_stub, tmp_path):
+    # The earlier turn's "nova" tag is not this turn's.
+    path = _turn_transcript(tmp_path, ["no tag here"])
+    run_hook(stop_payload("<say>quiet</say>", transcript_path=path))
+    time.sleep(0.5)
+    assert not (say_stub.exists() and say_stub.read_text().strip())
+    # A tag inside a code fence is not a tag.
+    path = _turn_transcript(tmp_path, ['```\n<voice set="ember"/>\n```'])
+    run_hook(stop_payload("<say>still quiet</say>", transcript_path=path, session_id="sess-2"))
+    time.sleep(0.5)
+    assert not (say_stub.exists() and say_stub.read_text().strip())
+    # The final message's own tag wins over an earlier one.
+    path = _turn_transcript(tmp_path, ['<voice set="ember"/>'])
+    run_hook(stop_payload('<voice set="nova"/><say>final wins</say>', transcript_path=path, session_id="sess-3"))
+    assert wait_for(lambda: say_stub.exists() and "final wins" in say_stub.read_text())
+    state = json.loads((Path(aw_home) / "state" / "sess-3.json").read_text())
+    assert state["profile"] == "nova"
+    # The last of several earlier tags wins; voice off in a later message.
+    path = _turn_transcript(tmp_path, ['<voice set="ember"/>', '<voice set="off"/>'])
+    run_hook(stop_payload("<say>off again</say>", transcript_path=path, session_id="sess-4"))
+    time.sleep(0.5)
+    assert "off again" not in say_stub.read_text()
+
+
+def _codex_turn_transcript(tmp_path, earlier_texts):
+    """A Codex rollout transcript (task_started opens each turn, assistant
+    messages are response_item entries) whose current turn has the given
+    assistant messages, each followed by a tool call. The earlier turn says
+    "nova", and the current turn's user prompt carries a tag of its own that
+    must not count (only assistant text does)."""
+    transcript = tmp_path / "rollout.jsonl"
+
+    def msg(role, text, mid):
+        kind = "output_text" if role == "assistant" else "input_text"
+        return {"type": "response_item", "payload": {
+            "type": "message", "id": mid, "role": role, "content": [{"type": kind, "text": text}]}}
+
+    lines = [
+        {"type": "session_meta", "payload": {"id": "s"}},
+        {"type": "event_msg", "payload": {"type": "task_started", "turn_id": "t1"}},
+        msg("user", "first prompt", "u1"),
+        msg("assistant", '<voice set="nova"/>', "old"),
+        {"type": "event_msg", "payload": {"type": "task_complete", "turn_id": "t1",
+                                          "last_agent_message": '<voice set="nova"/>'}},
+        {"type": "event_msg", "payload": {"type": "task_started", "turn_id": "t2"}},
+        msg("user", 'second prompt <voice set="off"/>', "u2"),
+        msg("developer", '<voice set="off"/>', "d2"),
+    ]
+    for i, text in enumerate(earlier_texts):
+        lines.append(msg("assistant", text, "m%d" % i))
+        lines.append({"type": "response_item", "payload": {
+            "type": "custom_tool_call", "call_id": "c%d" % i, "name": "exec", "input": "sleep 1"}})
+        lines.append({"type": "response_item", "payload": {
+            "type": "custom_tool_call_output", "call_id": "c%d" % i, "output": [{"type": "input_text", "text": "ok"}]}})
+    transcript.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+    return str(transcript)
+
+
+def test_codex_voice_tag_written_before_a_tool_call_turns_the_session_on(aw_home, say_stub, tmp_path):
+    path = _codex_turn_transcript(tmp_path, ['<voice set="ember"/>\nChecking that now.'])
+    proc, elapsed = run_hook(stop_payload("Done. <say>after the codex tool</say>", transcript_path=path))
+    assert_clean_exit(proc, elapsed)
+    said = wait_for(lambda: say_stub.exists() and say_stub.read_text().strip())
+    assert said.endswith("after the codex tool")
+    state = json.loads((Path(aw_home) / "state" / "sess-1.json").read_text())
+    assert state["profile"] == "ember"
+
+
+def test_codex_turn_voice_stops_at_the_turn_start_and_reads_only_assistant_text(aw_home, tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(HOOK).parent))  # the hook imports its siblings (tags)
+    import afterword_hook as h
+    # The earlier turn's "nova" and the user/developer "off" tags don't count.
+    path = _codex_turn_transcript(tmp_path, ["no tag here"])
+    assert h._turn_voice(path) is None
+    assert h._turn_messages_from_transcript(path) == ["no tag here"]
+    path = _codex_turn_transcript(tmp_path, ['<voice set="ember"/>', "middle", '<voice set="off"/>'])
+    off = h._turn_voice(path)
+    assert off is not None and off.profile is None and off.raw == '<voice set="off"/>'
+    assert h._turn_messages_from_transcript(path, needle="<voice") == ['<voice set="ember"/>', '<voice set="off"/>']
+    path = _codex_turn_transcript(tmp_path, ['```\n<voice set="ember"/>\n```'])
+    assert h._turn_voice(path) is None
+
+
+def test_codex_turns_with_the_same_text_are_not_duplicates(aw_home, say_stub):
+    # Codex sends turn_id (no prompt_id): two quick turns that end with the
+    # same reply are both spoken; the same turn twice is still a duplicate.
+    run_hook(stop_payload('<voice set="nova"/><say>Done.</say>', turn_id="T1"))
+    assert wait_for(lambda: say_stub.exists() and say_stub.read_text().count("Done.") == 1)
+    proc, _ = run_hook(stop_payload('<say>Done.</say>', turn_id="T2"))
+    assert wait_for(lambda: say_stub.read_text().count("Done.") == 2)
+    run_hook(stop_payload('<say>Done.</say>', turn_id="T2"))
+    time.sleep(0.5)
+    assert say_stub.read_text().count("Done.") == 2
+
+
+def test_codex_null_message_falls_back_to_the_rollout(aw_home, say_stub, tmp_path):
+    path = _codex_turn_transcript(tmp_path, ['<voice set="ember"/>', "Done. <say>from the rollout</say>"])
+    run_hook(stop_payload(None, transcript_path=path, turn_id="T9"))
+    said = wait_for(lambda: say_stub.exists() and say_stub.read_text().strip())
+    assert said.endswith("from the rollout")
+
+
 def test_event_name_from_payload_when_no_arg(aw_home, say_stub):
     proc, elapsed = run_hook(stop_payload('<voice set="nova"/><say>no arg</say>'), args=())
     assert_clean_exit(proc, elapsed)
@@ -558,7 +692,7 @@ def test_hook_is_stdlib_only():
     import subprocess
 
     code = (
-        "import sys; sys.path.insert(0, %r); import tags, common; "
+        "import sys; sys.path.insert(0, %r); import tags, common, pronounce, scriptsplit; "
         "import importlib.util as u; s = u.spec_from_file_location('h', %r); "
         "m = u.module_from_spec(s); s.loader.exec_module(m); print('ok')"
     ) % (str(HOOK.parent), str(HOOK))

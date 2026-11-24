@@ -69,7 +69,8 @@ def test_voice_on_adds_short_instruction_in_profile_language(home):
     proc, _ = prompt("Fix the failing test.")
     ctx = context(proc)
     assert "profile ember" in ctx and "<say>" in ctx and "Japanese" in ctx
-    assert len(ctx) < 200  # about 40 tokens
+    assert "heard sooner" in ctx  # the start placement (early speaking)
+    assert len(ctx) < 230  # about 45 tokens
     assert proc.stderr == b""
 
 
@@ -85,7 +86,8 @@ def test_muted_session_still_gets_instruction(home):
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("cmd", ["/afterword:voice nova", "/afterword-voice nova", "  /afterword:voice   nova  "])
+@pytest.mark.parametrize("cmd", ["/afterword:voice nova", "/afterword-voice nova", "  /afterword:voice   nova  ",
+                                 "afterword:voice nova", "afterword-voice nova", "  afterword:voice nova\n"])  # no slash: Codex
 def test_voice_command_turns_on_and_instructs_same_turn(home, cmd):
     ctx = context(prompt(cmd)[0])
     assert "now on for this session with profile nova" in ctx
@@ -117,7 +119,10 @@ def test_unknown_profile_leaves_voice_unchanged(home, arg):
     assert state(home)["profile"] == "nova"
 
 
-@pytest.mark.parametrize("text", ["please explain the /afterword:voice nova command", "/voice nova", "/voice"])
+@pytest.mark.parametrize("text", ["please explain the /afterword:voice nova command", "/voice nova", "/voice",
+                                  "explain afterword:voice nova", "voice nova", "afterwordvoice nova",
+                                  "afterword-voice is broken in codex, can you look?",
+                                  "afterword:voice\n\nHere is the log", "afterword-voice off\nthen fix the tests"])
 def test_not_our_command(home, text):
     # A bare /voice belongs to Claude Code (dictation); AfterWord ignores it.
     proc, _ = prompt(text)
@@ -268,7 +273,7 @@ def test_plugin_manifest_and_marketplace():
 
 def test_plugin_hooks_point_inside_the_plugin():
     hooks = json.loads((ROOT / "hooks/hooks.json").read_text())["hooks"]
-    assert set(hooks) == {"SessionStart", "UserPromptSubmit", "Stop"}
+    assert set(hooks) == {"SessionStart", "UserPromptSubmit", "MessageDisplay", "Stop", "PermissionRequest", "Notification"}
     for event, groups in hooks.items():
         for h in groups[0]["hooks"]:
             cmd = h["command"]
@@ -276,9 +281,34 @@ def test_plugin_hooks_point_inside_the_plugin():
             assert ".." not in cmd
             if event == "UserPromptSubmit":
                 assert not h.get("async")  # context must be read before the prompt goes to Claude
-            if event == "Stop":
-                assert h.get("async") is True
+            if event in ("Stop", "MessageDisplay", "PermissionRequest", "Notification"):
+                assert h.get("async") is True  # never delays Claude, holds the screen or decides a permission
     assert (ROOT / "afterword/hooks/afterword_hook.py").is_file()
+
+
+def test_codex_plugin_manifest_and_hooks():
+    """Codex reads .codex-plugin/plugin.json first. Its hooks file runs the same
+    script with the same arguments as hooks/hooks.json, but only for events
+    Codex has, synchronously (codex exec can exit before an async hook
+    finishes), and with Codex's ${PLUGIN_ROOT}."""
+    codex = json.loads((ROOT / ".codex-plugin/plugin.json").read_text())
+    claude = json.loads((ROOT / ".claude-plugin/plugin.json").read_text())
+    assert codex["name"] == claude["name"]
+    assert codex["hooks"] == "./hooks/codex-hooks.json"
+    hooks = json.loads((ROOT / "hooks/codex-hooks.json").read_text())["hooks"]
+    claude_hooks = json.loads((ROOT / "hooks/hooks.json").read_text())["hooks"]
+    codex_events = {"PreToolUse", "PermissionRequest", "PostToolUse", "PreCompact", "PostCompact",
+                    "SessionStart", "SessionEnd", "UserPromptSubmit", "SubagentStart", "SubagentStop",
+                    "Stop", "Interrupt"}
+    assert set(hooks) == {"SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest"}
+    assert set(hooks) <= codex_events and set(hooks) <= set(claude_hooks)
+    for event, groups in hooks.items():
+        (group,) = groups
+        (h,) = group["hooks"]
+        (ch,) = claude_hooks[event][0]["hooks"]
+        assert h["type"] == "command" and "async" not in h, event
+        assert h["command"] == ch["command"].replace("${CLAUDE_PLUGIN_ROOT}", "${PLUGIN_ROOT}") + " codex", event
+        assert h["timeout"] == ch["timeout"], event
 
 
 def test_voice_command_file():
@@ -293,7 +323,9 @@ def test_install_hooks_registers_all_events_and_voice_command(tmp_path):
     settings = tmp_path / ".claude" / "settings.json"
     assert cli.main(["install-hooks", "--settings", str(settings), "--python", "/usr/bin/python3"]) == 0
     hooks = json.loads(settings.read_text())["hooks"]
-    assert set(hooks) == {"SessionStart", "UserPromptSubmit", "Stop"}
+    assert set(hooks) == {"SessionStart", "UserPromptSubmit", "MessageDisplay", "Stop", "PermissionRequest", "Notification"}
+    assert hooks["PermissionRequest"][0]["hooks"][0]["async"] is True
+    assert hooks["Notification"][0]["hooks"][0]["command"].endswith(" notification")
     ups = hooks["UserPromptSubmit"][0]["hooks"][0]
     assert ups["command"].endswith(" user-prompt-submit") and "async" not in ups
     cmd = tmp_path / ".claude" / "commands" / "afterword-voice.md"

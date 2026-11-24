@@ -6,21 +6,19 @@ here is defensive: a broken file never raises out, it falls back to defaults.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import re
 import shlex
 import stat
-import tempfile
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-try:  # Python 3.11+
-    import tomllib as _toml  # type: ignore[import-not-found]
-except ImportError:  # Python 3.9/3.10: see _mini_toml below
-    _toml = None  # type: ignore[assignment]
+# tomllib (3.11+) and tempfile are imported where they are used: the hooks'
+# fast paths (voice off) never need them, and they cost a few ms at startup.
 
 SOCKET_NAME = "afterword.sock"
 DEFAULT_PORT = 47800
@@ -108,6 +106,10 @@ def read_config_raw(path: Optional[Path] = None) -> Dict[str, Any]:
     except FileNotFoundError:
         return {}
     text = data.decode("utf-8")
+    try:  # Python 3.11+
+        import tomllib as _toml  # type: ignore[import-not-found]
+    except ImportError:  # Python 3.9/3.10: see _mini_toml below
+        _toml = None  # type: ignore[assignment]
     parsed = _toml.loads(text) if _toml is not None else _mini_toml(text)
     return parsed if isinstance(parsed, dict) else {}
 
@@ -133,10 +135,16 @@ def read_regular_file(path: Path, max_bytes: int) -> bytes:
 
 
 # A small TOML subset for interpreters without tomllib (< 3.11). It covers
-# what the hook reads: [tables], [dotted.tables], and key = string / integer /
-# float / boolean. Anything else on a line is kept as a raw string or skipped,
-# so an unusual config degrades to defaults rather than failing the hook.
-_MINI_KEY_RE = re.compile(r'^\s*("(?:[^"\\]|\\.)*"|[A-Za-z0-9_-]+)\s*=\s*(.*)$')
+# what the hook reads: [tables], [dotted.tables], bare, "quoted", 'literal'
+# and dotted.keys, key = string / integer / float / boolean, arrays of those
+# (also over several lines), and one-line { inline = "tables" }. A value it
+# cannot read (nested arrays, multi-line strings, dates) leaves the key out, as if it were not set, so an unusual config
+# degrades to defaults rather than failing the hook or reading TOML syntax
+# as a string.
+_MINI_PART = r'(?:"(?:[^"\\]|\\.)*"|\'[^\']*\'|[A-Za-z0-9_-]+)'
+_MINI_KEY_RE = re.compile(r'^\s*(' + _MINI_PART + r'(?:\s*\.\s*' + _MINI_PART + r')*)\s*=\s*(.*)$')
+_MINI_PART_RE = re.compile(_MINI_PART)
+_MINI_SKIP = object()  # a value the subset cannot read: the key is left out
 
 
 def _mini_strip_comment(line: str) -> str:
@@ -158,15 +166,55 @@ def _mini_strip_comment(line: str) -> str:
     return line
 
 
+_MINI_ESC = {"b": "\b", "t": "\t", "n": "\n", "f": "\f", "r": "\r", '"': '"', "\\": "\\"}
+
+
+def _mini_basic(body: str) -> Any:
+    """The text of a TOML basic string body (between the quotes)."""
+    out = []
+    i = 0
+    while i < len(body):
+        ch = body[i]
+        if ch != "\\":
+            out.append(ch)
+            i += 1
+            continue
+        nxt = body[i + 1:i + 2]
+        if nxt in _MINI_ESC:
+            out.append(_MINI_ESC[nxt])
+            i += 2
+        elif nxt in ("u", "U"):
+            width = 4 if nxt == "u" else 8
+            digits = body[i + 2:i + 2 + width]
+            if len(digits) != width or not all(c in "0123456789abcdefABCDEF" for c in digits):
+                return _MINI_SKIP
+            code = int(digits, 16)
+            if code > 0x10FFFF or 0xD800 <= code <= 0xDFFF:
+                return _MINI_SKIP
+            out.append(chr(code))
+            i += 2 + width
+        else:
+            return _MINI_SKIP
+    return "".join(out)
+
+
 def _mini_value(raw: str) -> Any:
     raw = raw.strip()
+    for q in ('"""', "'''"):
+        if raw.startswith(q):
+            # One-line multi-line string; one that spans lines is skipped.
+            if len(raw) >= 6 and raw.endswith(q):
+                inner = raw[3:-3]
+                return _mini_basic(inner) if q == '"""' else inner
+            return _MINI_SKIP
     if raw.startswith('"') and raw.endswith('"') and len(raw) >= 2:
-        try:
-            return json.loads(raw)
-        except ValueError:
-            return raw[1:-1]
+        inner = raw[1:-1]
+        if re.search(r'(?<!\\)(?:\\\\)*"', inner):
+            return _MINI_SKIP  # an unescaped quote: not one string
+        return _mini_basic(inner)
     if raw.startswith("'") and raw.endswith("'") and len(raw) >= 2:
-        return raw[1:-1]
+        inner = raw[1:-1]
+        return _MINI_SKIP if "'" in inner else inner
     if raw in ("true", "false"):
         return raw == "true"
     try:
@@ -176,7 +224,177 @@ def _mini_value(raw: str) -> Any:
     try:
         return float(raw.replace("_", ""))
     except ValueError:
-        return raw
+        return _MINI_SKIP
+
+
+_MINI_WS = " \t"
+_MINI_INLINE_KEY_RE = re.compile(_MINI_PART + r"(?:[ \t]*\.[ \t]*" + _MINI_PART + r")*")
+
+
+def _mini_inline(raw: str) -> Any:
+    """A one-line inline table, `{ a = 1, b.c = "x", d = { e = true } }`, as
+    a dict. A value inside it that the subset cannot read leaves that key
+    out; anything malformed gives _MINI_SKIP (the whole key is left out)."""
+    pos = 0
+    n = len(raw)
+
+    def ws():
+        nonlocal pos
+        while pos < n and raw[pos] in _MINI_WS:
+            pos += 1
+
+    def string_end(q: str) -> int:
+        i = pos + 1
+        while i < n:
+            if raw[i] == "\\" and q == '"':
+                i += 2
+                continue
+            if raw[i] == q:
+                return i + 1
+            i += 1
+        raise ValueError("unterminated string")
+
+    def skip_array():
+        nonlocal pos
+        depth = 0
+        while pos < n:
+            ch = raw[pos]
+            if ch in "\"'":
+                pos = string_end(ch)
+                continue
+            if ch in "[{":
+                depth += 1
+            elif ch in "]}":
+                depth -= 1
+                if depth == 0:
+                    pos += 1
+                    return
+            pos += 1
+        raise ValueError("unterminated array")
+
+    def table(depth: int) -> dict:
+        nonlocal pos
+        if depth > 8:
+            raise ValueError("too deep")
+        out: Dict[str, Any] = {}
+        pos += 1  # "{"
+        ws()
+        if pos < n and raw[pos] == "}":
+            pos += 1
+            return out
+        while True:
+            ws()
+            m = _MINI_INLINE_KEY_RE.match(raw, pos)
+            if not m:
+                raise ValueError("bad key")
+            parts = [_mini_key_part(x) for x in _MINI_PART_RE.findall(m.group(0))]
+            pos = m.end()
+            ws()
+            if pos >= n or raw[pos] != "=":
+                raise ValueError("no =")
+            pos += 1
+            ws()
+            if pos >= n:
+                raise ValueError("no value")
+            ch = raw[pos]
+            if ch == "{":
+                value: Any = table(depth + 1)
+            elif ch == "[":
+                skip_array()
+                value = _MINI_SKIP
+            else:
+                start = pos
+                if ch in "\"'":
+                    pos = string_end(ch)
+                else:
+                    while pos < n and raw[pos] not in ",}":
+                        pos += 1
+                value = _mini_value(raw[start:pos])
+            if value is not _MINI_SKIP:
+                target = out
+                for part in parts[:-1]:
+                    nxt = target.get(part)
+                    if not isinstance(nxt, dict):
+                        nxt = {}
+                        target[part] = nxt
+                    target = nxt
+                target[parts[-1]] = value
+            ws()
+            if pos < n and raw[pos] == ",":
+                pos += 1
+                continue
+            if pos < n and raw[pos] == "}":
+                pos += 1
+                return out
+            raise ValueError("expected , or }")
+
+    try:
+        raw = raw.strip()
+        n = len(raw)
+        if not raw.startswith("{"):
+            return _MINI_SKIP
+        result = table(0)
+        ws()
+        return result if pos == n else _MINI_SKIP
+    except (ValueError, IndexError, RecursionError):
+        return _MINI_SKIP
+
+
+_MINI_OPEN = object()  # an array that goes on on the next line
+
+
+def _mini_array(raw: str) -> Any:
+    """An array of strings, numbers and booleans, `["a", 'b', 3,]`, as a list.
+    _MINI_OPEN when it is not closed yet (a multi-line array: the caller
+    appends the next line); _MINI_SKIP for anything else (nested arrays,
+    inline tables, a value the subset cannot read)."""
+    raw = raw.strip()
+    if not raw.startswith("["):
+        return _MINI_SKIP
+    out = []
+    pos, n = 1, len(raw)
+    expect_value = True
+    while True:
+        while pos < n and raw[pos] in " \t\r\n":
+            pos += 1
+        if pos >= n:
+            return _MINI_OPEN
+        ch = raw[pos]
+        if ch == "]":
+            return out if pos == n - 1 else _MINI_SKIP
+        if ch == ",":
+            if expect_value:
+                return _MINI_SKIP
+            expect_value = True
+            pos += 1
+            continue
+        if not expect_value or ch in "[{":
+            return _MINI_SKIP
+        start = pos
+        if ch in "\"'":
+            pos += 1
+            while pos < n and raw[pos] != ch:
+                pos += 2 if (raw[pos] == "\\" and ch == '"') else 1
+            if pos >= n:
+                return _MINI_SKIP  # a string does not go on to the next line
+            pos += 1
+        else:
+            while pos < n and raw[pos] not in ",] \t\r\n":
+                pos += 1
+        value = _mini_value(raw[start:pos])
+        if value is _MINI_SKIP:
+            return _MINI_SKIP
+        out.append(value)
+        expect_value = False
+
+
+def _mini_key_part(part: str) -> str:
+    if part.startswith('"'):
+        text = _mini_basic(part[1:-1])
+        return text if isinstance(text, str) else part[1:-1]
+    if part.startswith("'"):
+        return part[1:-1]  # literal string: no escapes
+    return part
 
 
 def _mini_split_key(header: str) -> list:
@@ -214,8 +432,25 @@ def muted_all() -> bool:
 def _mini_toml(text: str) -> Dict[str, Any]:
     root: Dict[str, Any] = {}
     cur = root
+    open_quote = None  # inside a multi-line string: skip to its closing quotes
+    pending = None  # a multi-line array: (target table, key parts, text so far)
     for line in text.splitlines():
+        if open_quote:
+            if open_quote in line:
+                open_quote = None
+            continue
         line = _mini_strip_comment(line).strip()
+        if pending is not None:
+            target, parts, buf = pending
+            buf += "\n" + line
+            value = _mini_array(buf)
+            if value is _MINI_OPEN and len(buf) < 65536:
+                pending = (target, parts, buf)
+                continue
+            pending = None
+            if isinstance(value, list):
+                _mini_set(target, parts, value)
+            continue
         if not line:
             continue
         if line.startswith("["):
@@ -232,14 +467,34 @@ def _mini_toml(text: str) -> Dict[str, Any]:
             continue
         m = _MINI_KEY_RE.match(line)
         if m:
-            key = m.group(1)
-            if key.startswith('"'):
-                try:
-                    key = json.loads(key)
-                except ValueError:
-                    key = key[1:-1]
-            cur[key] = _mini_value(m.group(2))
+            raw_value = m.group(2).strip()
+            if raw_value.startswith("["):
+                value = _mini_array(raw_value)
+                if value is _MINI_OPEN:
+                    pending = (cur, [_mini_key_part(p) for p in _MINI_PART_RE.findall(m.group(1))], raw_value)
+                    continue
+            elif raw_value.startswith("{"):
+                value = _mini_inline(raw_value)
+            else:
+                value = _mini_value(raw_value)
+            if value is _MINI_SKIP:
+                raw = m.group(2).strip()
+                for q in ('"""', "'''"):
+                    if raw.startswith(q) and not (len(raw) >= 6 and raw.endswith(q)):
+                        open_quote = q
+                continue
+            _mini_set(cur, [_mini_key_part(p) for p in _MINI_PART_RE.findall(m.group(1))], value)
     return root
+
+
+def _mini_set(target: Dict[str, Any], parts: list, value: Any) -> None:
+    for part in parts[:-1]:  # dotted key: a.b = 1 is a = {b = 1}
+        nxt = target.get(part)
+        if not isinstance(nxt, dict):
+            nxt = {}
+            target[part] = nxt
+        target = nxt
+    target[parts[-1]] = value
 
 
 def say_argv() -> list:
@@ -254,6 +509,12 @@ def fallback_mode(cfg: Dict[str, Any]) -> str:
     value = env if env else _get(cfg, "daemon", "fallback", default="say")
     value = str(value).strip().lower()
     return value if value in ("say", "none") else "say"
+
+
+def early_say(cfg: Dict[str, Any]) -> bool:
+    """[daemon] early_say (default true): speak <say> blocks while Claude is
+    still writing (MessageDisplay). Anything but `false` keeps it on."""
+    return _get(cfg, "daemon", "early_say", default=True) is not False
 
 
 def profile_max_chars(cfg: Dict[str, Any], profile: Optional[str]) -> int:
@@ -301,6 +562,8 @@ def load_state(session_id: object) -> Dict[str, Any]:
 
 def save_state(session_id: object, state: Dict[str, Any]) -> None:
     """Atomically write session state (write temp file, then rename)."""
+    import tempfile
+
     d = state_dir()
     d.mkdir(mode=0o700, parents=True, exist_ok=True)
     state = dict(state)
@@ -317,6 +580,57 @@ def save_state(session_id: object, state: Dict[str, Any]) -> None:
         except OSError:
             pass
         raise
+
+
+STATE_LOCK_WAIT_S = 1.0
+
+
+@contextlib.contextmanager
+def state_lock(wait: float = STATE_LOCK_WAIT_S):
+    """An exclusive flock on state/.lock for a read-modify-write of a state
+    file (the hooks and the daemon's set_session both take it). Waits at
+    most `wait` seconds, then goes ahead without it: a lost update is better
+    than a hook that hangs. Yields whether the lock is held."""
+    fd = -1
+    held = False
+    try:
+        import fcntl
+
+        d = state_dir()
+        d.mkdir(mode=0o700, parents=True, exist_ok=True)
+        fd = os.open(str(d / ".lock"), os.O_RDWR | os.O_CREAT | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        if stat.S_ISREG(os.fstat(fd).st_mode):
+            deadline = time.monotonic() + max(0.0, wait)
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    held = True
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        break
+                    time.sleep(0.005)
+    except Exception:
+        held = False
+    try:
+        yield held
+    finally:
+        if fd >= 0:
+            try:
+                os.close(fd)  # also releases the flock
+            except OSError:
+                pass
+
+
+def update_state(session_id: object, change) -> Dict[str, Any]:
+    """Read the session state, let `change(state)` edit it in place, and save
+    it unless `change` returns False, all under state_lock(), so writers do
+    not undo each other's changes. Returns the state. Save errors raise."""
+    with state_lock():
+        st = load_state(session_id)
+        if change(st) is not False:
+            save_state(session_id, st)
+        return st
 
 
 # --------------------------------------------------------------------------- #

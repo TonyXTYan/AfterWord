@@ -160,6 +160,17 @@
   .toml pre.gut { color: var(--muted); text-align: right; user-select: none; -webkit-user-select: none; position: sticky; left: 0;
                   background: color-mix(in srgb, var(--bg) 70%, var(--panel)); border-right: 1px solid var(--line); min-width: 44px; }
   .toml pre.src { flex: 1; min-width: 0; }
+  table.pn td { padding: 4px 6px; }
+  table.pn td:first-child { width: 34%; } table.pn td:last-child { width: 1%; white-space: nowrap; }
+  table.pn input[type=text] { width: 100%; min-width: 0; font-family: var(--mono); font-size: 12px; }
+  table.pn tr.bad input.k { border-color: var(--error); }
+  table.pn tr.changed td:first-child { box-shadow: inset 3px 0 0 var(--queued); }
+  .pl-row { display: grid; grid-template-columns: minmax(7em, auto) 1fr auto; gap: 5px 6px; align-items: center;
+            border-top: 1px solid var(--line); padding: 7px 0; min-width: 0; }
+  .pl-row input[type=text] { width: 100%; min-width: 0; font-family: var(--mono); font-size: 12px; }
+  .pl-row .pl-more { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+  #view-lab .pl-row .pl-more select { width: auto; max-width: 15em; flex: 0 1 auto; }
+  #view-lab .pl-row .pl-more input[type=number] { width: 5.5em; flex: none; }
 
   /* ---- voice lab ---- */
   #view-lab { display: flex; flex-direction: column; gap: 14px; }
@@ -210,6 +221,11 @@
   .msg.err { color: var(--error); } .msg.ok { color: var(--spoken); } .msg.run { color: var(--queued); font-family: var(--mono); }
   .msg.info { color: var(--muted); }
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+  .al-set { display: flex; gap: 8px 10px; align-items: center; flex-wrap: wrap; }
+  .al-pools { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
+  .al-pools textarea { width: 100%; min-height: 120px; resize: vertical; font-size: 12.5px; }
+  .al-pools .ev { display: flex; gap: 6px; align-items: center; font-size: 12px; margin-bottom: 4px; }
+  .al-pools .ev b { font-size: 12px; } .al-pools textarea.bad { border-color: var(--error); }
 
   /* engine strip */
   .engine { display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; }
@@ -266,6 +282,37 @@
   .rec .clock { font-family: var(--mono); font-size: 13px; }
   .rec .clock.on { color: var(--error); }
   .readme { font-size: 13px; border-left: 3px solid var(--accent); padding: 4px 10px; background: var(--soft); border-radius: 0 6px 6px 0; }
+
+  /* seed explorer */
+  #view-lab .ex-num { width: 6.5em; flex: none; }
+  .ex-status { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 6px; min-height: 1.4em; overflow-wrap: anywhere; }
+  .ex-status b { color: var(--ink); font-weight: 600; }
+  .ex-takes { display: flex; flex-direction: column; max-height: 340px; overflow-y: auto; border: 1px solid var(--line);
+              border-radius: 7px; margin-top: 6px; outline: none; }
+  .ex-takes:empty { display: none; }
+  .ex-take { display: grid; grid-template-columns: auto 5em minmax(0, 1fr) auto auto; gap: 4px 8px; align-items: center;
+             padding: 4px 8px; border-top: 1px solid var(--line); font-size: 12.5px; cursor: pointer; min-width: 0; }
+  .ex-take:first-child { border-top: 0; }
+  .ex-take:hover { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+  .ex-take.sel { background: var(--soft); box-shadow: inset 3px 0 0 var(--accent); }
+  .ex-take.dropped { opacity: .45; }
+  .ex-take.pending { color: var(--muted); cursor: default; grid-template-columns: auto minmax(0, 1fr); }
+  .ex-take .seed { font-family: var(--mono); font-weight: 600; white-space: nowrap; }
+  .ex-take .meta { display: flex; gap: 10px; align-items: center; min-width: 0; font-family: var(--mono); font-size: 11.5px; color: var(--muted); flex-wrap: wrap; }
+  .ex-take .meta b { color: var(--ink); font-weight: 500; }
+  .ex-take button { font-size: 12px; padding: 1px 7px; }
+  .ex-take button.on { color: var(--queued); border-color: color-mix(in srgb, var(--queued) 45%, var(--line)); }
+  .ex-take.playing .play { color: var(--accent); border-color: var(--accent); }
+  .f0bar { position: relative; display: inline-block; width: 64px; height: 6px; border-radius: 3px; flex: none;
+           background: color-mix(in srgb, var(--muted) 18%, transparent); }
+  .f0bar i { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: color-mix(in srgb, var(--accent) 35%, transparent); }
+  .f0bar b { position: absolute; top: -2px; width: 2px; height: 10px; background: var(--accent); }
+  .ex-star .res { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; padding-left: 10px; border-left: 2px solid var(--line); }
+  .ex-star .res .r { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; min-width: 0; }
+  .ex-star .res audio { height: 26px; flex: 1; min-width: 160px; max-width: 320px; }
+  .ex-star .res .txt { font-size: 12px; color: var(--muted); flex-basis: 100%; overflow-wrap: anywhere; }
+  .drift-ok { color: var(--spoken); } .drift-warn { color: var(--queued); } .drift-bad { color: var(--error); }
+  kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
 </style>
 </head>
 <body>
@@ -400,6 +447,10 @@
         <div class="field"><label class="lbl" for="pr-max">Max chars</label>
           <div class="row"><input type="number" id="pr-max" min="1" step="1" value="400"></div></div>
         <div class="field"><label class="lbl" for="pr-sayv">Fallback say</label><select id="pr-sayv"></select></div>
+        <h3 class="sub">Voice per language <span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">(optional)</span></h3>
+        <div class="hint" style="margin-bottom:6px">Mixed lines are split by script (Chinese, Japanese, Korean, the rest) and each part is spoken with its language’s voice. Empty fields use the profile’s.</div>
+        <div id="pr-langs"></div>
+        <div class="bar"><button id="pr-addlang" class="small" title="Give one more language its own voice">+ Language</button><span class="msg" id="pr-langmsg"></span></div>
         <div class="hint" id="pr-summary"></div>
         <div class="bar"><button id="pr-save" class="primary">Save profile</button><span class="msg" id="pr-msg"></span></div>
       </section>
@@ -440,6 +491,7 @@
         <div class="bar">
           <button id="t-preview" class="primary" title="⌘/Ctrl + Enter">Preview</button>
           <label class="chk"><input type="checkbox" id="t-autoplay" checked> autoplay</label>
+          <label class="chk" title="Speak the text exactly as typed, without the pronunciation list (Config page). Unticked: the global list, plus the own entries of the profile named under Profiles (Load sets it)"><input type="checkbox" id="t-nopron"> skip pronunciations</label>
           <span class="msg" id="t-msg"></span>
         </div>
         <h3 class="sub">Same voice, every language</h3>
@@ -470,6 +522,31 @@
         </div>
       </section>
 
+      <section class="panel" aria-label="explore seeds" id="ex-panel">
+        <h2>Explore seeds <span class="grow"></span><span class="msg" id="ex-msg" style="text-transform:none;letter-spacing:0;font-weight:400"></span></h2>
+        <div class="hint" style="margin-bottom:8px">Renders the builder’s voice with seed after seed (start, start + 1, …), a few takes ahead of the one you are on, so you can listen through them quickly. Live speech always goes first.
+          Keys: <kbd>space</kbd> play · <kbd>j</kbd> / <kbd>k</kbd> next / previous · <kbd>s</kbd> star · <kbd>x</kbd> drop.</div>
+        <div class="field top"><label class="lbl" for="ex-text">Text</label>
+          <div><textarea id="ex-text" rows="2" maxlength="1000" placeholder="Leave empty to use the main text"></textarea></div></div>
+        <div class="field"><label class="lbl" for="ex-seed">Start seed</label>
+          <div class="row"><input type="number" id="ex-seed" class="ex-num" min="0" step="1" value="1">
+            <label class="hint" for="ex-ahead">takes ahead</label><input type="number" id="ex-ahead" class="ex-num" min="1" max="20" step="1" value="4"></div></div>
+        <div class="field"><label class="lbl" for="ex-fmin">Pitch</label>
+          <div class="row"><input type="number" id="ex-fmin" class="ex-num" min="0" step="5" placeholder="min Hz">
+            <span class="hint">to</span><input type="number" id="ex-fmax" class="ex-num" min="0" step="5" placeholder="max Hz">
+            <span class="hint">Hz (median)</span></div></div>
+        <div class="bar">
+          <button id="ex-start" class="primary">Start</button>
+          <button id="ex-stop" disabled>Stop</button>
+          <label class="chk" title="When a take ends, play the next one"><input type="checkbox" id="ex-auto"> auto-advance</label>
+          <label class="chk"><input type="checkbox" id="ex-showdrop"> show dropped</label>
+        </div>
+        <div class="ex-status" id="ex-status">Not running.</div>
+        <div class="ex-takes" id="ex-takes" role="listbox" aria-label="takes"></div>
+        <h3 class="sub">Starred <span class="hint" id="ex-starcount" style="text-transform:none;letter-spacing:0;font-weight:400"></span></h3>
+        <div class="list" id="ex-stars"><span class="hint">Star a take (<kbd>s</kbd>) to keep it; stars survive daemon restarts.</span></div>
+      </section>
+
       <section class="panel" aria-label="results">
         <h2>Results <span class="grow"></span><button id="r-clear">Clear</button></h2>
         <div class="results" id="r-list"><span class="hint" id="r-empty">Previews appear here, newest first.</span></div>
@@ -488,6 +565,49 @@
   <section class="panel" aria-label="engine status">
     <h2>Engine</h2>
     <div class="engine" id="c-engine"><span class="hint">Loading…</span></div>
+  </section>
+  <section class="panel" aria-label="pronunciations">
+    <h2>Pronunciations <span class="grow"></span><span class="msg" id="pn-msg"></span>
+      <label class="hint" for="pn-table" style="text-transform:none;letter-spacing:0;font-weight:400">table</label><select id="pn-table" title="Which [pronounce] table to edit"></select></h2>
+    <div class="hint" style="margin-bottom:8px">Words rewritten before they are spoken, in every line, the voice lab and the <code>say</code> fallback. The longest match wins; a word that begins or ends with a letter or digit only matches whole words (<code>uv</code> leaves <code>uvicorn</code> alone); an all-lowercase word ignores case, one with capitals matches exactly. Profile tables override the global one.</div>
+    <table class="pn"><thead><tr><th>Word</th><th>Spoken as</th><th></th></tr></thead><tbody id="pn-rows"><tr><td colspan="3" class="hint">Loading…</td></tr></tbody></table>
+    <div class="bar">
+      <button id="pn-add" title="Add a row">Add word</button>
+      <button id="pn-save" class="primary" disabled title="Write this table to config.toml (comments are kept)">Save</button>
+      <button id="pn-revert" disabled>Revert</button>
+      <span class="hint" id="pn-state"></span>
+    </div>
+    <div class="hint" id="pn-hearhint" style="margin-top:6px"></div>
+    <div class="msg err" id="pn-warn" hidden style="display:block;margin-top:6px"></div>
+  </section>
+  <section class="panel" aria-label="spoken alerts">
+    <h2>Spoken alerts <span class="grow"></span><span class="msg" id="al-msg"></span></h2>
+    <div class="hint" style="margin-bottom:8px">A short line when Claude needs you (a permission prompt, a question), sits idle, or finished a long turn with nothing spoken. Alerts speak even when a session’s voice is off, but not when it (or everything) is muted. Changes here are written to <code>[alerts]</code> in config.toml.</div>
+    <div class="al-set">
+      <label class="chk"><input type="checkbox" id="al-on"> <b>alerts on</b></label>
+      <span class="row" id="al-events"></span>
+      <label class="hint" for="al-profile">voice</label><select id="al-profile" title="[alerts] profile"></select>
+      <label class="hint" for="al-when">permission</label><select id="al-when" title="[alerts] permission_when">
+        <option value="away">when away (after ~6 s)</option><option value="now">at once</option></select>
+      <label class="hint" for="al-after">done after</label><input type="number" id="al-after" min="0" max="86400" step="5" style="width:80px" title="[alerts] done_after_s"><span class="hint">s</span>
+    </div>
+    <h2 style="margin-top:14px">Phrases <span class="grow"></span>
+      <label class="hint" for="al-lang" style="text-transform:none;letter-spacing:0;font-weight:400">language</label><select id="al-lang"></select></h2>
+    <div class="hint" id="al-src" style="margin-bottom:6px"></div>
+    <div class="al-pools" id="al-pools"><span class="hint">Loading…</span></div>
+    <div class="bar">
+      <button id="al-save" class="primary" disabled title="Write this language's phrases to alerts.json">Save</button>
+      <button id="al-revert" disabled>Revert</button>
+      <button id="al-builtin" title="Remove this language from alerts.json: the built-in phrases apply">Use built-in</button>
+      <span class="hint" id="al-state"></span>
+    </div>
+    <div class="bar" style="margin-top:12px">
+      <label class="hint" for="al-gprofile">Generate with</label><select id="al-gprofile" title="Profile whose language, style and persona the phrases are written for"></select>
+      <input type="number" id="al-count" min="1" max="30" value="12" style="width:64px" title="phrases per event">
+      <input type="text" id="al-persona" placeholder="persona (optional, e.g. a dry-witted butler)" maxlength="2000" style="flex:1;min-width:200px" title="Defaults to the profile's persona; not saved">
+      <button id="al-gen" title="Run claude -p --model haiku and merge its phrases into alerts.json">Generate phrases</button>
+    </div>
+    <div class="msg err" id="al-warn" hidden style="display:block;margin-top:6px"></div>
   </section>
   <section class="panel" aria-label="config.toml">
     <h2>config.toml <span class="hint" id="c-lines" style="text-transform:none;letter-spacing:0;font-weight:400"></span><span class="grow"></span><span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">read-only</span></h2>
@@ -512,8 +632,12 @@ function timingsLine(t) {
   if (t.hook_ms != null) bits.push(`hook ${t.hook_ms}ms`);
   if (t.synth_ms != null) bits.push(`synth ${t.synth_ms}ms`);
   if (t.rtf != null) bits.push(`rtf ${t.rtf}`);
-  if (t.first_audio_ms != null) bits.push(`first audio ${t.first_audio_ms}ms`);
+  if (t.first_chunk_ms != null) bits.push(`first chunk ${t.first_chunk_ms}ms`);
+  if (t.first_audio_ms != null) bits.push(`first audio ${t.first_audio_ms}ms${t.stream === true ? " (streamed)" : ""}`);
   if (replayRate(t) != null) bits.push(`played ${replayRate(t)}×`);
+  if (Array.isArray(t.segments) && t.segments.length > 1)
+    bits.push(`${t.segments.length} parts ${t.segments.map(s => (s && s.lang) || "auto").join("·")}`);
+  if (isNum(t.early_dropped) && t.early_dropped > 0) bits.push(`${t.early_dropped} spoken early`);
   return bits.join(" · ");
 }
 // The pace a clip was actually played at (timings.playback_rate), or null for 1.0x / unknown.
@@ -618,16 +742,18 @@ function matches(e) {
 }
 
 function rowHtml(e) {
-  const evName = e.kind === "hook" ? (e.hook_event || "hook") : e.kind;
+  const alertEv = e.kind === "alert" && e.parsed && e.parsed.alert ? e.parsed.alert.event : null;
+  const evName = e.kind === "hook" ? (e.hook_event || "hook") : alertEv ? `alert · ${alertEv}` : e.kind;
   const via = e.delivery === "spool" ? ` <span class="via" title="daemon was down; imported from spool">(spooled)</span>` : "";
   const text = e.text ? esc(e.text) : "";
-  const reason = e.reason ? `<div class="reason">${esc(e.reason)}</div>` : "";
+  const spoken = e.timings && typeof e.timings.spoken_text === "string" ? `<div class="reason" title="after the pronunciation list">spoken as: ${esc(e.timings.spoken_text)}</div>` : "";
+  const reason = (e.reason ? `<div class="reason">${esc(e.reason)}</div>` : "") + spoken;
   const prof = e.profile ? `<small>${esc(e.profile)}</small>` : "";
   return `<tr class="ev" data-id="${esc(e.id)}">
     <td class="t">${esc(e.id)}</td>
     <td class="t">${esc(fmtTime(e.ts))}</td>
     <td class="sess" title="${esc(e.session_id)}\n${esc(e.cwd)}">${esc(shortId(e.session_id))}<small>${esc(base(e.cwd))}</small>${prof}</td>
-    <td>${esc(evName)}${via}</td>
+    <td${e.hook_event === "early" && e.kind === "hook" ? ' title="spoken while Claude was still writing (MessageDisplay hook)"' : ""}>${esc(evName)}${via}</td>
     <td><span class="badge s-${esc(cls(e.status))}">${esc(e.status)}</span></td>
     <td class="text">${text}${reason}</td>
     <td class="t">${esc(timingsLine(e.timings))}</td>
@@ -841,6 +967,7 @@ function connect() {
   es.addEventListener("queue", (m) => { const q = parse(m); if (q) showQueue(q); });
   es.addEventListener("sessions", (m) => { const d = parse(m); if (d) sse.emit("sessions", d); });
   es.addEventListener("mute", (m) => { const d = parse(m); if (d) MuteAll.set(d.muted_all); });
+  es.addEventListener("explore", (m) => { const d = parse(m); if (d) sse.emit("explore", d); });
 }
 
 // ===================================================================
@@ -849,7 +976,7 @@ function connect() {
 const Stats = (() => {
   const METRICS = [
     ["hook_ms", "hook", "ms"], ["hook_to_daemon_ms", "hook → daemon", "ms"], ["synth_ms", "synthesis", "ms"],
-    ["rtf", "real-time factor", ""], ["first_audio_ms", "first audio", "ms"],
+    ["rtf", "real-time factor", ""], ["first_chunk_ms", "first chunk", "ms"], ["first_audio_ms", "first audio", "ms"],
   ];
   let visible = false, timer = null, loading = false;
   const fmt = (v, unit) => {
@@ -1474,7 +1601,15 @@ const Lab = (() => {
     const body = {text};
     for (const k of ["voice", "ref_text", "lang", "pace", "style", "mood", "seed", "temperature"]) if (s[k] != null) body[k] = s[k];
     if (body.seed === undefined) body.seed = null;
+    if ($("t-nopron").checked) body.skip_pronounce = true;
+    else if (builderProfile()) body.pronounce_profile = builderProfile();
     return body;
+  }
+  // The profile the builder holds (Load sets the name field): its own
+  // [profiles.x.pronounce] entries apply to builder previews too.
+  function builderProfile() {
+    const name = $("pr-name").value.trim();
+    return name && Object.prototype.hasOwnProperty.call(profilesMap(), name) ? name : null;
   }
   async function preview(body) {
     const r = await api("POST", "/api/lab/preview", body);
@@ -1513,6 +1648,8 @@ const Lab = (() => {
       h("div", {class: "card-top"}, opt.tag ? h("span", {class: "tag"}, opt.tag) : null, audio,
         h("span", {class: "mono muted", title: "preview id"}, res.id || "")),
       opt.hideText ? null : h("div", {class: "txt"}, res.text || ""),
+      res.spoken_text ? h("div", {class: "hint", title: res.pronounce_profile ? `after the pronunciation list (global + ${res.pronounce_profile})` : "after the pronunciation list (global)"},
+        "spoken as: ", h("span", {class: "mono"}, res.spoken_text)) : null,
       h("div", {class: "kv"}, set),
       h("div", {class: "kv"}, tim),
       h("div", {class: "actions"},
@@ -1650,6 +1787,7 @@ const Lab = (() => {
     }
     const body = {text, profile: slot.slice(2)};
     if (seed != null) body.seed = seed;
+    if ($("t-nopron").checked) body.skip_pronounce = true;
     return {body};
   }
   async function doAB() {
@@ -1704,6 +1842,325 @@ const Lab = (() => {
     playChain([a._audio, b._audio]);
   }
 
+  // ---------- seed explorer (docs/lab-api.md, "Seed explorer") ----------
+  const ex = {
+    state: null,          // GET /api/lab/explore .state
+    takes: new Map(),     // preview id -> take (insertion order = seed order)
+    sel: null,            // selected take id
+    dropped: new Set(),   // ids hidden with x (this page only)
+    want: null,           // {play} while waiting for a take past the end
+    stars: [],
+    starOf: new Map(),    // preview id -> star id
+    checks: new Map(),    // star id -> stability result (or {busy})
+  };
+  const exPlayer = new Audio();
+  exPlayer.preservesPitch = true; exPlayer.webkitPreservesPitch = true;
+  const EX_ACTIVE = new Set(["running", "waiting", "paused"]);
+  const f0Text = (t) => isNum(t.f0_hz) ? `${Math.round(t.f0_hz)} Hz` : "— Hz";
+  const spreadText = (t) => isNum(t.f0_spread_hz) ? `±${Math.round(t.f0_spread_hz / 2)}` : "";
+  function f0Bar(t) {
+    // 70-400 Hz on a log scale: the band is the 10th-90th percentile, the mark the median.
+    const pos = (f) => Math.max(0, Math.min(100, 100 * Math.log(f / 70) / Math.log(400 / 70)));
+    const bar = h("span", {class: "f0bar", title: isNum(t.f0_hz) ? `median ${t.f0_hz} Hz, 10th-90th percentile spread ${t.f0_spread_hz} Hz` : "no pitch estimate"});
+    if (isNum(t.f0_hz)) {
+      const half = isNum(t.f0_spread_hz) ? t.f0_spread_hz / 2 : 0;
+      const lo = pos(Math.max(70, t.f0_hz - half)), hi = pos(Math.min(400, t.f0_hz + half));
+      bar.append(h("i", {style: `left:${lo}%;width:${Math.max(1, hi - lo)}%`}), h("b", {style: `left:calc(${pos(t.f0_hz)}% - 1px)`}));
+    }
+    return bar;
+  }
+  function exFilter() {
+    const lo = parseFloat($("ex-fmin").value), hi = parseFloat($("ex-fmax").value);
+    return {lo: Number.isFinite(lo) ? lo : null, hi: Number.isFinite(hi) ? hi : null};
+  }
+  function exShown(t) {
+    if (ex.dropped.has(t.id) && !$("ex-showdrop").checked) return false;
+    const {lo, hi} = exFilter();
+    if (lo == null && hi == null) return true;
+    if (!isNum(t.f0_hz)) return false;
+    return (lo == null || t.f0_hz >= lo) && (hi == null || t.f0_hz <= hi);
+  }
+  const exList = () => [...ex.takes.values()].filter(exShown);
+  function exStatus() {
+    const st = ex.state;
+    const running = !!st && EX_ACTIVE.has(st.status);
+    $("ex-stop").disabled = !running;
+    $("ex-start").textContent = running ? "Restart" : "Start";
+    if (!st || !st.id) { $("ex-status").replaceChildren("Not running."); return; }
+    const shown = exList().length;
+    const bits = [h("b", null, st.status), ` · ${st.count} take${st.count === 1 ? "" : "s"}`];
+    if (shown !== ex.takes.size) bits.push(` (${shown} shown)`);
+    if (st.status === "running" && st.rendering != null) bits.push(` · rendering seed ${st.rendering}`);
+    if (st.status === "waiting") bits.push(` · ${st.ahead} ahead of seed ${st.cursor}; move on for more`);
+    if (st.preempted) bits.push(` · paused ${st.preempted}× for live speech`);
+    if (st.reason && st.status !== "waiting") bits.push(` · ${st.reason}`);
+    if (ex.want) {
+      const f = exFilter();
+      bits.push(f.lo != null || f.hi != null ? " · waiting for the next take in the pitch filter…" : " · waiting for the next take…");
+    }
+    $("ex-status").replaceChildren(...bits);
+  }
+  function exRow(t) {
+    const starred = ex.starOf.has(t.id);
+    const row = h("div", {class: "ex-take" + (t.id === ex.sel ? " sel" : "") + (ex.dropped.has(t.id) ? " dropped" : "") + (exPlayer.dataset.id === t.id && !exPlayer.paused ? " playing" : ""),
+      role: "option", "aria-selected": t.id === ex.sel ? "true" : "false", "data-id": t.id,
+      onclick: (e) => { if (!e.target.closest("button")) exSelect(t.id, {play: true}); }},
+      h("button", {class: "play", title: "Play (space)", onclick: () => exSelect(t.id, {play: true})}, "▶"),
+      h("span", {class: "seed", title: "seed"}, String(t.seed)),
+      h("span", {class: "meta"}, f0Bar(t), h("span", null, h("b", null, f0Text(t)), " ", spreadText(t)),
+        h("span", null, num(t.audio_s, 1) != null ? num(t.audio_s, 1) + " s" : "")),
+      h("button", {class: starred ? "on" : "", title: starred ? "Starred" : "Star (s)", onclick: () => { exSelect(t.id); exStar(); }}, starred ? "★" : "☆"),
+      h("button", {title: ex.dropped.has(t.id) ? "Bring back" : "Drop: hide this take (x)", onclick: () => { exSelect(t.id); exDrop(); }}, ex.dropped.has(t.id) ? "↺" : "✕"));
+    return row;
+  }
+  function exPaint() {
+    const box = $("ex-takes");
+    const rows = exList().map(exRow);
+    const st = ex.state;
+    if (st && st.status === "running" && st.rendering != null)
+      rows.push(h("div", {class: "ex-take pending"}, h("span", {class: "seed"}, String(st.rendering)), h("span", null, "rendering…")));
+    const top = box.scrollTop;
+    box.replaceChildren(...rows);
+    box.scrollTop = top;
+    exStatus();
+  }
+  function exScrollSel() {
+    const el = ex.sel && $("ex-takes").querySelector(`[data-id="${CSS.escape(ex.sel)}"]`);
+    if (el) el.scrollIntoView({block: "nearest"});
+  }
+  let cursorTimer = null;
+  function exCursor(seed, auto) {
+    clearTimeout(cursorTimer);
+    cursorTimer = setTimeout(async () => {
+      const r = await api("POST", "/api/lab/explore/cursor", {seed, auto: !!auto});
+      if (r.ok && r.data) { ex.state = r.data.state; exStatus(); }
+    }, 120);
+  }
+  function exSelect(id, opt = {}) {
+    const t = ex.takes.get(id);
+    if (!t) return;
+    ex.sel = id; ex.want = null;
+    exPaint(); exScrollSel();
+    if (ex.state && EX_ACTIVE.has(ex.state.status) && t.explore_id === ex.state.id) exCursor(t.seed, opt.auto);
+    if (opt.play) exPlay();
+  }
+  function exPlay() {
+    const t = ex.takes.get(ex.sel);
+    if (!t) return;
+    for (const a of document.querySelectorAll("#view-lab audio")) a.pause();
+    if (exPlayer.dataset.id !== t.id) { exPlayer.src = t.url; exPlayer.dataset.id = t.id; }
+    exPlayer.defaultPlaybackRate = exPlayer.playbackRate = clampPace(t.pace ?? (t.settings || {}).pace);
+    play(exPlayer);
+  }
+  function exNext(dir, opt = {}) {
+    // Step from the selected take's place among all takes (it may be hidden:
+    // just dropped, or outside the pitch filter) to the next one shown.
+    const all = [...ex.takes.values()];
+    let i = all.findIndex(t => t.id === ex.sel);
+    if (i < 0) i = dir > 0 ? -1 : all.length;
+    for (let j = i + dir; j >= 0 && j < all.length; j += dir)
+      if (exShown(all[j])) return exSelect(all[j].id, opt);
+    if (dir > 0 && ex.state && EX_ACTIVE.has(ex.state.status)) {
+      // Past the last take: let the explorer render on, take the next one that shows.
+      const last = all[all.length - 1];
+      ex.want = {play: !!opt.play};
+      if (last) exCursor(last.seed, opt.auto);
+      exStatus();
+    }
+  }
+  function exArrived(t) {
+    if (!ex.want) return;
+    // Hidden by the filter: move the cursor on (as auto-advance, so the idle
+    // pause still applies) and keep waiting for one that shows.
+    if (!exShown(t)) { exCursor(t.seed, true); return; }
+    const play = ex.want.play;
+    ex.want = null;
+    exSelect(t.id, {play, auto: true});
+  }
+  async function exStar() {
+    const t = ex.takes.get(ex.sel);
+    if (!t) return;
+    if (ex.starOf.has(t.id)) return flashNote("ex-msg", `Seed ${t.seed} is already starred.`, "info", 3000);
+    const r = await api("POST", "/api/lab/stars", {preview_id: t.id});
+    if (!r.ok) return note("ex-msg", r.error, "err");
+    flashNote("ex-msg", `Starred seed ${t.seed}.`, "ok", 3000);
+    await exLoadStars();
+  }
+  function exDrop() {
+    const t = ex.takes.get(ex.sel);
+    if (!t) return;
+    if (ex.dropped.has(t.id)) { ex.dropped.delete(t.id); exPaint(); return; }
+    ex.dropped.add(t.id);
+    if (exPlayer.dataset.id === t.id) exPlayer.pause();
+    exPaint();
+    exNext(1);  // from the dropped take's place: the next shown one, or wait for it
+    if (ex.sel === t.id && !ex.want && !exShown(t)) exNext(-1);  // nothing after it, none coming
+  }
+  function exApply(view) {
+    const old = ex.state && ex.state.id;
+    ex.state = view.state;
+    if (!view.state || view.state.id !== old) { ex.takes.clear(); ex.dropped.clear(); ex.sel = null; ex.want = null; }
+    for (const t of view.takes || []) ex.takes.set(t.id, t);
+    if (!ex.sel && ex.takes.size) ex.sel = [...ex.takes.keys()][0];
+    exPaint();
+  }
+  async function exLoad() {
+    const r = await api("GET", "/api/lab/explore");
+    if (r.ok && r.data) exApply(r.data);
+  }
+  async function exStart() {
+    const text = textOf("ex-text") || textOf("t-text");
+    if (!text) return note("ex-msg", "Type a line (here or in the main text box).", "err");
+    const s = readBuilder();
+    const bad = builderProblem(s);
+    if (bad) return note("ex-msg", "Builder: " + bad, "err");
+    if (s.voice.startsWith("say:")) return note("ex-msg", "macOS say voices have no seeds; pick a Qwen voice in the builder.", "err");
+    const settings = previewBody(text, s);
+    delete settings.seed;
+    const start = parseInt($("ex-seed").value, 10);
+    const ahead = parseInt($("ex-ahead").value, 10);
+    const body = {settings, start_seed: Number.isFinite(start) ? start : 1, ahead: Number.isFinite(ahead) ? ahead : 4};
+    $("ex-start").disabled = true;
+    const r = await api("POST", "/api/lab/explore", body);
+    $("ex-start").disabled = false;
+    if (!r.ok) return note("ex-msg", r.error, "err");
+    note("ex-msg", "");
+    exPlayer.pause();
+    ex.state = null;
+    exApply(r.data);
+  }
+  async function exStop() {
+    const r = await api("POST", "/api/lab/explore/stop");
+    if (!r.ok) return note("ex-msg", r.error, "err");
+    ex.state = r.data.state; ex.want = null; exPaint();
+  }
+  function exEvent(d) {
+    if (d.type === "state") {
+      if (!ex.state || d.state.id !== ex.state.id) { exLoad(); return; }
+      ex.state = d.state; exPaint();
+    } else if (d.type === "take") {
+      const t = d.take;
+      if (!ex.state || t.explore_id !== ex.state.id) { exLoad(); return; }
+      ex.takes.set(t.id, t);
+      if (!ex.sel) ex.sel = t.id;
+      exPaint();
+      exArrived(t);
+    }
+  }
+  function exKey(e) {
+    if (!visible || e.metaKey || e.ctrlKey || e.altKey || !ex.takes.size) return;
+    const tg = e.target;
+    if (tg && (tg.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName))) return;
+    const k = e.key;
+    if (k === " " || k === "Spacebar") {
+      if (tg && /^(BUTTON|AUDIO|A|SUMMARY)$/.test(tg.tagName)) return;  // space activates those
+      e.preventDefault();
+      if (!ex.sel) exNext(1);
+      if (exPlayer.dataset.id === ex.sel && !exPlayer.paused) exPlayer.pause(); else exPlay();
+    } else if (k === "j") { e.preventDefault(); exNext(1, {play: true}); }
+    else if (k === "k") { e.preventDefault(); exNext(-1, {play: true}); }
+    else if (k === "s") { e.preventDefault(); exStar(); }
+    else if (k === "x") { e.preventDefault(); exDrop(); }
+  }
+
+  // ---------- starred shortlist ----------
+  async function exLoadStars() {
+    const r = await api("GET", "/api/lab/stars");
+    if (!r.ok || !r.data) return;
+    ex.stars = r.data.stars || [];
+    ex.starOf = new Map(ex.stars.map(s => [s.preview_id, s.id]));
+    if (r.data.error) note("ex-msg", r.data.error, "err");
+    exPaintStars();
+    exPaint();
+  }
+  function driftClass(st) { const a = Math.abs(st); return a < 1 ? "drift-ok" : a < 2.5 ? "drift-warn" : "drift-bad"; }
+  function exCheckNode(star) {
+    const c = ex.checks.get(star.id);
+    if (!c) return null;
+    if (c.busy) return h("div", {class: "res"}, h("span", {class: "msg run"}, "rendering 3 sentences with seed " + star.seed + "…"));
+    if (c.error) return h("div", {class: "res"}, h("span", {class: "msg err"}, c.error));
+    const rows = c.takes.map(t => {
+      const a = makeAudio(t.url, t.pace ?? (t.settings || {}).pace);
+      a.preload = "none";
+      return h("div", {class: "r"}, h("span", {class: "tag"}, String(t.check_lang || "").toUpperCase()), a,
+        h("span", {class: "mono"}, f0Text(t), " ", spreadText(t)),
+        isNum(t.f0_delta_st) ? h("span", {class: "mono " + driftClass(t.f0_delta_st), title: "pitch against the starred take, in semitones"},
+          (t.f0_delta_st > 0 ? "+" : "") + t.f0_delta_st.toFixed(1) + " st") : null,
+        h("span", {class: "txt"}, t.text));
+    });
+    const sum = isNum(c.max_delta_st)
+      ? h("span", {class: driftClass(c.max_delta_st)}, `largest pitch drift ${c.max_delta_st.toFixed(1)} semitones`)
+      : h("span", {class: "muted"}, "no pitch to compare");
+    return h("div", {class: "res"}, h("div", {class: "r"}, sum, c.errors && c.errors.length ? h("span", {class: "msg err"}, c.errors.join(" · ")) : null), rows);
+  }
+  function exPaintStars() {
+    $("ex-starcount").textContent = ex.stars.length ? `(${ex.stars.length})` : "";
+    if (!ex.stars.length) {
+      $("ex-stars").replaceChildren(h("span", {class: "hint"}, "Star a take (", h("kbd", null, "s"), ") to keep it; stars survive daemon restarts."));
+      return;
+    }
+    $("ex-stars").replaceChildren(...ex.stars.map(star => {
+      const msg = h("span", {class: "msg"});
+      const s = star.settings || {};
+      const a = makeAudio(star.url, s.pace);
+      a.preload = "none";
+      const busy = !!(ex.checks.get(star.id) || {}).busy;
+      return h("div", {class: "item ex-star"},
+        h("div", {class: "item-h"}, h("span", {class: "nm"}, "★ seed " + star.seed),
+          h("span", {class: "mono muted"}, f0Text(star), " ", spreadText(star)), f0Bar(star),
+          h("span", {class: "grow mono muted ell", title: s.voice || ""}, s.voice || "")),
+        a,
+        h("div", {class: "tr"}, star.text || ""),
+        star.note ? h("div", {class: "hint"}, star.note) : null,
+        h("div", {class: "actions"},
+          h("button", {disabled: busy, title: "Render this voice and seed on three other sentences (one in another language) and compare the pitch",
+            onclick: () => exStability(star)}, "Stability check"),
+          h("button", {title: "Freeze into a clip and save a profile that clones it, with this take's language, pace and seed",
+            onclick: () => exFreezeSave(star, msg)}, "Freeze & save"),
+          h("button", {onclick: () => { writeBuilder({...s, seed: star.seed}); note(msg, "Loaded into the builder.", "ok"); }}, "Load settings"),
+          h("button", {class: "danger", onclick: () => exUnstar(star, msg)}, "Delete"),
+          msg),
+        exCheckNode(star));
+    }));
+  }
+  async function exStability(star) {
+    ex.checks.set(star.id, {busy: true});
+    exPaintStars();
+    const r = await api("POST", "/api/lab/stability", {star_id: star.id});
+    ex.checks.set(star.id, r.ok ? r.data : {error: r.error});
+    exPaintStars();
+  }
+  async function exFreezeSave(star, msg) {
+    const s = star.settings || {};
+    const name = prompt("Name for the new clip and profile (voice = clone:<name>):", `seed-${star.seed}`);
+    if (name == null) return;
+    const nm = name.trim();
+    if (!NAME_RE.test(nm)) return note(msg, "Names: letters, digits, _ . - (start with a letter or digit, max 64).", "err");
+    note(msg, "freezing…", "run");
+    let r = await api("POST", "/api/lab/freeze", {star_id: star.id, name: nm});
+    if (r.status === 409) {
+      if (!confirm(`A clip named “${nm}” already exists. Replace it?`)) return note(msg, "Not saved.", "info");
+      r = await api("POST", "/api/lab/freeze", {star_id: star.id, name: nm, overwrite: true});
+    }
+    if (!r.ok) return note(msg, r.error, "err");
+    const prof = {name: nm, voice: "clone:" + nm, lang: s.lang || "auto", pace: clampPace(s.pace), seed: star.seed, overwrite: false};
+    r = await api("POST", "/api/lab/profiles", prof);
+    if (r.status === 409) {
+      if (!confirm(`Profile “${nm}” already exists. Overwrite it with clone:${nm}?`)) return note(msg, `Saved clip “${nm}”; profile not changed.`, "info");
+      r = await api("POST", "/api/lab/profiles", {...prof, overwrite: true});
+    }
+    if (!r.ok) return note(msg, `Saved clip “${nm}”, but the profile failed: ${r.error}`, "err");
+    note(msg, `Saved clip “${nm}” and profile “${nm}” (clone:${nm}, ${prof.lang}, ${prof.pace.toFixed(2)}×, seed ${star.seed}).`, "ok");
+    await refresh();
+  }
+  async function exUnstar(star, msg) {
+    if (!confirm(`Delete the star for seed ${star.seed}? Its audio file is removed.`)) return;
+    const r = await api("DELETE", "/api/lab/stars/" + encodeURIComponent(star.id));
+    if (!r.ok) return note(msg, r.error, "err");
+    ex.checks.delete(star.id);
+    await exLoadStars();
+  }
+
   // ---------- profiles ----------
   function profilesMap() {
     const p = (cat && cat.profiles) || {};
@@ -1723,6 +2180,8 @@ const Lab = (() => {
       const meta = [p.lang || "auto", clampPace(p.pace ?? 1).toFixed(2) + "×"];
       if (p.seed != null) meta.push("seed " + p.seed);
       if (p.temperature != null) meta.push("temp " + p.temperature);
+      const pl = Object.entries(p.langs || {});
+      if (pl.length) meta.push("langs " + pl.map(([c, v]) => v && v.voice ? `${c} (${v.voice})` : c).join(", "));
       return h("div", {class: "item"},
         h("div", {class: "item-h"}, h("span", {class: "nm"}, name),
           h("span", {class: "grow mono muted", style: "overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: p.voice || ""}, p.voice || ""),
@@ -1739,7 +2198,101 @@ const Lab = (() => {
     $("pr-name").value = name;
     $("pr-max").value = p.max_chars ?? 400;
     setSelect($("pr-sayv"), p.say_voice || "");
+    langRows = Object.entries(p.langs || {}).map(([lang, v]) => ({lang, ...(v || {})}));
+    langRowsFor = name; langRowsEdited = false;
+    paintLangs();
     note("pr-msg", `Loaded “${name}” into the builder.`, "ok");
+  }
+
+  // ---------- voice per language ([profiles.x.langs.*]) ----------
+  // Rows: {lang, voice?, say_voice?, pace?, ref_text?, style?, seed?}. The
+  // last three are not edited here but kept, so a save does not drop them.
+  // A save sends `langs` (which replaces the profile's language tables)
+  // only when the rows were loaded from a profile or edited here; otherwise
+  // (fresh page, nothing loaded) the server keeps the tables as they are.
+  let langRows = [], langRowsFor = null, langRowsEdited = false;
+  function langsEdited() { langRowsEdited = true; }
+  function langOptions() {
+    const codes = Object.keys((cat && cat.lang_codes) || {});
+    return codes.map(c => ({value: c, label: `${langName(c)} (${c})`}));
+  }
+  function langProblem() {
+    const seen = new Set();
+    for (const r of langRows) {
+      if (seen.has(r.lang)) return `${langName(r.lang)} is listed twice.`;
+      seen.add(r.lang);
+      if (r.pace != null && r.pace !== "" && !(Number(r.pace) >= 0.5 && Number(r.pace) <= 2)) return `${langName(r.lang)}: pace must be 0.5–2.`;
+    }
+    return null;
+  }
+  function langsBody() {
+    const out = {};
+    for (const r of langRows) {
+      const e = {};
+      for (const k of ["voice", "say_voice", "ref_text", "style"]) if (r[k] != null && String(r[k]).trim() !== "") e[k] = String(r[k]).trim();
+      if (r.pace != null && r.pace !== "") e.pace = Number(r.pace);
+      if (r.seed != null && r.seed !== "") e.seed = Number(r.seed);
+      out[r.lang] = e;
+    }
+    return out;
+  }
+  function paintLangs() {
+    const tbody = $("pr-langs");
+    note("pr-langmsg", langProblem() || "", "err");
+    if (!langRows.length) {
+      tbody.replaceChildren(h("div", {class: "hint"}, "One voice for every language."));
+      return;
+    }
+    const sv = [{value: "", label: "say: profile’s"}, ...((cat && cat.say_voices) || []).map(v => ({value: v.name, label: v.name}))];
+    tbody.replaceChildren(...langRows.map((r, i) => {
+      const lang = h("select", {"aria-label": "language", onchange: (ev) => { r.lang = ev.target.value; langsEdited(); paintLangs(); }});
+      fillSelect(lang, langOptions(), r.lang);
+      const voice = h("input", {type: "text", value: r.voice || "", placeholder: "voice: profile’s", spellcheck: "false",
+        "aria-label": "voice", title: "builtin:<Speaker>, clone:<clip>, design:<text> or say:<Voice>",
+        oninput: (ev) => { r.voice = ev.target.value; langsEdited(); }});
+      const fromBuilder = h("button", {class: "small", title: "Use the builder’s current voice for this language", onclick: () => {
+        const s = readBuilder();
+        r.voice = s.voice; voice.value = s.voice; langsEdited();
+        if (s.ref_text) r.ref_text = s.ref_text; else delete r.ref_text;
+      }}, "← builder");
+      const say = h("select", {"aria-label": "macOS say voice", title: "macOS voice used if Qwen3-TTS is unavailable",
+        onchange: (ev) => { r.say_voice = ev.target.value; langsEdited(); }});
+      fillSelect(say, sv, r.say_voice || "");
+      const pace = h("input", {type: "number", min: "0.5", max: "2", step: "0.05", value: r.pace ?? "", placeholder: "pace",
+        "aria-label": "pace", oninput: (ev) => { r.pace = ev.target.value; langsEdited(); note("pr-langmsg", langProblem() || "", "err"); }});
+      const msg = h("span", {class: "msg"});
+      const hear = h("button", {class: "small", title: "Hear this language’s sample with this voice", onclick: () => hearLang(r, msg)}, "▶");
+      const del = h("button", {class: "small danger", title: "Remove (then Save profile)", onclick: () => { langRows.splice(i, 1); langsEdited(); paintLangs(); }}, "✕");
+      return h("div", {class: "pl-row"}, lang, voice, del,
+        h("div", {class: "pl-more"}, fromBuilder, say, pace, hear, msg));
+    }));
+  }
+  function addLang() {
+    const used = new Set(langRows.map(r => r.lang));
+    const primary = normLang($("b-lang").value);
+    const free = langOptions().map(o => o.value).filter(c => !used.has(c));
+    const pick = free.find(c => c !== primary && ["zh", "ja", "ko"].includes(c)) || free.find(c => c !== primary) || free[0];
+    if (!pick) return note("pr-langmsg", "Every language already has a row.", "err");
+    langRows.push({lang: pick});
+    langsEdited();
+    paintLangs();
+  }
+  async function hearLang(r, msg) {
+    const s = readBuilder();
+    const voice = (r.voice || "").trim() || s.voice;
+    const settings = {...s, voice, lang: r.lang, pace: r.pace != null && r.pace !== "" ? clampPace(r.pace) : s.pace,
+      ref_text: (r.voice || "").trim() ? (r.ref_text || null) : s.ref_text, seed: r.seed ?? s.seed};
+    const bad = builderProblem(settings);
+    if (bad) return note(msg, bad, "err");
+    const text = ((cat && cat.samples) || {})[r.lang] || textOf("t-text");
+    if (!text) return note(msg, "No sample sentence for this language; type one in the test box.", "err");
+    const res = await withBusy("pr-langmsg", `${langName(r.lang)}…`, () => preview(previewBody(text, settings)));
+    if (!res) return;
+    if (!res.ok) return note(msg, res.error, "err");
+    const card = resultCard(res.data, {tag: r.lang.toUpperCase()});
+    pushResult(card);
+    play(card._audio);
+    refreshSoon();
   }
   async function deleteProfile(name, msg) {
     if (!confirm(`Delete profile “${name}” from config.toml?`)) return;
@@ -1754,21 +2307,31 @@ const Lab = (() => {
     const s = readBuilder();
     const bad = builderProblem(s);
     if (bad) return note("pr-msg", bad, "err");
+    const lp = langProblem();
+    if (lp) return note("pr-msg", "Voice per language: " + lp, "err");
     const max = parseInt($("pr-max").value, 10);
     const body = {
       name, voice: s.voice, ref_text: s.ref_text || "", lang: s.lang, pace: s.pace,
       style: [s.style, s.mood].filter(Boolean).join(", "),
       max_chars: Number.isFinite(max) && max > 0 ? max : 400,
-      say_voice: $("pr-sayv").value || "", seed: s.seed, temperature: s.temperature, overwrite: false,
+      say_voice: $("pr-sayv").value || "", seed: s.seed, temperature: s.temperature,
+      overwrite: false,
     };
+    const sendLangs = langRowsEdited || langRowsFor !== null;
+    if (sendLangs) body.langs = langsBody();
     $("pr-save").disabled = true;
     try {
       let r = await api("POST", "/api/lab/profiles", body);
       if (r.status === 409) {
-        if (!confirm(`Profile “${name}” already exists. Overwrite it?`)) return note("pr-msg", "Not saved.", "info");
+        const had = Object.keys((profilesMap()[name] || {}).langs || {});
+        const extra = !had.length ? "" : sendLangs
+          ? ` Its voices per language (${had.join(", ")}) will be replaced by the rows below.`
+          : ` Its voices per language (${had.join(", ")}) are kept.`;
+        if (!confirm(`Profile “${name}” already exists. Overwrite it?${extra}`)) return note("pr-msg", "Not saved.", "info");
         r = await api("POST", "/api/lab/profiles", {...body, overwrite: true});
       }
       if (!r.ok) return note("pr-msg", r.error, "err");
+      if (sendLangs) { langRowsFor = name; langRowsEdited = false; }
       note("pr-msg", `Saved “${name}”. The daemon reloads config.toml automatically.`, "ok");
       await refresh();
     } finally { $("pr-save").disabled = false; }
@@ -2067,6 +2630,7 @@ const Lab = (() => {
       return {value: rev[ln] || ln, label: cap(ln) + (rev[ln] ? ` (${rev[ln]})` : "")};
     });
     if (!sameJSON("langs", lo)) fillSelect($("b-lang"), lo);
+    if (!sameJSON("langrows", [Object.keys(cat.lang_codes || {}), sv])) paintLangs();
     // samples + every-language checkboxes
     const samples = cat.samples || {};
     if (!sameJSON("samples", samples)) {
@@ -2106,6 +2670,7 @@ const Lab = (() => {
       $("r-list").replaceChildren($("r-empty")); $("r-empty").hidden = false;
     });
     $("pr-save").addEventListener("click", saveProfile);
+    $("pr-addlang").addEventListener("click", addLang);
     $("pr-name").addEventListener("keydown", (e) => { if (e.key === "Enter") saveProfile(); });
     $("cl-upload").addEventListener("click", doUploadFile);
     $("cl-file").addEventListener("change", () => {
@@ -2117,6 +2682,14 @@ const Lab = (() => {
     $("rec-usetext").addEventListener("click", () => { $("cl-ref").value = $("rec-sentence").textContent; });
     $("rec-next").addEventListener("click", () => { sentenceIdx++; showSentence(); });
     $("eng-refresh").addEventListener("click", async () => { note("eng-msg", "refreshing…", "run"); await refresh(); note("eng-msg", ""); });
+    $("ex-start").addEventListener("click", exStart);
+    $("ex-stop").addEventListener("click", exStop);
+    for (const id of ["ex-fmin", "ex-fmax", "ex-showdrop"]) $(id).addEventListener("input", exPaint);
+    exPlayer.addEventListener("ended", () => { exPaint(); if ($("ex-auto").checked) exNext(1, {play: true, auto: true}); });
+    for (const ev of ["play", "pause"]) exPlayer.addEventListener(ev, exPaint);
+    document.addEventListener("keydown", exKey);
+    sse.on("explore", exEvent);
+    sse.on("open", () => { if (visible) { exLoad(); exLoadStars(); } });
     showSentence();
     abOptions();
     syncText();
@@ -2126,10 +2699,386 @@ const Lab = (() => {
   }
 
   return {
-    show() { visible = true; if (!started) { started = true; init(); } refresh(); },
+    show() { visible = true; if (!started) { started = true; init(); } refresh(); exLoad(); exLoadStars(); },
     engineStrip(box, eng, afterWarm) { renderEngine(eng, null, box, afterWarm); },
-    hide() { visible = false; },
+    hide() { visible = false; exPlayer.pause(); },
   };
+})();
+
+// ===================================================================
+// Pronunciations (Config page): GET/POST /api/pronounce (docs/gui-api.md)
+// ===================================================================
+const Pronounce = (() => {
+  let data = null;          // last GET /api/pronounce
+  let table = "";           // "" = global, else a profile name
+  let rows = [];            // [{key, value, orig}] being edited (orig: saved key or null)
+  let savedSig = null, dataSig = null, saving = false;
+  let limits = {entries: 500, key: 100, value: 300};
+  const player = new Audio();
+
+  const saved = () => !data ? {} : (table ? (data.profiles || {})[table] || {} : data.global || {});
+  const entriesSig = (pairs) => JSON.stringify(pairs);
+  // A saved key is kept verbatim (even " uv") until the user edits it; typed keys are trimmed.
+  const keyOf = (r) => r.orig !== null && r.key === r.orig ? r.key : r.key.trim();
+  const current = () => rows.map(r => [keyOf(r), r.value]);
+  const dirty = () => savedSig !== null && entriesSig(current()) !== savedSig;
+  const hearProfile = () => table || (data && data.default_profile) || null;
+
+  function problems() {
+    const seen = new Map(), bad = new Map();
+    rows.forEach((r, i) => {
+      const k = keyOf(r);
+      if (!k.trim()) { if (r.value.trim()) bad.set(i, "word is empty"); return; }
+      if (k.length > limits.key) bad.set(i, `word is longer than ${limits.key} characters`);
+      else if (r.value.length > limits.value) bad.set(i, `“spoken as” is longer than ${limits.value} characters`);
+      else if (seen.has(k)) bad.set(i, `“${k}” is listed twice`);
+      seen.set(k, i);
+    });
+    return bad;
+  }
+  function syncState() {
+    const bad = problems();
+    const isDirty = dirty();
+    $("pn-save").disabled = saving || !isDirty || bad.size > 0;
+    $("pn-revert").disabled = saving || !isDirty;
+    const n = rows.filter(r => keyOf(r).trim()).length;
+    $("pn-state").textContent = bad.size ? [...bad.values()][0]
+      : `${n} word${n === 1 ? "" : "s"}${isDirty ? " · unsaved changes" : ""}`;
+    $("pn-state").className = bad.size ? "msg err" : "hint";
+    $("pn-rows").querySelectorAll("tr[data-i]").forEach(tr => {
+      const i = Number(tr.dataset.i), r = rows[i];
+      tr.classList.toggle("bad", bad.has(i));
+      tr.classList.toggle("changed", !!r && (r.orig === null || r.orig !== keyOf(r) || saved()[r.orig] !== r.value));
+    });
+  }
+  function paintTables() {
+    const sel = $("pn-table");
+    const names = Object.keys((data && data.profiles) || {});
+    const want = ["", ...names];
+    const have = [...sel.options].map(o => o.value);
+    if (JSON.stringify(want) !== JSON.stringify(have)) {
+      sel.replaceChildren(h("option", {value: ""}, "global (every profile)"),
+        ...names.map(n => h("option", {value: n}, `profile ${n}`)));
+    }
+    if (!want.includes(table)) table = "";
+    sel.value = table;
+    const p = hearProfile();
+    $("pn-hearhint").textContent = p ? `▶ plays the “spoken as” text with profile ${p}${table ? "" : " (the default profile)"}.`
+      : "Add a profile in the Voice lab to hear entries.";
+  }
+  function paintRows(focusLast) {
+    const tbody = $("pn-rows");
+    if (!rows.length) {
+      tbody.replaceChildren(h("tr", null, h("td", {colspan: 3, class: "hint"},
+        table ? `No entries for ${table}: the global table applies.` : "No entries yet. Add a word, e.g. SQLite → sequel lite.")));
+      syncState();
+      return;
+    }
+    tbody.replaceChildren(...rows.map((r, i) => {
+      const key = h("input", {type: "text", value: r.key, maxlength: limits.key, placeholder: "word, e.g. kubectl", spellcheck: "false",
+        "aria-label": "word", class: "k", oninput: (ev) => { r.key = ev.target.value; syncState(); }, onkeydown: keys});
+      const val = h("input", {type: "text", value: r.value, maxlength: limits.value, placeholder: "spoken as, e.g. cube control",
+        "aria-label": "spoken as", oninput: (ev) => { r.value = ev.target.value; syncState(); }, onkeydown: keys});
+      const msg = h("span", {class: "msg"});
+      const hear = h("button", {class: "small", title: "Hear the “spoken as” text", onclick: () => hearIt(r, hear, msg)}, "▶");
+      const del = h("button", {class: "small danger", title: "Delete this word (then Save)", onclick: () => { rows.splice(i, 1); paintRows(); }}, "✕");
+      return h("tr", {"data-i": i}, h("td", null, key), h("td", null, val, msg), h("td", null, hear, " ", del));
+    }));
+    if (focusLast) tbody.querySelector("tr:last-child input").focus();
+    syncState();
+  }
+  function keys(ev) {
+    if (ev.key === "Enter") { ev.preventDefault(); if (!$("pn-save").disabled) save(); }
+  }
+  function loadTable() {
+    const t = saved();
+    rows = Object.entries(t).map(([k, v]) => ({key: k, value: String(v), orig: k}));
+    savedSig = entriesSig(Object.entries(t));
+    paintRows();
+  }
+  function paintWarnings() {
+    const w = (data && Array.isArray(data.warnings)) ? data.warnings.map(String) : [];
+    const box = $("pn-warn");
+    box.hidden = !w.length;
+    box.replaceChildren(...(w.length ? [
+      h("b", null, `${w.length} entr${w.length === 1 ? "y" : "ies"} in config.toml not used (and not shown above); fix ${w.length === 1 ? "it" : "them"} in the file. Saving here keeps ${w.length === 1 ? "it" : "them"} as written.`),
+      h("ul", null, w.slice(0, 20).map(x => h("li", {class: "mono"}, x))),
+    ] : []));
+  }
+  function apply(d) {
+    data = d;
+    if (d.limits && typeof d.limits === "object") limits = {...limits, ...d.limits};
+    paintTables();
+    paintWarnings();
+    loadTable();
+  }
+  async function load(force = false) {
+    if (saving) return;
+    // Never overwrite edits in progress (the Config page polls every 10 s).
+    if (!force && (dirty() || $("pn-rows").contains(document.activeElement))) return;
+    const r = await api("GET", "/api/pronounce");
+    if (!r.ok || !r.data) { note("pn-msg", `pronunciations unavailable: ${r.error || "empty response"}`, "err"); return; }
+    if ($("pn-msg").classList.contains("err")) note("pn-msg", "");
+    const sig = JSON.stringify(r.data);
+    if (!force && sig === dataSig) return;
+    dataSig = sig;
+    apply(r.data);
+  }
+  async function save() {
+    if (problems().size || saving) return;
+    saving = true; syncState();
+    note("pn-msg", "saving…", "run");
+    const entries = Object.fromEntries(current().filter(([k]) => k.trim()));
+    const r = await api("POST", "/api/pronounce", {profile: table || null, entries});
+    saving = false;
+    if (!r.ok || !r.data) { syncState(); return flashNote("pn-msg", `Save failed: ${r.error || "empty response"}`, "err", 10000); }
+    dataSig = JSON.stringify(r.data);
+    apply(r.data);
+    flashNote("pn-msg", "Saved to config.toml.", "ok", 4000);
+    Config.refresh();  // show the new file text
+  }
+  async function hearIt(r, btn, msg) {
+    const text = (r.value.trim() || r.key.trim());
+    const profile = hearProfile();
+    if (!text) return note(msg, "nothing to say", "err");
+    if (!profile) return note(msg, "no profile to speak with", "err");
+    btn.disabled = true; note(msg, "rendering…", "run");
+    const res = await api("POST", "/api/lab/preview", {text, profile, skip_pronounce: true});
+    btn.disabled = false;
+    if (!res.ok || !res.data || typeof res.data.url !== "string" || !res.data.url.startsWith("/api/lab/")) {
+      return note(msg, res.error || "render failed", "err");
+    }
+    note(msg, "");
+    const rate = clampRate(res.data.pace);
+    player.src = res.data.url;
+    player.preservesPitch = true; player.defaultPlaybackRate = rate; player.playbackRate = rate;
+    player.play().catch(() => note(msg, "the browser blocked playback; click again", "err"));
+  }
+  const clampRate = (p) => Math.min(2, Math.max(0.5, Number(p) || 1));
+
+  $("pn-add").addEventListener("click", () => { rows.push({key: "", value: "", orig: null}); paintRows(true); });
+  $("pn-save").addEventListener("click", () => save());
+  $("pn-revert").addEventListener("click", () => loadTable());
+  $("pn-table").addEventListener("change", (ev) => {
+    if (dirty() && !confirm("Discard unsaved pronunciation changes?")) { ev.target.value = table; return; }
+    table = ev.target.value;
+    paintTables();
+    loadTable();
+  });
+  window.addEventListener("beforeunload", (ev) => { if (dirty()) { ev.preventDefault(); ev.returnValue = ""; } });
+  return {load};
+})();
+
+// ===================================================================
+// Spoken alerts (Config page): GET/POST /api/alerts, /api/alerts/phrases,
+// /api/alerts/generate, /api/alerts/hear (docs/gui-api.md)
+// ===================================================================
+const Alerts = (() => {
+  let data = null, dataSig = null, lang = null, saving = false, busy = false;
+  let edits = {};            // event -> textarea text (current language)
+  const player = new Audio();
+  const EV_HELP = {permission: "Claude needs your OK for a tool", input: "a question or a form",
+                   idle: "~60 s after a reply, you haven't typed", done: "a long turn finished with nothing spoken"};
+
+  const linesOf = (t) => String(t || "").split("\n").map(x => x.trim()).filter(Boolean);
+  const savedText = (ev) => ((data && data.pools[lang]) || {})[ev] ? data.pools[lang][ev].join("\n") : "";
+  const dirty = () => !!data && Object.entries(edits).some(([ev, t]) => linesOf(t).join("\n") !== savedText(ev));
+  const placeholdersOf = (t) => [...String(t).matchAll(/\{([^{}]*)\}/g)].map(m => m[1]);
+
+  function problem(ev, text) {
+    const allowed = (data.placeholders || {})[ev] || [];
+    const max = (data.limits || {}).phrase || 120;
+    for (const [i, line] of linesOf(text).entries()) {
+      if (line.length > max) return `line ${i + 1}: longer than ${max} characters`;
+      for (const p of placeholdersOf(line)) if (!allowed.includes(p)) return `line ${i + 1}: {${p}} is not available here`;
+    }
+    return null;
+  }
+  function syncState() {
+    if (!data) return;
+    let bad = null;
+    for (const ev of data.events) {
+      const why = problem(ev, edits[ev] ?? savedText(ev));
+      const ta = $("al-pools").querySelector(`textarea[data-ev="${ev}"]`);
+      if (ta) { ta.classList.toggle("bad", !!why); ta.title = why || ""; }
+      bad = bad || (why ? `${ev}: ${why}` : null);
+    }
+    const isDirty = dirty();
+    $("al-save").disabled = saving || !isDirty || !!bad;
+    $("al-revert").disabled = saving || !isDirty;
+    $("al-builtin").disabled = saving || !(data.custom || {})[lang];
+    $("al-state").textContent = bad || (isDirty ? "unsaved changes" : "");
+    $("al-state").className = bad ? "msg err" : "hint";
+  }
+  function paintSettings() {
+    const st = data.settings;
+    $("al-on").checked = !!st.enabled;
+    $("al-events").replaceChildren(...data.events.map(ev => h("label", {class: "chk", title: EV_HELP[ev] || ""},
+      h("input", {type: "checkbox", checked: st.events.includes(ev), onchange: (e) => {
+        const set = new Set(data.settings.events);
+        if (e.target.checked) set.add(ev); else set.delete(ev);
+        saveSettings({events: data.events.filter(x => set.has(x))});
+      }}), ev)));
+    const names = data.profiles.map(p => p.name);
+    const opts = (sel, first) => {
+      const want = JSON.stringify([first, ...names]);
+      if (sel.dataset.sig !== want) {
+        sel.replaceChildren(...(first !== null ? [h("option", {value: ""}, first)] : []),
+          ...data.profiles.map(p => h("option", {value: p.name}, `${p.name} (${p.pool_lang})`)));
+        sel.dataset.sig = want;
+      }
+    };
+    opts($("al-profile"), "the session's, else the first");
+    $("al-profile").value = names.includes(st.profile) ? st.profile : "";
+    $("al-when").value = st.permission_when;
+    if (document.activeElement !== $("al-after")) $("al-after").value = st.done_after_s;
+    opts($("al-gprofile"), null);
+    if (!names.includes($("al-gprofile").value)) $("al-gprofile").value = data.default_profile || names[0] || "";
+    syncPersona();
+  }
+  function syncPersona() {
+    const p = data && data.profiles.find(x => x.name === $("al-gprofile").value);
+    $("al-persona").placeholder = p && p.persona ? `persona: ${p.persona}` : "persona (optional, e.g. a dry-witted butler)";
+  }
+  function paintLangs() {
+    const langs = Object.keys(data.pools);
+    for (const p of data.profiles) if (!langs.includes(p.pool_lang)) langs.push(p.pool_lang);
+    if (!langs.includes(lang)) {
+      const def = data.profiles.find(p => p.name === data.default_profile);
+      lang = def && langs.includes(def.pool_lang) ? def.pool_lang : langs[0];
+    }
+    const sel = $("al-lang");
+    sel.replaceChildren(...langs.map(l => h("option", {value: l}, l)));
+    sel.value = lang;
+  }
+  function paintPools() {
+    edits = {};
+    const custom = (data.custom || {})[lang] || [];
+    $("al-src").textContent = custom.length
+      ? `alerts.json sets ${custom.join(", ")} for ${lang}; the other events use the built-in phrases. One phrase per line; a random one is picked, never one of the last 3.`
+      : (data.builtin_langs || []).includes(lang)
+        ? `Built-in phrases for ${lang} (alerts.json has none). One phrase per line; Save writes them to alerts.json.`
+        : `No ${lang} phrases yet, so ${lang} profiles speak the English ones. Write some (one per line) and Save, or Generate.`;
+    $("al-pools").replaceChildren(...data.events.map(ev => {
+      const allowed = ((data.placeholders || {})[ev] || []).map(p => `{${p}}`).join(" ");
+      const ta = h("textarea", {"data-ev": ev, spellcheck: "false", "aria-label": `${ev} phrases`,
+        oninput: (e) => { edits[ev] = e.target.value; syncState(); }});
+      ta.value = savedText(ev);
+      const msg = h("span", {class: "msg"});
+      const hear = h("button", {class: "small", title: "Hear a random phrase from this box (sample values filled in)",
+        onclick: () => hearOne(ev, ta, hear, msg)}, "▶ hear one");
+      return h("div", null, h("div", {class: "ev"}, h("b", null, ev), h("span", {class: "hint grow", title: EV_HELP[ev] || ""}, allowed), hear),
+        ta, msg);
+    }));
+    syncState();
+  }
+  function paintWarnings() {
+    const w = [...(data.error ? [`alerts.json: ${data.error}`] : []), ...(data.warnings || []).map(String)];
+    $("al-warn").hidden = !w.length;
+    $("al-warn").replaceChildren(...(w.length ? [h("b", null, "Not used:"), h("ul", null, w.slice(0, 20).map(x => h("li", {class: "mono"}, x)))] : []));
+  }
+  function apply(d, keepEdits = false) {
+    data = d;
+    paintSettings();
+    paintWarnings();
+    if (!keepEdits) { paintLangs(); paintPools(); } else syncState();
+  }
+  async function load(force = false) {
+    if (saving || busy) return;
+    const r = await api("GET", "/api/alerts");
+    if (!r.ok || !r.data) { note("al-msg", `alerts unavailable: ${r.error || "empty response"}`, "err"); return; }
+    if ($("al-msg").classList.contains("err")) note("al-msg", "");
+    const sig = JSON.stringify(r.data);
+    if (!force && sig === dataSig) return;
+    dataSig = sig;
+    // Never overwrite phrases being edited (the Config page polls every 10 s).
+    apply(r.data, !force && (dirty() || $("al-pools").contains(document.activeElement)));
+  }
+  async function saveSettings(body) {
+    note("al-msg", "saving…", "run");
+    const r = await api("POST", "/api/alerts", body);
+    if (!r.ok || !r.data) { flashNote("al-msg", `Not saved: ${r.error || "empty response"}`, "err", 10000); if (data) paintSettings(); return; }
+    dataSig = JSON.stringify(r.data);
+    apply(r.data, true);
+    flashNote("al-msg", "Saved to config.toml.", "ok", 3000);
+    Config.refresh();
+  }
+  async function savePools(pools) {
+    saving = true; syncState();
+    note("al-msg", "saving…", "run");
+    const r = await api("POST", "/api/alerts/phrases", {lang, pools});
+    saving = false;
+    if (!r.ok || !r.data) { syncState(); return flashNote("al-msg", `Not saved: ${r.error || "empty response"}`, "err", 10000); }
+    dataSig = JSON.stringify(r.data);
+    apply(r.data);
+    flashNote("al-msg", pools ? "Saved to alerts.json." : `Built-in phrases restored for ${lang}.`, "ok", 4000);
+  }
+  async function hearOne(ev, ta, btn, msg) {
+    const lines = linesOf(ta.value);
+    if (!lines.length) return note(msg, "no phrase to hear", "err");
+    const phrase = lines[Math.floor(Math.random() * lines.length)];
+    const why = problem(ev, phrase);
+    if (why) return note(msg, why, "err");
+    const prof = data.profiles.find(p => p.pool_lang === lang && p.name === $("al-gprofile").value)
+      || data.profiles.find(p => p.pool_lang === lang) || data.profiles.find(p => p.name === $("al-gprofile").value);
+    btn.disabled = true; note(msg, "rendering…", "run");
+    const r = await api("POST", "/api/alerts/hear", {event: ev, phrase, lang, profile: prof ? prof.name : undefined});
+    btn.disabled = false;
+    if (!r.ok || !r.data || typeof r.data.url !== "string" || !r.data.url.startsWith("/api/lab/")) return note(msg, r.error || "render failed", "err");
+    note(msg, `“${r.data.alert_text}” (${r.data.alert_profile})`, "info");
+    const rate = Math.min(2, Math.max(0.5, Number(r.data.pace) || 1));
+    player.src = r.data.url;
+    player.preservesPitch = true; player.defaultPlaybackRate = rate; player.playbackRate = rate;
+    player.play().catch(() => note(msg, "the browser blocked playback; click again", "err"));
+  }
+  async function generate() {
+    if (busy) return;
+    if (dirty() && !confirm("Generating reloads the phrases; discard your unsaved edits?")) return;
+    busy = true; $("al-gen").disabled = true;
+    const profile = $("al-gprofile").value;
+    note("al-msg", `asking claude (haiku) for phrases for ${profile}… (this takes a while)`, "run");
+    const body = {profile, count: Math.max(1, Math.min(30, Number($("al-count").value) || 12))};
+    if ($("al-persona").value.trim()) body.persona = $("al-persona").value.trim();
+    const r = await api("POST", "/api/alerts/generate", body);
+    busy = false; $("al-gen").disabled = false;
+    if (!r.ok || !r.data) return flashNote("al-msg", `Not generated: ${r.error || "empty response"}`, "err", 15000);
+    const added = Object.values(r.data.added || {}).reduce((n, v) => n + v.length, 0);
+    const rej = (r.data.rejected || []).length;
+    lang = r.data.lang;
+    await load(true);
+    flashNote("al-msg", `${added} new ${r.data.lang} phrase${added === 1 ? "" : "s"} merged into alerts.json${rej ? ` (${rej} rejected)` : ""}.`, "ok", 10000);
+  }
+
+  $("al-on").addEventListener("change", (e) => saveSettings({enabled: e.target.checked}));
+  $("al-profile").addEventListener("change", (e) => saveSettings({profile: e.target.value}));
+  $("al-when").addEventListener("change", (e) => saveSettings({permission_when: e.target.value}));
+  $("al-after").addEventListener("change", (e) => {
+    // An empty (or half-typed) field is not 0: Number("") would be.
+    const raw = e.target.value.trim(), v = Number(raw);
+    if (raw !== "" && Number.isFinite(v) && v >= 0 && v <= 86400) saveSettings({done_after_s: v});
+    else {
+      flashNote("al-msg", "done after: 0 to 86400 seconds", "err");
+      if (data && data.settings) e.target.value = data.settings.done_after_s;
+    }
+  });
+  $("al-lang").addEventListener("change", (e) => {
+    if (dirty() && !confirm("Discard unsaved phrase changes?")) { e.target.value = lang; return; }
+    lang = e.target.value;
+    paintPools();
+  });
+  $("al-gprofile").addEventListener("change", syncPersona);
+  $("al-save").addEventListener("click", () => {
+    const pools = {};
+    for (const ev of data.events) { const l = linesOf(edits[ev] ?? savedText(ev)); if (l.length) pools[ev] = l; }
+    savePools(pools);
+  });
+  $("al-revert").addEventListener("click", () => paintPools());
+  $("al-builtin").addEventListener("click", () => {
+    if (confirm(`Remove the ${lang} phrases from alerts.json and use the built-in ones?`)) savePools(null);
+  });
+  $("al-gen").addEventListener("click", generate);
+  window.addEventListener("beforeunload", (ev) => { if (dirty()) { ev.preventDefault(); ev.returnValue = ""; } });
+  return {load};
 })();
 
 // ===================================================================
@@ -2197,14 +3146,15 @@ const Config = (() => {
     else if ($("c-msg").classList.contains("err")) note("c-msg", "");
     renderCfg(r.data);
   }
-  $("c-reload").addEventListener("click", () => load(true));
+  $("c-reload").addEventListener("click", () => { load(true); Pronounce.load(); Alerts.load(); });
   return {
     show() {
-      visible = true; load();
+      visible = true; load(); Pronounce.load(); Alerts.load();
       // Pick up hot reloads while the page is open (unchanged text is not re-rendered).
-      if (!timer) timer = setInterval(() => { if (visible && document.visibilityState === "visible") load(); }, 10000);
+      if (!timer) timer = setInterval(() => { if (visible && document.visibilityState === "visible") { load(); Pronounce.load(); Alerts.load(); } }, 10000);
     },
     hide() { visible = false; },
+    refresh() { if (visible) load(); },
   };
 })();
 

@@ -7,8 +7,17 @@
     "UserPromptSubmit": [
       {"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/afterword/hooks/afterword_hook.py\" user-prompt-submit", "timeout": 5}]}
     ],
+    "MessageDisplay": [
+      {"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/afterword/hooks/afterword_hook.py\" message-display", "async": true, "timeout": 5}]}
+    ],
     "Stop": [
       {"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/afterword/hooks/afterword_hook.py\" stop", "async": true, "timeout": 10}]}
+    ],
+    "PermissionRequest": [
+      {"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/afterword/hooks/afterword_hook.py\" permission-request", "async": true, "timeout": 10}]}
+    ],
+    "Notification": [
+      {"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/afterword/hooks/afterword_hook.py\" notification", "async": true, "timeout": 10}]}
     ]
   }
 }

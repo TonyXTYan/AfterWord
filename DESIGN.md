@@ -3,6 +3,10 @@
 Spoken replies for Claude Code, using local Qwen3-TTS on Apple Silicon.
 Speech is **off by default**, **set per session**, and **triggered only by a tag**.
 
+The v2 features (pronunciations, a voice per language, streaming and early
+speaking, spoken alerts, the seed explorer) are specified in
+[docs/design-v2.md](docs/design-v2.md); the rules below still hold.
+
 ## Goals (v1)
 1. Speak Claude Code replies only when Claude includes a `<say>` tag in a reply and the session has voice on.
 2. Each session gets its own voice profile, so parallel sessions can be told apart by ear.

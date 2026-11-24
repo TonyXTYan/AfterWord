@@ -631,12 +631,42 @@ def test_queue_uses_qwen_and_passes_pace_to_player(home, monkeypatch):
                 break
             await asyncio.sleep(0.02)
         worker.cancel()
-        return ev, d.player.last_rate
+        return ev, d.stream_player.last.rate, d.engine.models_made["custom_voice"].calls
 
-    ev, rate = run(main())
+    ev, rate, calls = run(main())
     assert ev["status"] == "spoken", ev
     assert ev["timings"]["synth_backend"] == "qwen" and ev["timings"]["model"] == "custom_voice"
+    assert ev["timings"]["stream"] is True
     assert rate == 1.05 and ev["timings"]["playback_rate"] == 1.05
+    # Live speech streams at a 1 s interval.
+    kw = calls[-1][1]
+    assert kw["stream"] is True and kw["streaming_interval"] == qwen.STREAMING_INTERVAL == 1.0
+
+
+def test_queue_v1_path_passes_pace_to_afplay_player(home, monkeypatch):
+    """[daemon] stream = false: the whole line is rendered, then played."""
+    (home / "config.toml").write_text(
+        '[daemon]\nstream = false\n[profiles.ember]\nvoice = "builtin:Aiden"\npace = 1.05\n'
+    )
+
+    async def main():
+        d = _daemon(home, monkeypatch, FakeEngine())
+        assert d.stream_player is None
+        worker = asyncio.create_task(d.worker())
+        ack = d.dispatch(json.dumps({"type": "test", "text": "hi", "profile": "ember"}).encode(), time.time())
+        for _ in range(100):
+            ev = d.events.get(ack["event_id"])
+            if ev["status"] in ("spoken", "error", "skipped"):
+                break
+            await asyncio.sleep(0.02)
+        worker.cancel()
+        return ev, d.player.last_rate, d.engine.models_made["custom_voice"].calls
+
+    ev, rate, calls = run(main())
+    assert ev["status"] == "spoken", ev
+    assert ev["timings"]["stream"] is False and ev["timings"]["playback_rate"] == 1.05
+    assert rate == 1.05
+    assert "stream" not in calls[-1][1]
 
 
 def test_queue_falls_back_to_say_when_model_missing(home, monkeypatch):

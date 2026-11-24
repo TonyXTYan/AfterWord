@@ -21,7 +21,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     ts          REAL NOT NULL,
-    kind        TEXT NOT NULL,              -- hook | test | system
+    kind        TEXT NOT NULL,              -- hook | test | system | alert
     hook_event  TEXT,                       -- Stop, ...
     session_id  TEXT,
     cwd         TEXT,
@@ -48,7 +48,7 @@ COLUMNS = (
     "reason", "text", "attrs", "parsed", "payload", "timings", "delivery", "clip", "error",
 )
 SUMMARY_COLUMNS = tuple(c for c in ("id",) + COLUMNS if c != "payload")
-STAT_KEYS = ("hook_ms", "hook_to_daemon_ms", "synth_ms", "rtf", "first_audio_ms")
+STAT_KEYS = ("hook_ms", "hook_to_daemon_ms", "synth_ms", "rtf", "first_chunk_ms", "first_audio_ms")
 
 
 def _summary_stats(values: list[float]) -> dict[str, Any]:
@@ -409,9 +409,14 @@ def _import_record(events: EventLog, rec: dict[str, Any]) -> bool:
         status, reason = "error", "error: malformed spool record"
     t_hook = rec.get("t_hook")
     ts = float(t_hook) if isinstance(t_hook, (int, float)) and not isinstance(t_hook, bool) else time.time()
+    # A spoken alert (the hook's `say` fallback) is an alert row, like the
+    # daemon's own, so it stays out of the speech stats.
+    alert = rec.get("alert") if isinstance(rec.get("alert"), dict) else None
+    if alert is not None and decision == "speak":
+        reason = reason.replace("spoken by say fallback", "alert spoken by say fallback")
     events.insert(
         ts=ts,
-        kind="hook",
+        kind="alert" if alert is not None and decision == "speak" else "hook",
         hook_event=_s(rec.get("event"), 64) or "",
         session_id=_s(rec.get("session_id"), 256),
         cwd=_s(rec.get("cwd")),
@@ -421,7 +426,8 @@ def _import_record(events: EventLog, rec: dict[str, Any]) -> bool:
         reason=reason,
         text=_s(rec.get("text"), 5000),
         attrs=rec.get("attrs") if isinstance(rec.get("attrs"), dict) else None,
-        parsed=rec.get("parsed") if isinstance(rec.get("parsed"), dict) else None,
+        parsed=rec.get("parsed") if isinstance(rec.get("parsed"), dict) else ({"alert": common.cap_strings(alert)}
+                                                                              if alert is not None else None),
         payload=common.cap_strings(rec.get("payload")),
         delivery="spool",
         error=_s(rec.get("fallback_error")),

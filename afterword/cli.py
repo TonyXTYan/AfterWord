@@ -1,4 +1,4 @@
-"""afterword serve | status | test "text" | install-hooks"""
+"""afterword serve | status | test "text" | models | alerts | install-hooks"""
 
 from __future__ import annotations
 
@@ -20,11 +20,16 @@ HOOK_SCRIPT = Path(__file__).resolve().parent / "hooks" / "afterword_hook.py"
 HOOK_MARKER = "afterword_hook.py"
 # event -> (argument, extra hook fields). UserPromptSubmit and SessionStart
 # must be synchronous: their output (the <say> instruction) is read before
-# the prompt goes to Claude. Stop is async: speaking never delays Claude.
+# the prompt goes to Claude. Stop, MessageDisplay, PermissionRequest and
+# Notification are async: speaking never delays Claude or holds the screen
+# (and an async PermissionRequest hook can never decide a permission).
 HOOK_EVENTS = {
     "SessionStart": ("session-start", {"timeout": 5}),
     "UserPromptSubmit": ("user-prompt-submit", {"timeout": 5}),
+    "MessageDisplay": ("message-display", {"async": True, "timeout": 5}),
     "Stop": ("stop", {"async": True, "timeout": 10}),
+    "PermissionRequest": ("permission-request", {"async": True, "timeout": 10}),
+    "Notification": ("notification", {"async": True, "timeout": 10}),
 }
 VOICE_COMMAND_SRC = Path(__file__).resolve().parent.parent / "commands" / "voice.md"
 VOICE_COMMAND_MARKER = "afterword:voice-command"
@@ -149,8 +154,12 @@ def _wait_for_event(event_id: int, timeout: float = 60.0) -> int:
             status = ev["status"]
             print(f"  … {status}")
         if status in ("spoken", "skipped", "error"):
-            t = ev.get("timings") or {}
+            t = dict(ev.get("timings") or {})
+            segments = t.pop("segments", None)
             print("  timings: " + ", ".join(f"{k}={v}" for k, v in t.items()))
+            for i, seg in enumerate(segments if isinstance(segments, list) else []):
+                if isinstance(seg, dict):
+                    print(f"  segment {i + 1}: " + ", ".join(f"{k}={v}" for k, v in seg.items() if v is not None))
             return 0 if status == "spoken" else 1
         time.sleep(0.1)
     print("  timed out waiting")
@@ -186,6 +195,44 @@ def cmd_models(args: argparse.Namespace) -> int:
         print(f"pulling {kind}: {repos[kind]}")
         snapshot_download(repos[kind])
     print("done. The daemon picks the models up on next use.")
+    return 0
+
+
+def cmd_alerts(args: argparse.Namespace) -> int:
+    """`afterword alerts generate|show`: works with or without the daemon
+    (it re-reads alerts.json when the file changes)."""
+    from afterword.daemon import alerts
+    from afterword.daemon.config import ConfigStore
+
+    store = ConfigStore()
+    phrases = alerts.AlertPhrases(common.home() / alerts.FILE_NAME)
+    cfg = store.get()
+    if args.action == "show":
+        pools = phrases.pools()
+        langs = [args.lang] if args.lang else list(pools)
+        for lang in langs:
+            for event, items in pools.get(lang, {}).items():
+                src = "alerts.json" if phrases.file_pools.get(lang, {}).get(event) else "built-in"
+                print(f"[{lang}] {event} ({len(items)}, {src})")
+                for p in items:
+                    print(f"  {p}")
+        for w in phrases.warnings:
+            print(f"warning: {w}")
+        return 0
+    name = args.profile or alerts.alert_profile_name(cfg, None)
+    print(f"asking claude (haiku) for {args.count} phrases per event for profile {name} …", flush=True)
+    try:
+        result = alerts.generate(cfg, phrases, args.profile, args.count, args.persona)
+    except alerts.AlertError as exc:
+        print(f"not generated: {exc}")
+        return 1
+    print(f"profile {result['profile']}, language {result['lang']}; merged into {phrases.path}")
+    for event, items in result["added"].items():
+        print(f"{event}: {len(items)} new")
+        for p in items:
+            print(f"  + {p}")
+    for r in result["rejected"]:
+        print(f"rejected {r}")
     return 0
 
 
@@ -364,6 +411,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("action", choices=("list", "pull"), nargs="?", default="list")
     s.add_argument("kinds", nargs="*", help="custom_voice, base, voice_design (default: all)")
     s.set_defaults(func=cmd_models)
+
+    s = sub.add_parser("alerts", help="spoken alert phrases: generate them with claude, or show them")
+    s.add_argument("action", choices=("generate", "show"))
+    s.add_argument("--profile", help="profile whose language, style and persona to write for (default: [alerts] profile, else the first)")
+    s.add_argument("--count", type=int, default=12, help="phrases per event (1-30, default 12)")
+    s.add_argument("--persona", help="persona note for this run (default: the profile's persona)")
+    s.add_argument("--lang", help="show: only this language")
+    s.set_defaults(func=cmd_alerts)
 
     s = sub.add_parser("install-hooks", help="add AfterWord's hooks to a Claude Code settings file")
     s.add_argument("--scope", choices=("user", "project", "local"), default="user",

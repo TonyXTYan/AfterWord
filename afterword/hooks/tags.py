@@ -11,8 +11,9 @@ Rules:
 - Tags inside Markdown code (fenced blocks, inline code spans) and HTML
   comments are ignored, so a reply can *talk about* the protocol without
   triggering it.
-- The last non-empty <say> wins ("end your reply with <say>"). The last
-  valid <voice> wins.
+- Every non-empty <say> is kept, in order, at most MAX_SAYS of them (extra
+  ones are dropped with a warning); `.say` is the last one (the v1 rule).
+  The last valid <voice> wins.
 - Unknown or invalid attributes are dropped and reported in `warnings`.
 
 This module is stdlib-only and must stay importable on Python 3.9+, because
@@ -35,6 +36,8 @@ __all__ = [
     "parse",
     "clean_text",
     "truncate",
+    "limit_says",
+    "MAX_SAYS",
     "PROFILE_NAME_RE",
 ]
 
@@ -44,6 +47,7 @@ _LANG_RE = re.compile(r"^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{1,8})*$")
 PACE_MIN = 0.5
 PACE_MAX = 2.0
 MOOD_MAX = 64
+MAX_SAYS = 4  # <say> blocks spoken per reply; extra ones are dropped
 
 # Opening tag name must be followed by whitespace, '/' or '>' so that
 # <sayings> or <voice-over> never match.
@@ -56,6 +60,9 @@ _ATTR_RE = re.compile(
 )
 
 _MASK = "\x00"
+
+
+SEGMENT_PREVIEW = 200  # characters of each block kept in to_dict()
 
 
 @dataclass
@@ -75,9 +82,16 @@ class VoiceTag:
 
 @dataclass
 class ParseResult:
-    says: List[SayTag] = field(default_factory=list)
+    says: List[SayTag] = field(default_factory=list)  # non-empty, in order, at most MAX_SAYS
     voices: List[VoiceTag] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    # For text that is still being written (early speaking): where a later
+    # closer could still change the parse. `open_says`: starts of <say>
+    # openers left unpaired (a later </say> pairs with them and nests the
+    # blocks after them); `open_comments`: starts of `<!--` with no `-->`
+    # after them (a later `-->` masks everything up to it).
+    open_says: List[int] = field(default_factory=list)
+    open_comments: List[int] = field(default_factory=list)
 
     @property
     def say(self) -> Optional[SayTag]:
@@ -97,6 +111,11 @@ class ParseResult:
         voice = self.voice
         return {
             "say": None if say is None else {"text": say.text, "attrs": dict(say.attrs)},
+            # A preview of each block (the spoken text goes in the hook's
+            # own `segments`); `chars` is the block's full length.
+            "segments": [
+                {"text": t.text[:SEGMENT_PREVIEW], "chars": len(t.text), "attrs": dict(t.attrs)} for t in self.says
+            ],
             "voice": None if voice is None else {"set": voice.profile or "off"},
             "say_count": len(self.says),
             "voice_count": len(self.voices),
@@ -129,11 +148,12 @@ def _mask_span(chars: List[str], start: int, end: int) -> None:
             chars[i] = _MASK
 
 
-def _mask_code(text: str) -> str:
+def _mask_code(text: str, open_comments: Optional[List[int]] = None) -> str:
     """Return a copy of `text`, same length, with code and comments masked.
 
     Positions are preserved, so a match found in the masked copy can be
-    sliced from the original text.
+    sliced from the original text. The start of each comment that has no
+    `-->` after it is appended to `open_comments` when given.
     """
     chars = list(text)
 
@@ -193,6 +213,8 @@ def _mask_code(text: str) -> str:
             if tok.group(0)[0] == "<":
                 k = bisect.bisect_left(comment_ends, tok.end() + 3)
                 end = comment_ends[k] if k < len(comment_ends) else block_end
+                if k >= len(comment_ends) and open_comments is not None:
+                    open_comments.append(tok.start())
                 _mask_span(chars, tok.start(), end)
                 consumed = end
             else:
@@ -318,6 +340,37 @@ def truncate(text: str, max_chars: int) -> str:
     return head.rstrip()
 
 
+MIN_SAY_CHARS = 20  # a later <say> is dropped when less than this is left of the total
+
+
+def limit_says(says: List[SayTag], max_chars: int, keep_index: bool = False) -> List[dict]:
+    """The <say> blocks as they are spoken: each truncated to `max_chars`,
+    all of them together to 2 x `max_chars` (counting a joining space).
+    A later block that would get fewer than MIN_SAY_CHARS is dropped.
+    Returns [{"text", "attrs"}] in order (plus "i", the block's index in
+    `says`, with keep_index). The result for the first k blocks does not
+    depend on later ones."""
+    out: List[dict] = []
+    budget = 2 * max_chars if max_chars > 0 else 0
+    for i, tag in enumerate(says):
+        if not tag.text:
+            continue
+        if max_chars > 0:
+            room = min(max_chars, budget - (1 if out else 0))
+            if room < (MIN_SAY_CHARS if out else 1):
+                break
+            text = truncate(tag.text, room)
+        else:
+            text = tag.text
+        if not text:
+            continue
+        out.append({"text": text, "attrs": dict(tag.attrs)})
+        if keep_index:
+            out[-1]["i"] = i
+        budget -= len(text) + (1 if len(out) > 1 else 0)
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Entry point                                                                 #
 # --------------------------------------------------------------------------- #
@@ -329,7 +382,7 @@ def parse(message: object) -> ParseResult:
     if not isinstance(message, str) or not message:
         return result
 
-    masked = _mask_code(message)
+    masked = _mask_code(message, result.open_comments)
 
     # Pair each </say> with the nearest preceding unpaired <say>, like
     # brackets. A bare "<say>" mentioned in prose then stays unpaired instead
@@ -338,6 +391,7 @@ def parse(message: object) -> ParseResult:
     marks += [(m.start(), 1, m) for m in _SAY_CLOSE_RE.finditer(masked)]
     marks.sort(key=lambda x: (x[0], x[1]))
     stack: List[re.Match] = []
+    ends: Dict[int, int] = {}  # start -> end of each kept block
     for _pos, kind, m in marks:
         if kind == 0:
             if not m.group(1).rstrip().endswith("/"):  # <say …/> is empty
@@ -351,11 +405,33 @@ def parse(message: object) -> ParseResult:
         text = clean_text(inner)
         if not text:
             result.warnings.append("say: empty tag ignored")
+            continue
         result.says.append(
             SayTag(text=text, attrs=attrs, raw=message[opener.start():m.end()], start=opener.start())
         )
+        ends[opener.start()] = m.end()
     if stack:
         result.warnings.append("say: %d unclosed tag(s) ignored" % len(stack))
+        result.open_says = [m.start() for m in stack]
+    # A block nested in another one is already part of the outer block's
+    # text: keep the outer one only (as v1 did), so nothing is said twice.
+    # Pairs are bracket-matched, so two blocks either nest or do not touch.
+    result.says.sort(key=lambda t: t.start)
+    outer: List[SayTag] = []
+    reach = -1
+    for t in result.says:
+        if t.start < reach:
+            continue
+        outer.append(t)
+        reach = ends[t.start]
+    if len(outer) < len(result.says):
+        result.warnings.append("say: %d nested tag(s) ignored" % (len(result.says) - len(outer)))
+        result.says = outer
+    if len(result.says) > MAX_SAYS:
+        result.warnings.append(
+            "say: %d extra tag(s) dropped (at most %d per reply)" % (len(result.says) - MAX_SAYS, MAX_SAYS)
+        )
+        del result.says[MAX_SAYS:]
 
     for m in _VOICE_RE.finditer(masked):
         raw = message[m.start():m.end()]
