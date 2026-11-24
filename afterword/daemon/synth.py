@@ -1,9 +1,12 @@
 """Speech synthesis backends.
 
 Each backend renders text to a WAV file. Synthesis is blocking and is run in
-a worker thread by the server. The Qwen3-TTS (mlx-audio) backend is the next
-build step; until then the macOS `say` backend renders the audio, so the
-whole pipeline (queue, timings, history, playback control) is real.
+a worker thread by the server.
+
+- qwen: Qwen3-TTS through mlx-audio (see qwen.py). Pace is applied at
+  playback (`playback_rate`), because the model has no speed control.
+- say:  macOS `say`; pace is applied while rendering.
+- null: silence, for tests.
 """
 
 from __future__ import annotations
@@ -28,6 +31,11 @@ class SynthResult:
     duration_s: float
     synth_s: float
     sample_rate: int
+    playback_rate: float = 1.0  # the player applies this (pace for qwen)
+    load_s: float = 0.0  # model load time paid by this render
+    seed: int | None = None
+    model: str | None = None
+    backend: str = ""
 
     @property
     def rtf(self) -> float | None:
@@ -83,7 +91,7 @@ class SaySynth:
                 return self.synth(text, _without_say_voice(profile), attrs, out)
             raise RuntimeError(f"say failed ({proc.returncode}): {err[:300]}")
         duration, rate = wav_duration(out)
-        return SynthResult(out, duration, synth_s, rate)
+        return SynthResult(out, duration, synth_s, rate, backend="say")
 
 
 def _without_say_voice(profile: Profile) -> Profile:
@@ -109,13 +117,55 @@ class NullSynth:
             w.setsampwidth(2)
             w.setframerate(rate)
             w.writeframes(struct.pack("<h", 0) * frames)
-        return SynthResult(out, frames / rate, time.perf_counter() - t, rate)
+        pace = float(attrs.get("pace") or profile.pace or 1.0)
+        return SynthResult(out, frames / rate, time.perf_counter() - t, rate, playback_rate=pace, backend="null")
 
 
-def make_synth(name: str) -> Synth:
+class QwenSynth:
+    """Qwen3-TTS via the shared QwenEngine."""
+
+    name = "qwen"
+
+    def __init__(self, engine, clips):
+        self.engine = engine
+        self.clips = clips
+
+    def synth(self, text: str, profile: Profile, attrs: dict[str, Any], out: Path) -> SynthResult:
+        from . import qwen, voices
+
+        spec = voices.parse_voice(profile.voice)
+        if spec.kind == "say":
+            from dataclasses import replace
+
+            return SaySynth().synth(text, replace(profile, say_voice=spec.value), attrs, out)
+        req = qwen.build_request(
+            text,
+            spec,
+            self.clips,
+            lang=attrs.get("lang") or profile.lang,
+            style=profile.style,
+            mood=attrs.get("mood"),
+            ref_text=profile.ref_text,
+            seed=profile.seed,
+            temperature=profile.temperature,
+        )
+        result = self.engine.render(req, limit=False)  # the playback queue is never refused
+        duration = voices.write_wav(out, result.audio, result.sample_rate)
+        pace = float(attrs.get("pace") or profile.pace or 1.0)
+        return SynthResult(
+            out, duration, result.synth_s, result.sample_rate,
+            playback_rate=pace, load_s=result.load_s, seed=result.seed, model=result.model, backend="qwen",
+        )
+
+
+def make_synth(name: str, engine=None, clips=None) -> Synth:
     name = (os.environ.get("AFTERWORD_SYNTH") or name or "say").lower()
+    if name == "qwen":
+        if engine is None or clips is None:
+            raise ValueError("the qwen synth needs an engine")
+        return QwenSynth(engine, clips)
     if name == "say":
         return SaySynth()
     if name == "null":
         return NullSynth()
-    raise ValueError(f"unknown synth backend {name!r} (available: say, null)")
+    raise ValueError(f"unknown synth backend {name!r} (available: qwen, say, null)")

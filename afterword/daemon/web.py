@@ -19,6 +19,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from . import state
+from .lab import LabError
+from .voices import CLIP_MAX_BYTES
 
 if TYPE_CHECKING:
     from .server import Daemon
@@ -101,6 +103,82 @@ def build_app(daemon: "Daemon", port: int) -> FastAPI:
         if not path.is_file():
             raise HTTPException(404, "clip not kept")
         return FileResponse(path, media_type="audio/wav")
+
+    # -- voice lab (contract: docs/lab-api.md) ---------------------------
+
+    @app.exception_handler(LabError)
+    async def lab_error(request: Request, exc: LabError):
+        return JSONResponse({"error": exc.message}, status_code=exc.status)
+
+    @app.exception_handler(Exception)
+    async def unexpected_error(request: Request, exc: Exception):
+        import logging
+
+        logging.getLogger("afterword.web").exception("%s %s failed", request.method, request.url.path)
+        return JSONResponse({"error": f"internal error: {type(exc).__name__}: {exc}"}, status_code=500)
+
+    async def json_body(request: Request):
+        try:
+            return await request.json()
+        except ValueError:
+            raise LabError(400, "request body is not valid JSON") from None
+
+    @app.get("/api/lab/catalog")
+    async def lab_catalog():
+        return await asyncio.to_thread(daemon.lab.catalog)
+
+    @app.post("/api/lab/preview")
+    async def lab_preview(request: Request):
+        return await daemon.lab.preview(await json_body(request))
+
+    @app.get("/api/lab/previews/{name}")
+    async def lab_preview_audio(name: str):
+        pid = name.removesuffix(".wav")
+        path = daemon.lab.preview_path(pid)
+        if path is None or not path.is_file():
+            raise LabError(404, "preview not found")
+        return FileResponse(path, media_type="audio/wav")
+
+    @app.post("/api/lab/profiles")
+    async def lab_save_profile(request: Request):
+        return daemon.lab.save_profile(await json_body(request))
+
+    @app.delete("/api/lab/profiles/{name}")
+    async def lab_delete_profile(name: str):
+        return daemon.lab.delete_profile(name)
+
+    @app.post("/api/lab/clips")
+    async def lab_add_clip(request: Request, name: str = "", consent: str = "", ref_text: str = "", overwrite: str = ""):
+        declared = request.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > CLIP_MAX_BYTES:
+            raise LabError(413, "clip is larger than 20 MB")
+        chunks, total = [], 0
+        async for chunk in request.stream():
+            total += len(chunk)
+            if total > CLIP_MAX_BYTES:
+                raise LabError(413, "clip is larger than 20 MB")
+            chunks.append(chunk)
+        truthy = ("1", "true", "yes", "on")
+        return await daemon.lab.add_clip(
+            name, b"".join(chunks), consent.lower() in truthy, ref_text, overwrite.lower() in truthy
+        )
+
+    @app.get("/api/lab/clips/{name}")
+    async def lab_clip_audio(name: str):
+        return FileResponse(daemon.lab.clip_path(name), media_type="audio/wav")
+
+    @app.delete("/api/lab/clips/{name}")
+    async def lab_delete_clip(name: str):
+        return daemon.lab.delete_clip(name)
+
+    @app.post("/api/lab/freeze")
+    async def lab_freeze(request: Request):
+        body = await json_body(request)
+        return await asyncio.to_thread(daemon.lab.freeze, body)
+
+    @app.post("/api/lab/warm")
+    async def lab_warm(request: Request):
+        return await daemon.lab.warm(await json_body(request))
 
     @app.get("/api/stream")
     async def stream(request: Request):

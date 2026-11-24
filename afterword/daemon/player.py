@@ -15,11 +15,18 @@ class AfplayPlayer:
         self._proc: asyncio.subprocess.Process | None = None
         self._stopped = False
 
-    async def play(self, path: Path) -> bool:
-        """Play to the end. Returns False if interrupted by stop()."""
+    async def play(self, path: Path, rate: float = 1.0) -> bool:
+        """Play to the end. Returns False if interrupted by stop().
+
+        `rate` changes speed; afplay's rate-scaled playback keeps the pitch
+        (Core Audio time-pitch), and -q 1 selects its higher quality mode.
+        """
         self._stopped = False
+        args = [str(path)]
+        if abs(rate - 1.0) > 0.005:
+            args = ["-r", f"{rate:.3f}", "-q", "1", str(path)]
         self._proc = await asyncio.create_subprocess_exec(
-            self.binary, str(path),
+            self.binary, *args,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
@@ -60,12 +67,14 @@ class NullPlayer:
     def __init__(self):
         self._event = asyncio.Event()
 
-    async def play(self, path: Path) -> bool:
+    async def play(self, path: Path, rate: float = 1.0) -> bool:
         from .synth import wav_duration
 
         self._event = asyncio.Event()
+        self.last_rate = rate
         try:
             duration, _ = wav_duration(path)
+            duration /= max(rate, 0.1)
         except Exception:
             duration = 0.0
         try:

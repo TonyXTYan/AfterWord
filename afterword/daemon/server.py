@@ -4,6 +4,7 @@ one asyncio loop in one process."""
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import contextlib
 import fcntl
 import json
@@ -21,7 +22,10 @@ from .config import ConfigStore
 from .log import EventLog, ingest_spool, setup_text_logging
 from .player import make_player
 from .queue import PlaybackQueue, QueueItem
-from .synth import make_synth
+from .lab import Lab
+from .qwen import EngineStopped, QwenEngine, mlx_audio_available
+from .synth import SaySynth, make_synth
+from .voices import MODEL_FOR_KIND, ClipStore, VoiceError, parse_voice
 
 log = logging.getLogger("afterword.daemon")
 
@@ -47,11 +51,13 @@ class Daemon:
         self.events = events
         cfg = store.get()
         self.queue = PlaybackQueue(cfg.daemon.max_queue)
-        try:
-            self.synth = make_synth(cfg.daemon.synth)
-        except ValueError as exc:
-            log.error("%s; using say", exc)
-            self.synth = make_synth("say")
+        self.voice_clips = ClipStore(home / "voices")
+        self.engine = QwenEngine(cfg.qwen.repos(), cfg.qwen.keep_loaded)
+        self.synth = self._make_synth(cfg.daemon.synth)
+        self.lab = Lab(home, store, self.engine, self.voice_clips, active_synth=lambda: self.synth.name)
+        self._stopping = False
+        # [qwen] edits apply on every reload, not just when a message plays.
+        store.on_reload(lambda c: self.engine.configure(c.qwen.repos(), c.qwen.keep_loaded))
         try:
             self.player = make_player(cfg.daemon.player)
         except ValueError as exc:
@@ -223,27 +229,56 @@ class Daemon:
                 self.events.update(item.event_id, status="skipped", reason="daemon shutting down")
                 raise
             except Exception as exc:
+                if self._stopping:
+                    self.events.update(item.event_id, status="skipped", reason="daemon shutting down")
+                    continue
                 log.exception("playback of event %s failed", item.event_id)
                 self.events.update(item.event_id, status="error", reason="error", error=f"{type(exc).__name__}: {exc}")
             finally:
                 self.queue.now_playing = None
                 self._publish_queue()
 
+    def _make_synth(self, name: str):
+        if name == "qwen" and not os.environ.get("AFTERWORD_SYNTH"):
+            ok, error = mlx_audio_available()
+            if not ok:
+                log.warning("%s; using say", error)
+                name = "say"
+        try:
+            return make_synth(name, engine=self.engine, clips=self.voice_clips)
+        except ValueError as exc:
+            log.error("%s; using say", exc)
+            return make_synth("say")
+
     def _refresh_backends(self) -> None:
         cfg = self.store.get()
         self.queue.max_size = cfg.daemon.max_queue
         if not os.environ.get("AFTERWORD_SYNTH") and cfg.daemon.synth != self.synth.name:
-            try:
-                self.synth = make_synth(cfg.daemon.synth)
+            new = self._make_synth(cfg.daemon.synth)
+            if new.name != self.synth.name:
+                self.synth = new
                 log.info("synth backend switched to %s", self.synth.name)
-            except ValueError as exc:
-                log.error("%s; keeping %s", exc, self.synth.name)
         if not os.environ.get("AFTERWORD_PLAYER") and cfg.daemon.player != self.player.name:
             try:
                 self.player = make_player(cfg.daemon.player)
                 log.info("player switched to %s", self.player.name)
             except ValueError as exc:
                 log.error("%s; keeping %s", exc, self.player.name)
+
+    def _synthesize(self, text, profile, attrs, out):
+        """Render with the configured backend. If Qwen3-TTS fails (model not
+        downloaded, bad voice spec, …) fall back to `say` so the line is
+        still heard; the reason is recorded on the event."""
+        try:
+            return self.synth.synth(text, profile, attrs, out), None
+        except Exception as exc:
+            if self.synth.name != "qwen" or self._stopping or isinstance(
+                exc, (EngineStopped, concurrent.futures.CancelledError)
+            ):
+                raise
+            note = f"qwen failed ({type(exc).__name__}: {exc}); spoke with say"
+            log.warning("%s", note)
+            return SaySynth().synth(text, profile, attrs, out), note
 
     async def _play_item(self, item: QueueItem) -> None:
         self._refresh_backends()
@@ -259,13 +294,21 @@ class Daemon:
             merge_timings={"queue_wait_ms": round((t_start - item.enqueued_at) * 1000, 1)},
         )
         out = self.clips_dir / f"{item.event_id}.wav"
-        result = await asyncio.to_thread(self.synth.synth, text, profile, dict(item.attrs), out)
+        result, note = await asyncio.to_thread(self._synthesize, text, profile, dict(item.attrs), out)
         timings = {
             "synth_ms": round(result.synth_s * 1000, 1),
             "audio_s": round(result.duration_s, 3),
             "rtf": round(result.rtf, 3) if result.rtf is not None else None,
-            "synth_backend": self.synth.name,
+            "synth_backend": result.backend or self.synth.name,
         }
+        if result.load_s:
+            timings["load_ms"] = round(result.load_s * 1000, 1)
+        if result.model:
+            timings["model"] = result.model
+        if result.seed is not None:
+            timings["seed"] = result.seed
+        if abs(result.playback_rate - 1.0) > 0.005:
+            timings["playback_rate"] = result.playback_rate
         if self._skip_current:
             self.events.update(item.event_id, status="skipped", reason="skipped by user", clip=str(out), merge_timings=timings)
             self._prune_clips(cfg.daemon.history)
@@ -273,14 +316,42 @@ class Daemon:
         t_play = time.time()
         origin = item.t_hook or item.enqueued_at
         timings["first_audio_ms"] = round((t_play - origin) * 1000, 1)
-        self.events.update(item.event_id, status="playing", clip=str(out), merge_timings=timings)
-        finished = await self.player.play(out)
+        self.events.update(item.event_id, status="playing", clip=str(out), merge_timings=timings, reason=note)
+        finished = await self.player.play(out, result.playback_rate)
         done = {"play_s": round(time.time() - t_play, 3)}
         if finished and not self._skip_current:
-            self.events.update(item.event_id, status="spoken", reason=None, merge_timings=done)
+            self.events.update(item.event_id, status="spoken", reason=note, merge_timings=done)
         else:
             self.events.update(item.event_id, status="skipped", reason="stopped by user", merge_timings=done)
         self._prune_clips(cfg.daemon.history)
+
+    def models_in_use(self) -> list[str]:
+        """Qwen model kinds the configured profiles need, in profile order."""
+        kinds: list[str] = []
+        for profile in self.store.get().profiles.values():
+            try:
+                kind = MODEL_FOR_KIND.get(parse_voice(profile.voice).kind)
+            except VoiceError:
+                continue
+            if kind and kind not in kinds:
+                kinds.append(kind)
+        return kinds
+
+    async def warm_models(self) -> None:
+        cfg = self.store.get()
+        if self.synth.name != "qwen" or not cfg.qwen.warm_on_start:
+            return
+        for kind in self.models_in_use()[: cfg.qwen.keep_loaded]:
+            if self.engine.snapshot_path(kind) is None:
+                log.warning("not warming %s: model not downloaded", kind)
+                continue
+            try:
+                load_s = await self.engine.warm_async(kind)
+                if load_s:
+                    self.events.insert(kind="system", status="info", reason=f"loaded Qwen3-TTS {kind} in {load_s:.1f} s")
+            except Exception as exc:
+                log.warning("warming %s failed: %s", kind, exc)
+                self.events.insert(kind="system", status="error", reason=f"could not load Qwen3-TTS {kind}", error=str(exc))
 
     def _prune_clips(self, keep: int) -> None:
         try:
@@ -327,6 +398,7 @@ class Daemon:
             "http": self.http_url,
             "synth": self.synth.name,
             "player": self.player.name,
+            "engine": self.engine.status(),
             "config": {
                 "path": str(self.store.path),
                 "error": self.store.error,
@@ -348,6 +420,7 @@ class Daemon:
                 log.exception("spool import failed")
 
     def request_shutdown(self) -> None:
+        self._stopping = True
         self._stop_event.set()
         self.events.publish("shutdown", None)  # ends open SSE streams promptly
         if self._uvicorn is not None:
@@ -419,6 +492,7 @@ async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) 
         os.chmod(sock_path, 0o600)
         tasks.append(asyncio.create_task(daemon.worker(), name="worker"))
         tasks.append(asyncio.create_task(daemon.spool_poller(), name="spool"))
+        tasks.append(asyncio.create_task(daemon.warm_models(), name="warm"))
 
         # Our own SIGINT/SIGTERM handling in both modes, so shutdown always
         # runs the cleanup below (uvicorn's own capture re-raises the signal
@@ -473,6 +547,8 @@ async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) 
             with contextlib.suppress(Exception):
                 loop.remove_signal_handler(sig)
         if daemon is not None:
+            daemon._stopping = True
+            daemon.engine.shutdown()  # cancel queued renders before the worker is cancelled
             with contextlib.suppress(Exception):
                 daemon.player.stop()
         for t in tasks:
@@ -491,6 +567,8 @@ async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) 
             # Only unlink the socket this process bound.
             with contextlib.suppress(OSError):
                 sock_path.unlink()
+        if daemon is not None:
+            daemon.engine.shutdown()
         if events is not None:
             with contextlib.suppress(Exception):
                 events.insert(kind="system", status="info", reason="daemon stopped")

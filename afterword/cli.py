@@ -149,6 +149,38 @@ def _wait_for_event(event_id: int, timeout: float = 60.0) -> int:
     return 1
 
 
+def cmd_models(args: argparse.Namespace) -> int:
+    from afterword.daemon.config import ConfigStore
+    from afterword.daemon.qwen import MODEL_KINDS, local_snapshot, mlx_audio_available
+
+    repos = ConfigStore().get().qwen.repos()
+    kinds = args.kinds or list(MODEL_KINDS)
+    unknown = [k for k in kinds if k not in MODEL_KINDS]
+    if unknown:
+        print(f"unknown model kind(s): {', '.join(unknown)} (choose from {', '.join(MODEL_KINDS)})")
+        return 2
+    ok, error = mlx_audio_available()
+    if args.action == "list":
+        uses = {"custom_voice": "builtin:<Speaker>", "base": "clone:<clip>", "voice_design": "design:<description>"}
+        for kind in kinds:
+            path = local_snapshot(repos[kind])
+            state = "downloaded" if path else "not downloaded"
+            print(f"{kind:13} {state:15} {repos[kind]}   ({uses[kind]})")
+        if not ok:
+            print(f"note: {error}")
+        return 0
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError:
+        print("huggingface_hub is missing; run `uv sync --extra qwen` first")
+        return 1
+    for kind in kinds:
+        print(f"pulling {kind}: {repos[kind]}")
+        snapshot_download(repos[kind])
+    print("done. The daemon picks the models up on next use.")
+    return 0
+
+
 def hook_command(python: str | None = None) -> str:
     py = python or sys.executable
     return f"{shlex.quote(py)} {shlex.quote(str(HOOK_SCRIPT))}"
@@ -256,6 +288,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--wait", action="store_true", help="wait until it has been spoken; print timings")
     s.add_argument("--no-fallback", action="store_true", help="fail instead of using `say` if the daemon is down")
     s.set_defaults(func=cmd_test)
+
+    s = sub.add_parser("models", help="list or download the Qwen3-TTS models")
+    s.add_argument("action", choices=("list", "pull"), nargs="?", default="list")
+    s.add_argument("kinds", nargs="*", help="custom_voice, base, voice_design (default: all)")
+    s.set_defaults(func=cmd_models)
 
     s = sub.add_parser("install-hooks", help="add AfterWord's hooks to a Claude Code settings file")
     s.add_argument("--scope", choices=("user", "project", "local"), default="user",

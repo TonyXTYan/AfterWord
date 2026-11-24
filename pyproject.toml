@@ -7,11 +7,17 @@ requires-python = ">=3.12"
 license = "MIT"
 dependencies = [
     "fastapi>=0.115",
+    "tomlkit>=0.13",
     "uvicorn>=0.32",
 ]
 
 [project.scripts]
 afterword = "afterword.cli:main"
+
+[project.optional-dependencies]
+qwen = [
+    "mlx-audio>=0.6.8",
+]
 
 [dependency-groups]
 dev = [

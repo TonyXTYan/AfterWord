@@ -326,10 +326,10 @@ def test_bad_spool_records_and_leftover_claims(aw_home):
 def test_unknown_backend_in_config_is_a_warning(aw_home):
     from afterword.daemon.config import ConfigStore
 
-    (aw_home / "config.toml").write_text('[daemon]\nsynth = "qwen"\nplayer = "vlc"\n')
+    (aw_home / "config.toml").write_text('[daemon]\nsynth = "festival"\nplayer = "vlc"\n')
     store = ConfigStore()
     cfg = store.get()
-    assert cfg.daemon.synth == "say" and cfg.daemon.player == "afplay"
+    assert cfg.daemon.synth == "qwen" and cfg.daemon.player == "afplay"
     assert any("daemon.synth" in w for w in store.warnings)
 
 

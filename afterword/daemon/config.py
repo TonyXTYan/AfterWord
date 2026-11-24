@@ -12,32 +12,48 @@ from afterword.hooks import common
 
 log = logging.getLogger("afterword.config")
 
-SYNTHS = ("say", "null")  # "qwen" joins in build step 4
+SYNTHS = ("qwen", "say", "null")
 PLAYERS = ("afplay", "null")
+QWEN_MODEL_KINDS = ("custom_voice", "base", "voice_design")
 
 DEFAULT_CONFIG_TOML = """\
 # AfterWord config. Edits are picked up automatically (hot reload).
+# Profiles can also be built and saved from the voice lab:
+# http://127.0.0.1:47800/#lab
 
 [daemon]
 port = 47800
 fallback = "say"          # what the hook does when the daemon is down: "say" or "none"
 announce_session = false  # speak the session label (cwd folder name) before each message
-synth = "say"             # "say" (macOS, used until the Qwen3-TTS backend lands) or "null"
+synth = "qwen"            # "qwen" (Qwen3-TTS via mlx-audio), "say" (macOS) or "null"
 player = "afplay"         # "afplay" or "null"
 max_queue = 16            # queued items beyond this are skipped as "daemon busy"
 history = 50              # clips kept on disk for replay
 
+[qwen]
+# Hugging Face repos for the three Qwen3-TTS variants. Download them with
+#   uv run afterword models pull
+custom_voice = "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit"   # builtin:<Speaker>
+base = "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit"                  # clone:<clip>
+voice_design = "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit"   # design:<description>
+keep_loaded = 2           # models kept in memory at once (about 3 GB each)
+warm_on_start = true      # load the models your profiles use when the daemon starts
+
+# voice: builtin:<Speaker> | clone:<clip name or path> | design:<description> | say:<MacVoice>
+# Speakers: Serena, Vivian, Uncle_Fu, Dylan, Eric, Ryan, Aiden, Ono_Anna, Sohee.
+# One voice is used for every language, so the accent stays the same.
+
 [profiles.nova]
-voice = "builtin:Chelsie"   # Qwen3-TTS voice, or "clone:~/voices/me.wav"
-ref_text = ""               # transcript of the clone clip, if the model needs one
+voice = "builtin:Serena"
+ref_text = ""               # transcript of the clone clip (clone voices only)
 lang = "en"
 pace = 1.0
 style = "calm, slightly wry"
 max_chars = 400
-say_voice = "Samantha"      # macOS voice for the "say" synth backend
+say_voice = "Samantha"      # macOS voice used if Qwen3-TTS is unavailable
 
 [profiles.ember]
-voice = ""                  # Qwen3-TTS voice, chosen in build step 4
+voice = "builtin:Aiden"
 lang = "en"
 pace = 1.05
 style = "warm, brisk"
@@ -56,6 +72,8 @@ class Profile:
     style: str = ""
     max_chars: int = common.DEFAULT_MAX_CHARS
     say_voice: str = ""
+    seed: int | None = None  # fixed sampling seed: the same line always sounds the same
+    temperature: float | None = None  # None: the model's default
     known: bool = True  # False when the name was not in config.toml
 
 
@@ -64,33 +82,61 @@ class DaemonSettings:
     port: int = common.DEFAULT_PORT
     fallback: str = "say"
     announce_session: bool = False
-    synth: str = "say"
+    synth: str = "qwen"
     player: str = "afplay"
     max_queue: int = 16
     history: int = 50
 
 
 @dataclass(frozen=True)
+class QwenSettings:
+    custom_voice: str = "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit"
+    base: str = "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit"
+    voice_design: str = "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit"
+    keep_loaded: int = 2
+    warm_on_start: bool = True
+
+    def repos(self) -> dict[str, str]:
+        return {k: getattr(self, k) for k in QWEN_MODEL_KINDS}
+
+
+DEFAULT_VOICE = "builtin:Ryan"
+
+
+@dataclass(frozen=True)
 class Config:
     daemon: DaemonSettings = field(default_factory=DaemonSettings)
+    qwen: QwenSettings = field(default_factory=QwenSettings)
     profiles: dict[str, Profile] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
     def profile(self, name: str | None) -> Profile:
+        """The named profile. An unknown name borrows the first profile's
+        settings (or a built-in default) so the line is still spoken."""
+        from dataclasses import replace
+
         if name and name in self.profiles:
             return self.profiles[name]
-        return Profile(name=name or "default", known=False)
+        if self.profiles:
+            return replace(next(iter(self.profiles.values())), name=name or "default", known=False)
+        return Profile(name=name or "default", voice=DEFAULT_VOICE, known=False)
 
 
 def _num(value: Any, kind: type, default: Any, lo: float, hi: float, where: str, errors: list[str]) -> Any:
+    import math
+
     if value is None:
         return default
     try:
-        if isinstance(value, bool):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError
+        if kind is int and isinstance(value, float) and not value.is_integer():
             raise ValueError
         n = kind(value)
-    except (TypeError, ValueError):
-        errors.append(f"{where}: expected a number, got {value!r}")
+    except (TypeError, ValueError, OverflowError):
+        errors.append(f"{where}: expected a finite {'whole ' if kind is int else ''}number, got {value!r}")
         return default
     if not lo <= n <= hi:
         errors.append(f"{where}: {n} out of range [{lo}, {hi}]")
@@ -159,8 +205,32 @@ def build_config(raw: dict[str, Any]) -> tuple[Config, list[str]]:
             style=_str(p.get("style"), base.style, f"{where}.style", errors),
             max_chars=_num(p.get("max_chars"), int, base.max_chars, 20, 5000, f"{where}.max_chars", errors),
             say_voice=_str(p.get("say_voice"), base.say_voice, f"{where}.say_voice", errors),
+            seed=_num(p.get("seed"), int, None, 0, 2**31 - 1, f"{where}.seed", errors),
+            temperature=_num(p.get("temperature"), float, None, 0.05, 2.0, f"{where}.temperature", errors),
         )
-    return Config(daemon=daemon, profiles=profiles, raw=raw), errors
+        voice = profiles[name].voice
+        if voice:
+            from .voices import VoiceError, parse_voice
+
+            try:
+                parse_voice(voice)
+            except VoiceError as exc:
+                errors.append(f"{where}.voice: {exc}")
+
+    q = raw.get("qwen") if isinstance(raw.get("qwen"), dict) else {}
+    qd = QwenSettings()
+    warm = q.get("warm_on_start", qd.warm_on_start)
+    if not isinstance(warm, bool):
+        errors.append("qwen.warm_on_start: expected true/false")
+        warm = qd.warm_on_start
+    qwen = QwenSettings(
+        custom_voice=_str(q.get("custom_voice"), qd.custom_voice, "qwen.custom_voice", errors),
+        base=_str(q.get("base"), qd.base, "qwen.base", errors),
+        voice_design=_str(q.get("voice_design"), qd.voice_design, "qwen.voice_design", errors),
+        keep_loaded=_num(q.get("keep_loaded"), int, qd.keep_loaded, 1, 3, "qwen.keep_loaded", errors),
+        warm_on_start=warm,
+    )
+    return Config(daemon=daemon, qwen=qwen, profiles=profiles, raw=raw), errors
 
 
 def common_profile_name_ok(name: str) -> bool:
@@ -179,6 +249,7 @@ class ConfigStore:
         self.config, self.warnings = build_config({})
         self.error: str | None = None
         self.loaded_at: float | None = None
+        self._callbacks: list = []
         self.reload(force=True)
 
     def ensure_default_file(self) -> bool:
@@ -197,8 +268,13 @@ class ConfigStore:
         except OSError:
             return None
 
+    def on_reload(self, callback) -> None:
+        """Call `callback(config)` after every successful (re)load."""
+        self._callbacks.append(callback)
+
     def reload(self, force: bool = False) -> bool:
-        """Reload if changed (or forced). Returns True if a reload happened."""
+        """Reload if changed (or forced). Returns True if a reload happened.
+        Any failure keeps the last good config and records the error."""
         import time
 
         mtime = self._current_mtime()
@@ -207,16 +283,22 @@ class ConfigStore:
         self._mtime = mtime
         try:
             raw = common.read_config_raw(self.path)
+            config, warnings = build_config(raw)
         except Exception as exc:
             self.error = f"{type(exc).__name__}: {exc}"
             log.error("config.toml not loaded, keeping previous config: %s", self.error)
             return True
-        self.config, self.warnings = build_config(raw)
+        self.config, self.warnings = config, warnings
         self.error = None
         self.loaded_at = time.time()
         for w in self.warnings:
             log.warning("config: %s", w)
         log.info("config loaded from %s (%d profiles)", self.path, len(self.config.profiles))
+        for callback in list(self._callbacks):
+            try:
+                callback(self.config)
+            except Exception:
+                log.exception("config reload callback failed")
         return True
 
     def get(self) -> Config:
