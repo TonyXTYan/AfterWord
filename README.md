@@ -6,6 +6,7 @@ Speech is **off by default**, **set per session**, and **triggered only by a tag
 in Claude's reply. See [DESIGN.md](DESIGN.md) (v1) and
 [docs/design-v2.md](docs/design-v2.md) (pronunciations, a voice per language,
 streaming and early speaking, spoken alerts, the seed explorer).
+Where it goes next, phase by phase, is in [roadmaps/](roadmaps/README.md).
 
 ![The AfterWord GUI: the line being spoken in the subtitle bar, and the transcript of what each voice said, one colour per voice](docs/gui.png)
 
