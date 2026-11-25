@@ -855,7 +855,18 @@ function setSpeakerProfiles(list) {
   const next = list.filter((p) => typeof p === "string");
   if (next.length === speakerProfiles.length && next.every((p, i) => p === speakerProfiles[i])) return;
   speakerProfiles = next;
+  // Repaint every speaker-coloured element already on the page (tags, rows,
+  // cards drawn before the list arrived) so a voice has one colour everywhere.
+  for (const el of document.querySelectorAll("[data-spk]")) paintSpeaker(el, el.dataset.spk);
   document.dispatchEvent(new CustomEvent("aw:speakers", {detail: next.slice()}));
+}
+// Give `el` the speaker class of `profile` (replacing any other) and remember
+// the profile so a later profile-list change repaints it.
+function paintSpeaker(el, profile) {
+  for (const c of [...el.classList]) if (/^spk-\d$/.test(c)) el.classList.remove(c);
+  el.classList.add("spk-" + speakerSlot(profile));
+  el.dataset.spk = speakerName(profile);
+  return el;
 }
 function speakerName(profile) { return profile == null || profile === "" ? "default" : String(profile); }
 function speakerSlot(profile) {
@@ -871,11 +882,11 @@ function speakerSlot(profile) {
 function speakerTag(profile, props = {}) {
   const name = speakerName(profile);
   const cls = `spk spk-${speakerSlot(profile)}` + (props.class ? " " + props.class : "");
-  return h("span", {...props, class: cls}, h("i", {"aria-hidden": "true"}), name);
+  return h("span", {...props, class: cls, "data-spk": name}, h("i", {"aria-hidden": "true"}), name);
 }
 function speakerTagHTML(profile) {
   const name = speakerName(profile);
-  return `<span class="spk spk-${speakerSlot(profile)}"><i aria-hidden="true"></i>${esc(name)}</span>`;
+  return `<span class="spk spk-${speakerSlot(profile)}" data-spk="${esc(name)}"><i aria-hidden="true"></i>${esc(name)}</span>`;
 }
 // ---------- player ----------
 // Every clip on this page plays through Web Audio, never an <audio> element:
@@ -1588,7 +1599,8 @@ const Sessions = (() => {
     if (on && !profiles.includes(s.profile)) sel.append(h("option", {value: s.profile}, `${s.profile} (not in config)`));
     sel.value = on ? s.profile : "";
     sel.addEventListener("change", () => change(id, {profile: sel.value || null}));
-    const vsel = h("span", {class: "vsel" + (on ? " spk-" + speakerSlot(s.profile) : "")}, h("i", {"aria-hidden": "true"}), sel);
+    const vsel = h("span", {class: "vsel"}, h("i", {"aria-hidden": "true"}), sel);
+    if (on) paintSpeaker(vsel, s.profile);
     const mute = h("button", {class: "small toggle", "data-k": "mute", "aria-pressed": String(!!s.muted), disabled: busy,
       title: s.muted ? "Muted: lines are logged but not played. Click to unmute." : "Keep the voice on but play nothing"},
       s.muted ? "Muted" : "Mute");
@@ -1802,7 +1814,8 @@ const History = (() => {
     const r = Number(d.playback_rate);
     applyRate(audio, Number.isFinite(r) && r >= 0.25 && r <= 4 ? r : 1);
     if (src) audio.src = src;
-    const node = h("div", {class: "hitem " + ("spk-" + speakerSlot(d.profile))},
+    const node = paintSpeaker(h("div", {class: "hitem"}), d.profile);
+    node.append(
       h("div", {class: "ctl"}, audio,
         dl ? h("a", {class: "btn", href: dl, download: `afterword-${id}.wav`, title: "Download the WAV"}, "Download") : null),
       h("div", {style: "min-width:0"},
@@ -2156,7 +2169,7 @@ const Lab = (() => {
              kv("model", res.model || res.backend));
     // A card from a profile (an A/B profile slot, or a builder loaded from one) wears that speaker's colour.
     const prof = opt.profile !== undefined ? opt.profile : res.pronounce_profile;
-    const card = h("div", {class: "card" + (prof ? " spk-" + speakerSlot(prof) : "")},
+    const card = h("div", {class: "card" + (prof ? " spk-" + speakerSlot(prof) : ""), ...(prof ? {"data-spk": speakerName(prof)} : {})},
       h("div", {class: "card-top"}, opt.tag ? h("span", {class: "tag"}, opt.tag) : null,
         prof && !opt.noSpeaker ? speakerTag(prof, {title: "profile " + prof}) : null, audio,
         h("span", {class: "mono muted", title: "preview id"}, res.id || "")),
@@ -2333,7 +2346,7 @@ const Lab = (() => {
         const card = resultCard(r.data, {tag: "AB"[i], hideText: true, profile: prof, noSpeaker: true});
         abCards[i] = card;
         const slotEl = outs[i];
-        if (prof) slotEl.classList.add("spk-" + speakerSlot(prof));
+        if (prof) paintSpeaker(slotEl, prof);
         card._audio.addEventListener("play", () => slotEl.classList.add("playing"));
         for (const ev of ["pause", "ended"]) card._audio.addEventListener(ev, () => slotEl.classList.remove("playing"));
         outs[i].replaceChildren(prof ? speakerTag(prof, {title: "profile " + prof}) : h("div", {class: "hint", style: "margin-bottom:2px"}, "builder"), card);
