@@ -5,45 +5,104 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AfterWord · log</title>
 <style>
+  /* ---- tokens ("transcript desk") ---- */
   :root {
-    --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1c1a; --muted: #77736b; --line: #e4e1d9;
-    --accent: #3b5bdb; --spoken: #2b8a3e; --queued: #8a6d00; --playing: #3b5bdb;
-    --skipped: #868e96; --error: #c92a2a; --info: #5f3dc4;
+    --paper: #E8EBEE; --sheet: #F7F8F9; --ink: #1B1F24; --slate: #5E6773; --rule: #CDD3DA;
+    --cue: #2D6CDF; --tally: #E5484D;
+    --spoken: #1E7F4F; --queued: #9A6700; --error: #C4251C; --skipped: #69727D; --info: #6340C9;
+    --sans: system-ui, -apple-system, "SF Pro Text", BlinkMacSystemFont, sans-serif;
+    --serif: Charter, "Iowan Old Style", "Palatino", Georgia, serif;
     --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    /* old names, kept as aliases so every existing rule still renders */
+    --bg: var(--paper); --panel: var(--sheet); --muted: var(--slate); --line: var(--rule);
+    --accent: var(--cue); --playing: var(--cue); --on-accent: #ffffff; --on-ink: var(--sheet);
+    --soft: color-mix(in srgb, var(--cue) 8%, var(--sheet));
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #151514; --panel: #1d1d1b; --ink: #ecebe6; --muted: #9a968d; --line: #2e2d2a;
-      --accent: #748ffc; --spoken: #69db7c; --queued: #ffd43b; --playing: #748ffc;
-      --skipped: #868e96; --error: #ff8787; --info: #b197fc;
+      --paper: #121417; --sheet: #1A1D21; --ink: #E8EAED; --slate: #9AA3AE; --rule: #2A2F35;
+      --cue: #7AA2F7; --tally: #FF5C5F;
+      --spoken: #4CC38A; --queued: #E5B84B; --error: #FF7B72; --skipped: #8B949E; --info: #B197FC;
+      --on-accent: #10131f;
     }
   }
+  /* speakers: one colour per voice profile (slot from speakerSlot()) */
+  .spk-0 { --spk: #F5C400; --spk-ink: #7A5C00; }
+  .spk-1 { --spk: #00B8D9; --spk-ink: #00687A; }
+  .spk-2 { --spk: #2FBF71; --spk-ink: #1B6B40; }
+  .spk-3 { --spk: #D63AAF; --spk-ink: #8A1F70; }
+  .spk-4 { --spk: #FFFFFF; --spk-ink: #3A4048; }
+  .spk-5 { --spk: #F08C00; --spk-ink: #8A4B00; }
+  @media (prefers-color-scheme: dark) {
+    .spk-0 { --spk-ink: #FFD43B; } .spk-1 { --spk-ink: #4FD6EE; } .spk-2 { --spk-ink: #63D99A; }
+    .spk-3 { --spk-ink: #F17ACF; } .spk-4 { --spk-ink: #F2F4F6; } .spk-5 { --spk-ink: #FFA94D; }
+  }
+  .spk { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; font-weight: 600;
+         color: var(--spk-ink, var(--slate)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: baseline; }
+  .spk > i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--spk, var(--slate)); }
+  .spk-4 > i { box-shadow: 0 0 0 1px var(--rule); }
+
+  /* ---- base ---- */
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink);
-         font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Inter", sans-serif; }
-  header { position: sticky; top: 0; z-index: 2; background: var(--bg);
-           border-bottom: 1px solid var(--line); padding: 12px 20px;
-           display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
-  h1 { font-size: 15px; margin: 0; letter-spacing: .02em; }
-  h1 span { color: var(--muted); font-weight: 400; }
-  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 14px/1.45 var(--sans); }
+  :focus-visible { outline: 2px solid var(--cue); outline-offset: 2px; }
+  a { color: var(--cue); }
+
+  /* ---- header ---- */
+  header { position: sticky; top: 0; z-index: 2; background: var(--paper); border-bottom: 1px solid var(--rule); }
+  .hd { display: flex; gap: 6px 16px; align-items: center; flex-wrap: wrap; padding: 0 24px; min-height: 48px; }
+  h1 { font: 700 18px/1 var(--serif); color: var(--ink); margin: 0; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--slate); }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--skipped); }
-  .dot.live { background: var(--spoken); box-shadow: 0 0 0 3px color-mix(in srgb, var(--spoken) 25%, transparent); }
+  .dot.live { background: var(--spoken); }
   .dot.down { background: var(--error); }
-  .now { flex: 1; min-width: 240px; font-size: 13px; color: var(--muted);
-         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .now b { color: var(--ink); font-weight: 500; }
-  button, input, select { font: inherit; font-size: 13px; color: var(--ink); background: var(--panel);
-           border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; }
+  #meta { font-size: 12px; color: var(--slate); max-width: 30ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hd .acts { display: flex; gap: 6px; align-items: center; }
+  #hdr-msg { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* tabs: text tabs, the selected one underlined */
+  .tabs { display: flex; align-self: stretch; gap: 2px; min-width: 0; }
+  .tabs a { display: inline-flex; align-items: center; padding: 0 9px; font-size: 14px; color: var(--slate); text-decoration: none;
+            border-bottom: 2px solid transparent; border-top: 2px solid transparent; white-space: nowrap; }
+  .tabs a:hover { color: var(--ink); }
+  .tabs a.on { color: var(--ink); font-weight: 600; border-bottom-color: var(--cue); }
+  .tabs a:focus-visible { outline-offset: -2px; }
+  .tabs a .cnt { display: inline-block; min-width: 16px; margin-left: 5px; padding: 0 4px; border-radius: 999px; font-size: 11px; line-height: 16px;
+                 text-align: center; background: color-mix(in srgb, var(--cue) 16%, transparent); color: var(--cue); font-weight: 600; }
+  .tabs a .cnt:empty { display: none; }
+
+  /* subtitle bar: the line being spoken right now */
+  .now { display: flex; align-items: center; gap: 12px; padding: 10px 24px; min-width: 0; background: var(--sheet);
+         border-top: 1px solid var(--rule); white-space: nowrap; overflow: hidden; }
+  .now .tally { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--rule); }
+  .now .tally.on { background: var(--tally); animation: tally 1.6s ease-in-out infinite; }
+  @keyframes tally { 50% { opacity: .4; } }
+  .now .spk { flex: none; max-width: 30%; font-size: 13px; }
+  .now .line { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+               font: 22px/1.35 var(--serif); color: var(--ink); }
+  .now .line.idle { flex: none; color: var(--slate); }
+  .now .last { display: flex; align-items: center; gap: 8px; min-width: 0; opacity: .6; }
+  .now .last .line { font-size: 16px; }
+  .now .q { flex: none; margin-left: auto; padding-left: 8px; font-size: 12px; color: var(--slate); }
+
+  /* ---- controls ---- */
+  button, input, select { font: inherit; font-size: 13px; color: var(--ink); background: var(--sheet);
+           border: 1px solid var(--rule); border-radius: 6px; padding: 4px 10px; }
   button { cursor: pointer; }
-  button:hover { border-color: var(--muted); }
+  button:hover { border-color: var(--slate); }
   button.danger { color: var(--error); }
+  input[type=checkbox], input[type=radio], input[type=range] { accent-color: var(--cue); }
+  input[type=range] { padding: 0; border: 0; background: none; }
   input[type=search] { width: 220px; }
-  main { padding: 12px 20px 40px; }
-  table { width: 100%; border-collapse: collapse; background: var(--panel);
-          border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
-  th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 500; }
+  button.toggle[aria-pressed="true"] { color: var(--error); font-weight: 600;
+           border-color: color-mix(in srgb, var(--error) 45%, var(--rule)); background: color-mix(in srgb, var(--error) 8%, var(--sheet)); }
+
+  /* ---- page ---- */
+  main { padding: 16px 24px 40px; }
+  table { width: 100%; border-collapse: collapse; background: var(--sheet);
+          border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-size: 12px; color: var(--slate); font-weight: 500; }
   tr.ev { cursor: pointer; }
   tr.ev:hover td { background: color-mix(in srgb, var(--accent) 5%, transparent); }
   tr.ev.flash td { animation: flash 1.2s ease-out; }
@@ -54,8 +113,8 @@
   td.text { min-width: 300px; max-width: 560px; }
   #rows td.t:last-child { white-space: normal; max-width: 260px; line-height: 1.6; }
   td.text .reason { color: var(--muted); font-size: 12px; }
-  .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px;
-           border: 1px solid currentColor; white-space: nowrap; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap;
+           border: 1px solid color-mix(in srgb, currentColor 40%, transparent); background: color-mix(in srgb, currentColor 9%, transparent); }
   .s-spoken { color: var(--spoken); } .s-queued, .s-synthesizing { color: var(--queued); }
   .s-playing { color: var(--playing); } .s-skipped { color: var(--skipped); }
   .s-error { color: var(--error); } .s-info { color: var(--info); }
@@ -71,23 +130,30 @@
   dl.timings dd { margin: 0; }
   .empty { text-align: center; color: var(--muted); padding: 40px; }
   .warn { color: var(--error); font-size: 12px; }
+  .warn:empty { display: none; }
 
-  /* ---- tabs ---- */
+  /* log toolbar (filters) */
+  .toolbar { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .toolbar .pill { font-size: 13px; }
+
   [hidden] { display: none !important; }
-  :root { --on-accent: #ffffff; --soft: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
-  @media (prefers-color-scheme: dark) { :root { --on-accent: #10131f; } }
-  .tabs { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
-  .tabs a { font-size: 13px; padding: 4px 12px; color: var(--muted); text-decoration: none; background: var(--panel); }
-  .tabs a + a { border-left: 1px solid var(--line); }
-  .tabs a.on { color: var(--ink); background: var(--soft); font-weight: 600; }
-  .logonly { display: contents; }
-  body:not(.tab-log) .logonly { display: none; }
-  .tabs a .cnt { display: inline-block; min-width: 16px; margin-left: 5px; padding: 0 4px; border-radius: 999px; font-size: 11px;
-                 text-align: center; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-weight: 600; }
-  .tabs a .cnt:empty { display: none; }
-  button.toggle[aria-pressed="true"] { color: var(--error); font-weight: 600;
-           border-color: color-mix(in srgb, var(--error) 45%, var(--line)); background: color-mix(in srgb, var(--error) 8%, var(--panel)); }
-  #hdr-msg { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  @media (max-width: 1180px) { #meta { display: none; } }
+  @media (max-width: 900px) {
+    .hd { padding: 8px 16px 0; }
+    .tabs { order: 9; flex: 1 0 100%; overflow-x: auto; min-height: 38px; scrollbar-width: none; }
+    .tabs a { padding: 0 8px; }
+    .now { padding: 8px 16px; }
+  }
+  @media (max-width: 760px) { main { padding: 12px 16px 32px; } }
+  @media (max-width: 640px) {
+    .now .line { font-size: 18px; }
+    .now .last { display: none; }
+    input[type=search] { width: 100%; flex: 1 1 160px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .now .tally.on { animation: none; }
+  }
 
   /* ---- shared page layout ---- */
   .page { display: flex; flex-direction: column; gap: 14px; }
@@ -177,12 +243,12 @@
   .lab-grid { display: grid; grid-template-columns: minmax(330px, 410px) minmax(0, 1fr); gap: 14px; align-items: start; }
   @media (max-width: 920px) { .lab-grid { grid-template-columns: minmax(0, 1fr); } }
   .col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; min-width: 0; }
-  .panel > h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600;
-                margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+  .panel { background: var(--sheet); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+  .panel > h2 { font-size: 15px; line-height: 1.3; color: var(--ink); font-weight: 600;
+                margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
   .panel > h2 .grow, .grow { flex: 1; }
-  .panel > h2 button { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 12px; padding: 2px 8px; }
-  h3.sub { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 500; margin: 14px 0 8px;
+  .panel > h2 button { font-weight: 400; font-size: 12px; padding: 2px 8px; }
+  h3.sub { font-size: 13px; color: var(--ink); font-weight: 600; margin: 14px 0 8px;
            padding-top: 10px; border-top: 1px solid var(--line); }
   .field { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 4px 8px; align-items: center; margin-bottom: 7px; }
   .field > .lbl { font-size: 12px; color: var(--muted); }
@@ -193,33 +259,34 @@
   #view-lab input[type=number] { width: 110px; }
   #view-lab input[type=checkbox], #view-lab input[type=radio] { width: auto; accent-color: var(--accent); margin: 0; }
   #view-lab input[type=range] { padding: 0; border: 0; background: none; accent-color: var(--accent); flex: 1; min-width: 80px; }
-  ::placeholder { color: var(--muted); opacity: .65; }
-  textarea { font: inherit; font-size: 13px; color: var(--ink); background: var(--panel); border: 1px solid var(--line);
+  ::placeholder { color: var(--slate); opacity: .8; }
+  textarea { font: inherit; font-size: 13px; color: var(--ink); background: var(--sheet); border: 1px solid var(--rule);
              border-radius: 6px; padding: 6px 9px; resize: vertical; }
-  input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: -1px; }
-  button:disabled { opacity: .5; cursor: default; border-color: var(--line); }
-  button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
-  button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+  input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible { outline: 2px solid var(--cue); outline-offset: 1px; }
+  button:disabled { opacity: .5; cursor: default; border-color: var(--rule); }
+  button.primary { background: var(--ink); border-color: var(--ink); color: var(--on-ink); font-weight: 600; }
+  button.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 85%, var(--cue)); }
   button.small { font-size: 12px; padding: 2px 8px; }
-  label.chk { display: inline-flex; gap: 5px; align-items: center; font-size: 12px; color: var(--muted); white-space: nowrap; cursor: pointer; }
+  label.chk { display: inline-flex; gap: 5px; align-items: center; font-size: 12px; color: var(--slate); white-space: nowrap; cursor: pointer; }
   .val { font-family: var(--mono); font-size: 12px; min-width: 52px; text-align: right; color: var(--ink); }
   .muted { color: var(--muted); } .mono { font-family: var(--mono); font-size: 12px; }
-  .hint { font-size: 12px; color: var(--muted); }
+  .hint { font-size: 12px; color: var(--slate); }
   code, .code { font-family: var(--mono); font-size: 12px; background: color-mix(in srgb, var(--muted) 14%, transparent);
                 padding: 1px 5px; border-radius: 4px; word-break: break-all; }
-  .seg { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: 7px; overflow: hidden; margin-bottom: 10px; }
+  .seg { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
   .seg label { font-size: 12px; text-align: center; padding: 5px 4px; cursor: pointer; color: var(--muted); line-height: 1.2; }
   .seg label { position: relative; }
   .seg label + label { border-left: 1px solid var(--line); }
   .seg input { position: absolute; opacity: 0; pointer-events: none; }
   .seg label:has(input:checked) { background: var(--soft); color: var(--ink); font-weight: 600; }
-  .seg label:has(input:focus-visible) { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: -2px; }
+  .seg label:has(input:focus-visible) { outline: 2px solid var(--cue); outline-offset: -2px; }
   .spec { margin-top: 8px; font-size: 12px; color: var(--muted); display: flex; gap: 6px; align-items: baseline; min-width: 0; }
   .spec code { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; word-break: normal; }
   .msg { font-size: 12px; min-height: 0; }
   .msg:empty { display: none; }
   .msg.err { color: var(--error); } .msg.ok { color: var(--spoken); } .msg.run { color: var(--queued); font-family: var(--mono); }
-  .msg.info { color: var(--muted); }
+  .msg { color: var(--slate); }
+  .msg.info { color: var(--slate); }
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
   .al-set { display: flex; gap: 8px 10px; align-items: center; flex-wrap: wrap; }
   .al-pools { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
@@ -317,31 +384,36 @@
 </head>
 <body>
 <header>
+  <div class="hd">
   <h1>AfterWord</h1>
   <nav class="tabs" aria-label="views">
     <a href="#log" id="tab-log">Log</a><a href="#sessions" id="tab-sessions">Sessions</a><a href="#queue" id="tab-queue">Queue<span class="cnt" id="tab-queue-n"></span></a><a href="#history" id="tab-history">History</a><a href="#lab" id="tab-lab">Voice lab</a><a href="#config" id="tab-config">Config</a>
   </nav>
-  <span class="pill"><span id="dot" class="dot"></span><span id="conn">connecting…</span></span>
-  <span class="pill" id="meta"></span>
-  <div class="now" id="now">idle</div>
+  <span class="grow"></span>
+  <span class="pill" id="live"><span id="dot" class="dot"></span><span id="conn">connecting…</span></span>
+  <span id="meta"></span>
   <span class="msg" id="hdr-msg"></span>
+  <span class="acts">
   <button id="muteall" class="toggle" aria-pressed="false" title="Mute every session (voices stay on; lines are logged as skipped)">Mute all</button>
   <button id="skip" title="Stop the current clip; keep the queue">Skip</button>
   <button id="stop" class="danger" title="Stop and clear the queue">Stop all</button>
-  <span class="logonly">
-  <select id="filter">
-    <option value="">all events</option>
-    <option value="spoken">spoken</option>
-    <option value="skipped">skipped</option>
-    <option value="error">errors</option>
-    <option value="active">queued / playing</option>
-  </select>
-  <input type="search" id="q" placeholder="filter text, session, reason">
-  <label class="pill"><input type="checkbox" id="hideSystem" checked> hide system</label>
-  <label class="pill" title="UserPromptSubmit / SessionStart hook calls (status info), one per prompt"><input type="checkbox" id="showHooks"> show prompt/session hooks</label>
   </span>
+  </div>
+  <div class="now" id="now" aria-live="polite"><span class="tally" aria-hidden="true"></span><span class="line idle">Nothing playing</span></div>
 </header>
 <main id="view-log">
+  <div class="toolbar" id="log-tools">
+    <select id="filter">
+      <option value="">All events</option>
+      <option value="spoken">Spoken</option>
+      <option value="skipped">Skipped</option>
+      <option value="error">Errors</option>
+      <option value="active">Queued / playing</option>
+    </select>
+    <input type="search" id="q" placeholder="Filter text, session, reason">
+    <label class="pill"><input type="checkbox" id="hideSystem" checked> Hide system</label>
+    <label class="pill" title="UserPromptSubmit / SessionStart hook calls (status info), one per prompt"><input type="checkbox" id="showHooks"> Show prompt/session hooks</label>
+  </div>
   <div class="warn" id="cfgwarn"></div>
   <details class="panel" id="st-panel" open>
     <summary>Timings <span class="hint" id="st-scope"></span><span class="grow"></span><span class="msg" id="st-msg"></span></summary>
@@ -681,6 +753,41 @@ function h(tag, props, ...kids) {
   for (const c of kids.flat(Infinity)) if (c != null && c !== false) el.append(c instanceof Node ? c : String(c));
   return el;
 }
+// ---------- speakers ----------
+// Each voice profile is a "speaker" with one of six subtitle colours
+// (CSS .spk-0 … .spk-5 set --spk, the swatch, and --spk-ink, the text tone).
+// Slots follow the configured profile order (config.profiles from /api/status),
+// so they stay put while the config does; a name not in it hashes to a slot.
+// When the list changes, document gets an "aw:speakers" event so a page can redraw.
+const SPEAKER_SLOTS = 6;
+let speakerProfiles = [];
+function setSpeakerProfiles(list) {
+  if (!Array.isArray(list)) return;
+  const next = list.filter((p) => typeof p === "string");
+  if (next.length === speakerProfiles.length && next.every((p, i) => p === speakerProfiles[i])) return;
+  speakerProfiles = next;
+  document.dispatchEvent(new CustomEvent("aw:speakers", {detail: next.slice()}));
+}
+function speakerName(profile) { return profile == null || profile === "" ? "default" : String(profile); }
+function speakerSlot(profile) {
+  const name = speakerName(profile);
+  const i = speakerProfiles.indexOf(name);
+  if (i >= 0) return i % SPEAKER_SLOTS;
+  let x = 0;
+  for (const c of name) x = (Math.imul(x, 31) + c.codePointAt(0)) >>> 0;
+  return x % SPEAKER_SLOTS;
+}
+// <span class="spk spk-N"><i></i>name</span>: a round swatch + the name in the
+// speaker's text tone. speakerTag returns an element, speakerTagHTML a string.
+function speakerTag(profile, props = {}) {
+  const name = speakerName(profile);
+  const cls = `spk spk-${speakerSlot(profile)}` + (props.class ? " " + props.class : "");
+  return h("span", {...props, class: cls}, h("i", {"aria-hidden": "true"}), name);
+}
+function speakerTagHTML(profile) {
+  const name = speakerName(profile);
+  return `<span class="spk spk-${speakerSlot(profile)}"><i aria-hidden="true"></i>${esc(name)}</span>`;
+}
 // ---------- player ----------
 // Every clip on this page plays through Web Audio, never an <audio> element:
 // a playing media element makes the browser the macOS "Now Playing" app, and
@@ -761,16 +868,18 @@ class AwAudio extends HTMLElement {
     this._paused = true; this._ended = false; this._dur = NaN; this._gen = 0; this._raf = 0;
     const root = this.attachShadow({mode: "open"});
     root.innerHTML = `<style>
-      :host { display: inline-flex; align-items: center; gap: 6px; height: 30px; min-width: 0; box-sizing: border-box;
-              font: 11.5px var(--mono, ui-monospace, monospace); color: var(--muted, #777); vertical-align: middle; }
+      :host { display: inline-flex; align-items: center; gap: 8px; height: 30px; min-width: 0; box-sizing: border-box;
+              font: 11.5px var(--mono, ui-monospace, monospace); color: var(--slate, var(--muted, #5E6773)); vertical-align: middle; }
       :host([hidden]) { display: none !important; }
-      button { flex: none; width: 24px; height: 24px; padding: 0; border-radius: 50%; border: 1px solid var(--line, #ccc);
-               background: var(--panel, transparent); color: var(--ink, inherit); cursor: pointer; font-size: 10px; line-height: 1; }
-      button:hover { border-color: var(--accent, #3b5bdb); color: var(--accent, #3b5bdb); }
-      button:focus-visible { outline: 2px solid var(--accent, #3b5bdb); outline-offset: 1px; }
-      input { flex: 1; min-width: 40px; margin: 0; accent-color: var(--accent, #3b5bdb); }
+      button { flex: none; width: 24px; height: 24px; padding: 0; border-radius: 50%; border: 0;
+               background: var(--ink, #1B1F24); color: var(--sheet, var(--panel, #F7F8F9)); cursor: pointer;
+               font: 9px/1 system-ui, -apple-system, sans-serif; }
+      button:hover { background: var(--cue, var(--accent, #2D6CDF)); }
+      button:focus-visible { outline: 2px solid var(--cue, var(--accent, #2D6CDF)); outline-offset: 2px; }
+      input { flex: 1; min-width: 40px; margin: 0; accent-color: var(--cue, var(--accent, #2D6CDF)); }
+      input:focus-visible { outline: 2px solid var(--cue, var(--accent, #2D6CDF)); outline-offset: 2px; border-radius: 4px; }
       .t { flex: none; white-space: nowrap; }
-      .t.err { color: var(--error, #c92a2a); }
+      .t.err { color: var(--error, #C4251C); }
     </style><button type="button" aria-label="Play">▶</button><input type="range" min="0" max="1000" step="1" value="0" aria-label="Position"><span class="t">0:00</span>`;
     this._btn = root.querySelector("button");
     this._bar = root.querySelector("input");
@@ -1132,13 +1241,29 @@ async function queueAction(path, label, msgId = "hdr-msg") {
 $("skip").onclick = () => queueAction("/api/queue/skip", "Skip");
 $("stop").onclick = () => queueAction("/api/queue/stop", "Stop all");
 
+// Subtitle bar (#now): tally light, speaker tag, the line being spoken.
+// Idle, it says so and keeps the last line it saw, faded, with its speaker.
+let lastSpoken = null;   // {text, profile} of the last now_playing line
+function paintNow(np, pending, idleText = "Nothing playing") {
+  const q = pending ? `<span class="q">${pending} queued</span>` : "";
+  const bar = $("now");
+  if (np) {
+    lastSpoken = {text: np.text, profile: np.profile};
+    bar.title = `${speakerName(np.profile)} · session ${shortId(np.session_id)}`;
+    bar.innerHTML = `<span class="tally on" aria-hidden="true"></span>${speakerTagHTML(np.profile)}`
+      + `<span class="line">${esc(np.text)}</span>${q}`;
+    return;
+  }
+  bar.title = lastSpoken ? `Last line: ${lastSpoken.text}` : "";
+  bar.innerHTML = `<span class="tally" aria-hidden="true"></span><span class="line idle">${esc(idleText)}</span>`
+    + (lastSpoken ? `<span class="last">${speakerTagHTML(lastSpoken.profile)}<span class="line">${esc(lastSpoken.text)}</span></span>` : "")
+    + q;
+}
 function showQueue(q) {
   if (!q || typeof q !== "object") return;
   const np = q.now_playing;
   const pending = Array.isArray(q.pending) ? q.pending.length : 0;
-  $("now").innerHTML = np
-    ? `▶ <b>${esc(np.text)}</b> <span>(${esc(np.profile || "default")}, ${esc(shortId(np.session_id))})</span>${pending ? ` · ${pending} queued` : ""}`
-    : (pending ? `${pending} queued` : "idle");
+  paintNow(np, pending);
   const total = (np ? 1 : 0) + pending;
   $("tab-queue-n").textContent = total ? String(total) : "";
   Queue.update(q);
@@ -1176,7 +1301,9 @@ const MuteAll = (() => {
 async function loadStatus() {
   try {
     const s = await (await fetch("/api/status")).json();
-    $("meta").textContent = `v${s.version} · pid ${s.pid} · synth ${s.synth} · player ${s.player} · profiles: ${s.config.profiles.join(", ") || "none"}`;
+    setSpeakerProfiles(s.config.profiles);
+    const meta = `v${s.version} · pid ${s.pid} · synth ${s.synth} · player ${s.player} · profiles: ${s.config.profiles.join(", ") || "none"}`;
+    $("meta").textContent = meta; $("meta").title = meta; $("live").title = meta;
     $("cfgwarn").textContent = s.config.error ? `config.toml error (using last good config): ${s.config.error}` :
       (s.config.warnings.length ? "config warnings: " + s.config.warnings.join("; ") : "");
     showQueue(s.queue);
@@ -1218,7 +1345,7 @@ function connect() {
     $("dot").className = "dot down"; $("conn").textContent = "daemon unreachable — retrying";
     // Nothing is playing while the daemon is down; the next "open" resyncs.
     showQueue({now_playing: null, pending: [], max_size: 0});
-    $("now").textContent = "daemon unreachable";
+    paintNow(null, 0, "Daemon unreachable");
   });
   es.addEventListener("event", (m) => {
     const e = parse(m);
