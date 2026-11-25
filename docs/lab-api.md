@@ -45,8 +45,8 @@ A profile's `voice` string picks the source:
   },
   "speakers": [{"name": "Ryan", "native": "english", "dialect": null},
                {"name": "Eric", "native": "chinese", "dialect": "sichuan"}],   // [] if CustomVoice not downloaded
-  "languages": ["auto", "english", "chinese", "japanese"],               // Qwen names
-  "lang_codes": {"en": "english", "zh": "chinese", "ja": "japanese"},    // ISO -> Qwen name
+  "languages": ["auto", "english", "chinese", "japanese", "hindi"],      // Qwen's, then the other engines' languages
+  "lang_codes": {"en": "english", "zh": "chinese", "hi": "hindi"},       // ISO -> language name (Qwen's names for its own)
   "say_voices": [{"name": "Samantha", "locale": "en_US"}],
   "kokoro_voices": [{"name": "zf_xiaobei", "lang": "Mandarin Chinese", "lang_code": "zh", "gender": "female"}],  // [] if not downloaded
   "kokoro_langs": ["en", "es", "fr", "hi", "it", "ja", "pt", "zh"],

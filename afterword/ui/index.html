@@ -2669,7 +2669,7 @@ const Lab = (() => {
     if (!sameJSON("kokoro", kv)) fillSelect($("b-kokoro"), kv.length ? kv : [{value: "", label: "— none (Kokoro not downloaded) —"}]);
     const av = [{value: "", label: "Best installed voice for the language"},
       ...(cat.apple_voices || []).filter(v => !v.novelty).map(v => ({
-        value: v.quality === "default" ? v.name : `${v.name} (${cap(v.quality)})`,
+        value: v.id || v.name,  // names repeat across regions: the identifier is exact
         label: `${v.name}${v.quality !== "default" ? " (" + cap(v.quality) + ")" : ""} — ${v.lang}`}))];
     if (!sameJSON("apple", av)) fillSelect($("b-apple"), av);
     // languages

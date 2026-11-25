@@ -670,11 +670,13 @@ class Daemon:
         return self.synth.name == "qwen" and (self.queue.now_playing is not None or len(self.queue) > 0)
 
     def _make_synth(self, name: str):
+        # "qwen" stays the prefix-aware synth even without mlx-audio: apple:
+        # and say: voices still work, and a model voice fails its render (the
+        # engine reports why), so [daemon] model_fallback decides what speaks.
         if name == "qwen" and not os.environ.get("AFTERWORD_SYNTH"):
             ok, error = mlx_audio_available()
             if not ok:
-                log.warning("%s; using say", error)
-                name = "say"
+                log.warning("%s; model voices will use the fallback", error)
         try:
             return make_synth(name, engine=self.engine, clips=self.voice_clips)
         except ValueError as exc:
@@ -750,6 +752,8 @@ class Daemon:
             try:
                 result = run(synth)
             except Exception as exc2:
+                if not can_retry():
+                    raise  # it was heard, or cancelled: its own error (and partial timings) stand
                 log.warning("fallback %s failed too: %s", name, exc2)
                 continue
             note = f"{failed} failed ({reason}); spoke with {name}"
@@ -1160,7 +1164,7 @@ class Daemon:
 
     async def warm_models(self) -> None:
         cfg = self.store.get()
-        if self.synth.name != "qwen" or not cfg.qwen.warm_on_start:
+        if self.synth.name != "qwen" or not cfg.qwen.warm_on_start or not mlx_audio_available()[0]:
             return
         for kind in self.models_in_use()[: cfg.qwen.keep_loaded]:
             if self.engine.snapshot_path(kind) is None:

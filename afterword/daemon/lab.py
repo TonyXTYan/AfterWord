@@ -79,6 +79,13 @@ def profile_dict(p: Profile) -> dict[str, Any]:
     return out
 
 
+def _all_languages(qwen_langs: list[str]) -> list[str]:
+    """Qwen's languages (from its model), then the other engines' ones."""
+    seen = {lang.lower() for lang in qwen_langs}
+    extra = [name.lower() for name in voices.LANGUAGE_NAMES.values() if name.lower() not in seen]
+    return list(qwen_langs) + extra
+
+
 def _langs_body(raw: Any) -> dict[str, dict[str, Any]] | None:
     """Validate the `langs` of a profile save: {lang: {voice?, ref_text?,
     style?, pace?, say_voice?, seed?}}. None when absent (keep the file's)."""
@@ -155,8 +162,11 @@ class Lab:
         return {
             "engine": self.engine.status(),
             "speakers": voices.speakers_from_config(cv / "config.json" if cv else None),
-            "languages": ["auto"] + voices.languages_from_config(any_model / "config.json" if any_model else None),
-            "lang_codes": dict(voices.ISO_TO_QWEN),
+            "languages": ["auto"] + _all_languages(
+                voices.languages_from_config(any_model / "config.json" if any_model else None)),
+            # ISO -> lower-case language name, for every engine's languages
+            # (the Qwen names are the same words).
+            "lang_codes": {**{k: v.lower() for k, v in voices.LANGUAGE_NAMES.items()}, **voices.ISO_TO_QWEN},
             "say_voices": voices.say_voices(),
             "kokoro_voices": voices.kokoro_voices(self.engine.snapshot_path("kokoro")),
             "kokoro_langs": sorted({k.split("-")[0] for k in voices.KOKORO_LANGS}),
@@ -333,6 +343,7 @@ class Lab:
                 except apple.AppleUnavailable as exc:
                     raise LabError(503, str(exc)) from None
             f0 = await asyncio.to_thread(pitch.f0_of_wav, out)
+            settings["seed"] = None  # no seed: never show or save one for this voice
             return {"backend": spec.backend, "model": None, "synth_ms": round(result.synth_s * 1000, 1),
                     "load_ms": 0.0, "audio_s": round(result.duration_s, 3), "seed": None,
                     "f0_hz": f0["f0_hz"], "f0_spread_hz": f0["f0_spread_hz"]}

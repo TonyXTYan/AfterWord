@@ -137,19 +137,20 @@ def _no_langs() -> Mapping[str, LangVoice]:
 
 def lang_code(value: Any) -> str | None:
     """An ISO 639-1 code ("zh") for an ISO code, a regional code ("zh-CN") or
-    a Qwen language name ("chinese"); None for anything else."""
-    from .voices import ISO_TO_QWEN
+    a language name ("chinese"), for any language some engine speaks
+    (voices.LANGUAGE_NAMES); None for anything else."""
+    from .voices import LANGUAGE_NAMES
 
     if not isinstance(value, str):
         return None
     v = value.strip().lower().replace("_", "-")
-    if v in ISO_TO_QWEN:
+    if v in LANGUAGE_NAMES:
         return v
-    for code, name in ISO_TO_QWEN.items():
-        if v == name:
+    for code, name in LANGUAGE_NAMES.items():
+        if v == name.lower():
             return code
     base = v.split("-", 1)[0]
-    return base if base in ISO_TO_QWEN and base != v else None
+    return base if base in LANGUAGE_NAMES and base != v else None
 
 
 @dataclass(frozen=True)

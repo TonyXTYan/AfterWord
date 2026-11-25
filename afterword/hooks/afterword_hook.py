@@ -997,9 +997,14 @@ def _turn_key(payload: dict, text: object) -> str:
 # UserPromptSubmit / SessionStart (build step 5)                              #
 # --------------------------------------------------------------------------- #
 
+# Every language some engine speaks; a copy of voices.LANGUAGE_NAMES (the
+# hook cannot import the daemon; tests keep the two equal).
 _LANG_NAMES = {
     "en": "English", "zh": "Chinese", "ja": "Japanese", "ko": "Korean", "de": "German",
     "fr": "French", "es": "Spanish", "it": "Italian", "pt": "Portuguese", "ru": "Russian",
+    "hi": "Hindi", "ar": "Arabic", "da": "Danish", "el": "Greek", "fi": "Finnish",
+    "he": "Hebrew", "ms": "Malay", "nl": "Dutch", "no": "Norwegian", "pl": "Polish",
+    "sv": "Swedish", "sw": "Swahili", "tr": "Turkish",
 }
 
 

@@ -277,6 +277,10 @@ if "--voice" in args and args[args.index("--voice") + 1] == "Nope":
 mode = os.environ.get("STUB_MODE", "ok")
 if mode == "slow":
     time.sleep(30)
+if mode == "partial":
+    sys.stdout.buffer.write(b"AWPCM1" + struct.pack("<I", 22050) + struct.pack("<2205f", *([0.1] * 2205)))
+    sys.stdout.buffer.flush()
+    sys.stderr.write("helper crashed\n"); sys.exit(1)
 out = sys.stdout.buffer
 out.write(b"AWPCM1" + struct.pack("<I", 22050)); out.flush()
 for _ in range(5):
@@ -498,3 +502,68 @@ def make_lab_engine(aw_home):
         return Lab(aw_home, store, MultiEngine(), voices.ClipStore(aw_home / "voices"))
 
     return make
+
+
+# --------------------------------------------------------------------------- #
+# Review fixes                                                                #
+# --------------------------------------------------------------------------- #
+
+
+def test_lang_tag_keeps_the_region():
+    assert voices.lang_tag("zh_tw") == "zh-TW" and voices.lang_tag("en-au") == "en-AU"
+    assert voices.lang_tag("zh-hant-tw") == "zh-Hant-TW" and voices.lang_tag("es-419") == "es-419"
+    assert voices.lang_tag("Chinese") == "zh" and voices.lang_tag("auto") is None and voices.lang_tag("") is None
+    assert voices.lang_tag("x1") is None
+
+
+def test_apple_passes_the_regional_tag(apple_stub):
+    apple.AppleSynth().stream("Hi", Profile(name="p", voice="apple:", lang="en"), {"lang": "zh-tw"},
+                              lambda c: None, threading.Event())
+    assert apple_stub()[-1]["args"] == ["--lang", "zh-TW"]
+    apple.AppleSynth().stream("Hi", Profile(name="p", voice="apple:", lang="en-AU"), {}, lambda c: None)
+    assert apple_stub()[-1]["args"] == ["--lang", "en-AU"]
+
+
+def test_every_engine_language_is_a_profile_language():
+    from afterword.daemon.config import lang_code
+    from afterword.daemon.lab import _langs_body
+    from afterword.hooks import afterword_hook
+
+    assert afterword_hook._LANG_NAMES == voices.LANGUAGE_NAMES  # the hook's copy
+    assert set(voices.ISO_TO_QWEN) <= set(voices.LANGUAGE_NAMES)
+    assert set(voices.CHATTERBOX_LANGS) <= set(voices.LANGUAGE_NAMES)
+    assert {k.split("-")[0] for k in voices.KOKORO_LANGS} <= set(voices.LANGUAGE_NAMES)
+    assert lang_code("hi") == "hi" and lang_code("Hindi") == "hi" and lang_code("ar-EG") == "ar"
+    cfg, errors = build_config({"profiles": {"mix": {"voice": "kokoro:af_heart", "lang": "en",
+                                                     "langs": {"hi": {"voice": "kokoro:hf_alpha"}}}}})
+    assert errors == []
+    assert cfg.voice_for("mix", "hi").voice == "kokoro:hf_alpha"
+    assert _langs_body({"hindi": {"voice": "kokoro:hf_alpha"}}) == {"hi": {"voice": "kokoro:hf_alpha"}}
+    assert afterword_hook._lang_code("arabic") == "ar"
+
+
+def test_lab_lists_every_language(make_lab_engine):
+    cat = make_lab_engine().catalog()
+    assert "hindi" in cat["languages"] and "swahili" in cat["languages"]
+    assert cat["lang_codes"]["hi"] == "hindi" and cat["lang_codes"]["zh"] == "chinese"
+    assert len(cat["languages"]) == len(set(cat["languages"]))
+
+
+def test_apple_preview_drops_a_supplied_seed(make_lab_engine, apple_stub):
+    res = run(make_lab_engine().preview({"text": "Hello there.", "voice": "apple:", "seed": 42}))
+    assert res["seed"] is None and res["settings"]["seed"] is None
+
+
+def test_a_fallback_heard_then_failing_reports_its_own_error(aw_home, monkeypatch, apple_stub):
+    monkeypatch.setenv("STUB_MODE", "partial")
+    d, used = _fallback_daemon(aw_home, monkeypatch, "apple")
+    ev = _speak(d)
+    assert ev["status"] == "error", ev
+    assert "helper crashed" in (ev.get("error") or "") and used == []  # not the model's error, and no say on top
+
+
+def test_no_mlx_audio_keeps_the_voice_router(aw_home, monkeypatch, apple_stub):
+    d, used = _fallback_daemon(aw_home, monkeypatch, "none")
+    monkeypatch.setattr(server, "mlx_audio_available", lambda: (False, "mlx-audio is not installed"))
+    monkeypatch.delenv("AFTERWORD_SYNTH", raising=False)
+    assert d._make_synth("qwen").name == "qwen"  # apple: and say: still routed, models fall back

@@ -160,7 +160,8 @@ def list_voices(refresh: bool = False) -> list[dict[str, Any]]:
 
 
 def _lang_arg(profile: Profile, attrs: dict[str, Any]) -> str | None:
-    return voices.lang_iso(attrs.get("lang") or profile.lang)
+    """The line's language with its region ("zh-TW" picks a Taiwan voice)."""
+    return voices.lang_tag(attrs.get("lang") or profile.lang)
 
 
 def _voice_value(profile: Profile) -> str:

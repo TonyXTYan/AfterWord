@@ -71,7 +71,18 @@ CHATTERBOX_LANGS = (
     "nl", "no", "pl", "pt", "ru", "sv", "sw", "tr", "zh",
 )
 
-# ISO 639-1 -> Qwen3-TTS language name.
+# Every language some engine speaks (ISO 639-1 -> English name): what
+# profiles, [profiles.x.langs.*] and the lab accept. Keep in step with the
+# hook's _LANG_NAMES (afterword_hook.py; tests check).
+LANGUAGE_NAMES = {
+    "en": "English", "zh": "Chinese", "ja": "Japanese", "ko": "Korean", "de": "German",
+    "fr": "French", "es": "Spanish", "it": "Italian", "pt": "Portuguese", "ru": "Russian",
+    "hi": "Hindi", "ar": "Arabic", "da": "Danish", "el": "Greek", "fi": "Finnish",
+    "he": "Hebrew", "ms": "Malay", "nl": "Dutch", "no": "Norwegian", "pl": "Polish",
+    "sv": "Swedish", "sw": "Swahili", "tr": "Turkish",
+}
+
+# ISO 639-1 -> Qwen3-TTS language name (Qwen-only; other languages are "auto").
 ISO_TO_QWEN = {
     "en": "english",
     "zh": "chinese",
@@ -193,6 +204,31 @@ def lang_iso(lang: str | None) -> str | None:
             return iso
     base = value.split("-", 1)[0]
     return base if re.fullmatch(r"[a-z]{2,3}", base) else None
+
+
+def lang_tag(lang: str | None) -> str | None:
+    """A BCP-47 tag with its region kept ("zh-TW", "en-AU", "zh-Hant-TW"),
+    for Apple voices; a language name becomes its ISO code. None for auto."""
+    if not lang:
+        return None
+    value = lang.strip().replace("_", "-")
+    if value.lower() in ("", "auto"):
+        return None
+    for iso, name in LANGUAGE_NAMES.items():
+        if value.lower() == name.lower():
+            return iso
+    parts = [p for p in value.split("-") if p]
+    if not parts or not re.fullmatch(r"[A-Za-z]{2,3}", parts[0]):
+        return None
+    out = [parts[0].lower()]
+    for part in parts[1:]:
+        if re.fullmatch(r"[A-Za-z]{4}", part):
+            out.append(part.title())
+        elif re.fullmatch(r"[A-Za-z]{2}|[0-9]{3}", part):
+            out.append(part.upper())
+        else:
+            out.append(part.lower())
+    return "-".join(out)
 
 
 def kokoro_lang(voice: str, lang: str | None) -> str:
