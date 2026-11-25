@@ -203,18 +203,41 @@
   .empty-panel b { color: var(--ink); }
 
   /* sessions */
-  #s-table td.sess { font-family: var(--mono); font-size: 12px; }
   .scroll-x { overflow-x: auto; min-width: 0; }
-  #s-table td.last { max-width: 360px; min-width: 160px; }
+  #s-table td.sess { font-family: var(--mono); font-size: 12px; }
+  #s-table td.last { max-width: 420px; min-width: 200px; }
   #s-table td.last .ell { display: block; }
-  #s-table td.last .reason { color: var(--muted); font-size: 12px; }
-  #s-table select { max-width: 160px; }
-  #s-table tr.off td.prof select { color: var(--muted); }
+  #s-table td.last .txt { flex: 1 1 0; min-width: 0; font: 14px/1.45 var(--serif); color: var(--ink); }
+  #s-table td.last .reason { color: var(--slate); font-size: 12px; }
+  .vsel { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+  .vsel > i { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--spk, transparent);
+              border: 1px dashed var(--slate); }
+  .vsel[class*="spk-"] > i { border: 0; }
+  .vsel.spk-4 > i { box-shadow: 0 0 0 1px var(--rule); }
+  .vsel select { max-width: 160px; min-width: 0; }
+  #s-table tr.off td.prof select { color: var(--slate); }
   #s-table tr.pending { opacity: .65; }
+  /* muted: the voice stays on but plays nothing, so the swatch goes hollow and the text recedes */
+  #s-table tr.muted .vsel > i { background: transparent; box-shadow: inset 0 0 0 2px var(--spk, var(--slate)); border: 0; }
+  #s-table tr.muted td.last .txt, #s-table tr.muted td.sess, #s-table tr.muted td.ell { color: var(--slate); }
+  #s-table tr.muted td.last .txt { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--slate) 60%, transparent); }
 
   /* queue */
-  .np-text { font-size: 15px; white-space: pre-wrap; word-break: break-word; margin: 2px 0 6px; }
-  #q-table td.text { max-width: 560px; white-space: pre-wrap; word-break: break-word; }
+  .np-who { font-size: 14px; margin-bottom: 4px; }
+  .np-text { font: 20px/1.4 var(--serif); color: var(--ink); max-width: 80ch; white-space: pre-wrap; word-break: break-word; margin: 0 0 8px; }
+  .np-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 14px; font-family: var(--mono); font-size: 12px; color: var(--slate); min-width: 0; }
+  .np-meta b { color: var(--ink); font-weight: 500; }
+  .q-empty { margin: 0; color: var(--slate); font-size: 13px; max-width: 80ch; }
+  .q-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .q-item { display: grid; grid-template-columns: 2.2em minmax(0, 1fr) auto; gap: 2px 10px; align-items: start;
+            padding: 9px 0; border-top: 1px solid var(--rule); min-width: 0; }
+  .q-item:first-child { border-top: 0; padding-top: 0; }
+  .q-item .n { font-family: var(--mono); font-size: 12px; color: var(--slate); padding-top: 2px; text-align: right; }
+  .q-item .body { min-width: 0; }
+  .q-item .txt { font: 15px/1.55 var(--serif); color: var(--ink); max-width: 80ch; white-space: pre-wrap; word-break: break-word; }
+  .q-item .meta { display: flex; flex-wrap: wrap; gap: 0 12px; margin-top: 2px; font-family: var(--mono); font-size: 12px; color: var(--slate); }
+  .q-item button { font-size: 12px; padding: 2px 8px; }
+  @media (max-width: 520px) { .q-item { grid-template-columns: minmax(0, 1fr) auto; } .q-item .n { display: none; } .np-text { font-size: 18px; } }
 
   /* history */
   .hitem { display: grid; grid-template-columns: minmax(220px, 320px) minmax(0, 1fr); gap: 4px 14px; align-items: start;
@@ -461,7 +484,7 @@
   <div class="banner" id="s-muted" hidden><b>All sessions are muted.</b> Voices stay on and lines are logged as skipped (“all muted”). Use <b>All muted</b> in the header to unmute.</div>
   <div class="banner" id="s-err" hidden></div>
   <section class="panel" aria-label="sessions">
-    <h2>Sessions <span class="hint" id="s-count" style="text-transform:none;letter-spacing:0;font-weight:400"></span><span class="grow"></span><span class="msg" id="s-msg"></span><button id="s-refresh">Refresh</button></h2>
+    <h2>Sessions <span class="hint" id="s-count"></span><span class="grow"></span><span class="msg" id="s-msg"></span><button id="s-refresh">Refresh</button></h2>
     <div id="s-body"><span class="hint">Loading…</span></div>
   </section>
 </main>
@@ -471,11 +494,11 @@
     <h2>Now playing <span class="grow"></span><span class="msg" id="q-msg"></span>
       <button id="q-skip" title="Stop the current clip; keep the queue">Skip</button>
       <button id="q-stop" class="danger" title="Stop and clear the queue">Stop all</button></h2>
-    <div id="q-now"><span class="hint">Nothing playing.</span></div>
+    <div id="q-now"><p class="q-empty">Nothing playing. The line being spoken appears here.</p></div>
   </section>
   <section class="panel" aria-label="pending">
-    <h2>Pending <span class="hint" id="q-count" style="text-transform:none;letter-spacing:0;font-weight:400"></span></h2>
-    <div id="q-pending"><span class="hint">Queue is empty.</span></div>
+    <h2>Pending <span class="hint" id="q-count"></span></h2>
+    <div id="q-pending"><p class="q-empty">Queue is empty. Lines waiting to be spoken are listed here in the order they will play.</p></div>
   </section>
 </main>
 
@@ -1480,7 +1503,7 @@ const Sessions = (() => {
     if (!r.ok || !r.data) {
       $("s-err").hidden = false;
       $("s-err").replaceChildren(h("b", null, "Couldn't load sessions"), `: ${r.error || "empty response"}`);
-      if (!loadedOnce) $("s-body").replaceChildren(h("span", {class: "hint"}, "No session data."));
+      if (!loadedOnce) $("s-body").replaceChildren(h("p", {class: "q-empty"}, "No session data yet. Use Refresh to try again."));
       return;
     }
     $("s-err").hidden = true;
@@ -1531,6 +1554,7 @@ const Sessions = (() => {
     if (on && !profiles.includes(s.profile)) sel.append(h("option", {value: s.profile}, `${s.profile} (not in config)`));
     sel.value = on ? s.profile : "";
     sel.addEventListener("change", () => change(id, {profile: sel.value || null}));
+    const vsel = h("span", {class: "vsel" + (on ? " spk-" + speakerSlot(s.profile) : "")}, h("i", {"aria-hidden": "true"}), sel);
     const mute = h("button", {class: "small toggle", "data-k": "mute", "aria-pressed": String(!!s.muted), disabled: busy,
       title: s.muted ? "Muted: lines are logged but not played. Click to unmute." : "Keep the voice on but play nothing"},
       s.muted ? "Muted" : "Mute");
@@ -1540,10 +1564,10 @@ const Sessions = (() => {
     const src = typeof s.source === "string" ? s.source : null;
     const idLink = h("a", {class: "plain", href: "#log", title: `${id}\nshow this session in the log`}, shortId(id));
     idLink.addEventListener("click", () => { $("q").value = id; render(); });
-    return h("tr", {class: [on ? "" : "off", busy ? "pending" : ""].join(" ").trim()},
+    return h("tr", {class: [on ? "" : "off", s.muted ? "muted" : "", busy ? "pending" : ""].join(" ").trim()},
       h("td", {class: "sess"}, idLink),
       h("td", {class: "ell", style: "max-width:180px", title: s.cwd || ""}, base(s.cwd || "") || "—"),
-      h("td", {class: "prof nowrap"}, sel),
+      h("td", {class: "prof nowrap"}, vsel),
       h("td", {class: "nowrap"}, mute, n ? h("div", {class: "msg " + n.kind, style: "max-width:220px;white-space:normal"}, n.text) : null),
       h("td", {class: "nowrap muted", title: src || ""}, src ? (SOURCES[src] || src) : "—"),
       h("td", {class: "nowrap"}, relSpan(s.last_seen)),
@@ -1551,7 +1575,7 @@ const Sessions = (() => {
       h("td", {class: "last"}, le ? [
         h("div", {class: "row", style: "flex-wrap:nowrap"},
           le.status ? h("span", {class: "badge s-" + cls(le.status)}, String(le.status)) : null,
-          h("span", {class: "ell", title: le.text || ""}, le.text || "")),
+          h("span", {class: "ell txt", title: le.text || ""}, le.text || "")),
         le.reason ? h("div", {class: "reason ell", title: le.reason}, le.reason) : null,
       ] : h("span", {class: "muted"}, "—")));
   }
@@ -1567,7 +1591,7 @@ const Sessions = (() => {
   }
 
   function renderAll() {
-    $("s-count").textContent = loadedOnce && data.size ? `${data.size} · newest activity first` : "";
+    $("s-count").textContent = loadedOnce && data.size ? `${data.size} ${data.size === 1 ? "session" : "sessions"}, newest activity first` : "";
     if (!loadedOnce) return;
     if (!data.size) { rows.clear(); $("s-body").replaceChildren(emptyState()); return; }
     let table = $("s-table");
@@ -1595,7 +1619,7 @@ const Sessions = (() => {
     const focusK = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.k : null;
     const want = [];
     for (const s of list) {
-      const sig = JSON.stringify([s, profiles, pending.has(s.session_id), notes.get(s.session_id) || null]);
+      const sig = JSON.stringify([s, profiles, speakerProfiles, pending.has(s.session_id), notes.get(s.session_id) || null]);
       let r = rows.get(s.session_id);
       if (!r || r.sig !== sig) {
         const tr = rowFor(s);
@@ -1614,6 +1638,7 @@ const Sessions = (() => {
   }
 
   sse.on("sessions", upsert);
+  document.addEventListener("aw:speakers", () => { if (visible && loadedOnce) renderAll(); });
   sse.on("event", loadSoon);
   sse.on("open", () => { if (visible) load(); else stale = true; });
   $("s-refresh").addEventListener("click", async () => { note("s-msg", "refreshing…", "run"); await load(); note("s-msg", ""); });
@@ -1667,13 +1692,13 @@ const Queue = (() => {
 
   function renderAll() {
     const np = snap.now_playing;
-    if (!np) $("q-now").replaceChildren(h("span", {class: "hint"}, "Nothing playing."));
+    if (!np) $("q-now").replaceChildren(h("p", {class: "q-empty"}, "Nothing playing. The line being spoken appears here."));
     else {
       const st = evStatus(np.event_id);
       $("q-now").replaceChildren(
+        h("div", {class: "np-who"}, speakerTag(np.profile)),
         h("div", {class: "np-text"}, np.text || ""),
-        h("div", {class: "kv", style: "align-items:center"},
-          h("span", null, "profile ", h("b", null, np.profile || "default")),
+        h("div", {class: "np-meta"},
           h("span", null, "session ", h("b", {title: np.session_id || ""}, shortId(np.session_id))),
           h("span", null, "event ", h("b", null, "#" + np.event_id)),
           st ? h("span", null, "status ", h("span", {class: "badge s-" + cls(st)}, st)) : null,
@@ -1682,22 +1707,23 @@ const Queue = (() => {
     }
     $("q-skip").disabled = !np;
     const p = snap.pending;
-    $("q-count").textContent = `${p.length}${isNum(snap.max_size) ? " / " + snap.max_size : ""} waiting · plays top to bottom`;
-    if (!p.length) { $("q-pending").replaceChildren(h("span", {class: "hint"}, "Queue is empty.")); }
+    $("q-count").textContent = `${p.length}${isNum(snap.max_size) ? " of " + snap.max_size : ""} waiting, plays top to bottom`;
+    if (!p.length) { $("q-pending").replaceChildren(h("p", {class: "q-empty"}, "Queue is empty. Lines waiting to be spoken are listed here in the order they will play.")); }
     else {
-      $("q-pending").replaceChildren(h("table", {id: "q-table"},
-        h("thead", null, h("tr", null, ["#", "text", "profile", "session", "waiting", ""].map(t => h("th", null, t)))),
-        h("tbody", null, p.map((it, i) => {
+      $("q-pending").replaceChildren(h("ol", {class: "q-list", id: "q-table"},
+        p.map((it, i) => {
           const btn = h("button", {class: "small danger", title: `Drop #${it.event_id} from the queue`}, "Remove");
           btn.addEventListener("click", () => remove(it.event_id, btn));
-          return h("tr", null,
-            h("td", {class: "t", title: `event #${it.event_id}`}, String(i + 1)),
-            h("td", {class: "text"}, it.text || ""),
-            h("td", {class: "ell", style: "max-width:160px", title: it.profile || "default"}, it.profile || "default"),
-            h("td", {class: "nowrap"}, sess(it.session_id)),
-            h("td", {class: "nowrap muted"}, relSpan(it.enqueued_at)),
-            h("td", {class: "nowrap"}, btn));
-        }))));
+          return h("li", {class: "q-item"},
+            h("span", {class: "n", title: `event #${it.event_id}`}, String(i + 1)),
+            h("div", {class: "body"},
+              speakerTag(it.profile),
+              h("div", {class: "txt"}, it.text || ""),
+              h("div", {class: "meta"},
+                h("span", null, "session ", sess(it.session_id)),
+                h("span", null, "waiting ", relSpan(it.enqueued_at)))),
+            btn);
+        })));
     }
     $("q-stop").disabled = !np && !p.length;
   }
@@ -1705,6 +1731,7 @@ const Queue = (() => {
   $("q-skip").addEventListener("click", () => queueAction("/api/queue/skip", "Skip", "q-msg"));
   $("q-stop").addEventListener("click", () => queueAction("/api/queue/stop", "Stop all", "q-msg"));
   // Status of the head item (synthesizing -> playing) comes from event rows.
+  document.addEventListener("aw:speakers", () => { if (visible) renderAll(); });
   sse.on("event", (e) => { if (visible && snap.now_playing && e.id === snap.now_playing.event_id) renderAll(); });
   return {
     update,
