@@ -3967,11 +3967,18 @@ const Lab = (() => {
   const MODE_KEY = "aw.lab.mode";
   const modeRadios = () => [...document.querySelectorAll('input[name="lab-mode"]')];
   function labMode() { return (modeRadios().find(r => r.checked) || {}).value || "preview"; }
+  // Leaving Explore (another mode, or another page): stop its player and drop
+  // a pending "play the next take" (ex.want.play), or the next take arriving
+  // over SSE would start the hidden explorer and cut off a preview.
+  function exSilence() {
+    exPlayer.pause();
+    if (ex.want) ex.want.play = false;
+  }
   function setMode(mode, remember = true) {
     if (!MODES.includes(mode)) mode = "preview";
     for (const r of modeRadios()) r.checked = r.value === mode;
     for (const el of document.querySelectorAll("#view-lab [data-mode]")) el.hidden = el.dataset.mode !== mode;
-    if (mode !== "explore") exPlayer.pause();
+    if (mode !== "explore") exSilence();
     if (remember) try { localStorage.setItem(MODE_KEY, mode); } catch { /* storage blocked */ }
   }
 
@@ -4038,7 +4045,7 @@ const Lab = (() => {
   return {
     show() { visible = true; if (!started) { started = true; init(); } refresh(); exLoad(); exLoadStars(); },
     engineStrip(box, eng, afterWarm) { renderEngine(eng, null, box, afterWarm); },
-    hide() { visible = false; exPlayer.pause(); },
+    hide() { visible = false; exSilence(); },
   };
 })();
 

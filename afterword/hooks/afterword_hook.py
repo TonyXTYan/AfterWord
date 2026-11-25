@@ -662,7 +662,9 @@ def handle_stop(payload: dict) -> dict:
     }
 
     outcome = {"decision": decision, "reason": reason, "text": text, "profile": profile}
-    if session_id and not duplicate and (state_changed or decision == "speak"):
+    # Lines spoken early (MessageDisplay) count as use too: a session that
+    # only speaks that way would otherwise look idle in voices.json.
+    if session_id and not duplicate and (state_changed or decision == "speak" or early_dropped):
         _note_voice(session_id, profile, payload.get("cwd"))
     if early_dropped:
         outcome["early_dropped"] = early_dropped
