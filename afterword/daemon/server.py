@@ -1162,11 +1162,19 @@ class Daemon:
                     kinds.append(kind)
         return kinds
 
+    def models_to_warm(self, keep_loaded: int) -> list[str]:
+        """The models in use to load at start-up: every light one (they do
+        not count against keep_loaded) plus the first keep_loaded others."""
+        from .qwen import LIGHT_KINDS
+
+        heavy = [k for k in self.models_in_use() if k not in LIGHT_KINDS][:keep_loaded]
+        return [k for k in self.models_in_use() if k in LIGHT_KINDS or k in heavy]
+
     async def warm_models(self) -> None:
         cfg = self.store.get()
         if self.synth.name != "qwen" or not cfg.qwen.warm_on_start or not mlx_audio_available()[0]:
             return
-        for kind in self.models_in_use()[: cfg.qwen.keep_loaded]:
+        for kind in self.models_to_warm(cfg.qwen.keep_loaded):
             if self.engine.snapshot_path(kind) is None:
                 log.warning("not warming %s: model not downloaded", kind)
                 continue

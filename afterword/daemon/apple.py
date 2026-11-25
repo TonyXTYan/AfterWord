@@ -24,6 +24,7 @@ import shlex
 import shutil
 import struct
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -199,7 +200,10 @@ class AppleSynth:
         _check_cancel(cancel)
         argv = self._argv(profile, attrs)
         t = time.perf_counter()
-        proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # stderr goes to a file, not a pipe: a helper that writes a lot of
+        # diagnostics can never block on it while we read its audio.
+        errfile = tempfile.TemporaryFile()
+        proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errfile)
         done = threading.Event()
 
         def watchdog():
@@ -241,7 +245,8 @@ class AppleSynth:
             proc.wait(timeout=10)
             _check_cancel(cancel)
             if proc.returncode != 0 or not samples:
-                err = proc.stderr.read().decode("utf-8", "replace").strip()
+                errfile.seek(0)
+                err = errfile.read()[-4000:].decode("utf-8", "replace").strip()
                 if proc.returncode == 2:
                     raise voices.VoiceError(err or "no such Apple voice")
                 if proc.returncode == 4 or proc.returncode == -9:
@@ -252,7 +257,7 @@ class AppleSynth:
             if proc.poll() is None:
                 proc.kill()
                 proc.wait()
-            for f in (proc.stdout, proc.stderr):
+            for f in (proc.stdout, errfile):
                 try:
                     f.close()
                 except Exception:

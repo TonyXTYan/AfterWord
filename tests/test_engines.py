@@ -277,6 +277,8 @@ if "--voice" in args and args[args.index("--voice") + 1] == "Nope":
 mode = os.environ.get("STUB_MODE", "ok")
 if mode == "slow":
     time.sleep(30)
+if mode == "noisy":
+    sys.stderr.write("diagnostic line\n" * 20000); sys.stderr.flush()  # ~300 KB: more than a pipe holds
 if mode == "partial":
     sys.stdout.buffer.write(b"AWPCM1" + struct.pack("<I", 22050) + struct.pack("<2205f", *([0.1] * 2205)))
     sys.stdout.buffer.flush()
@@ -631,3 +633,21 @@ def test_split_keeps_numbers_urls_and_spacing():
     assert all(p.endswith("com.") for p in pieces)  # cut only at sentence ends
     mixed = "第一句。第二句！" * 30
     assert "".join(qwen.split_by_duration(mixed, 5.0)) == mixed
+
+
+def test_a_noisy_helper_never_blocks_on_stderr(apple_stub, monkeypatch):
+    monkeypatch.setenv("STUB_MODE", "noisy")
+    t = time.perf_counter()
+    got = []
+    res = apple.AppleSynth().stream("Hi", Profile(name="p", voice="apple:"), {}, got.append, threading.Event())
+    assert res.audio_s > 0 and got and time.perf_counter() - t < 10
+
+
+def test_startup_warms_light_models_beyond_keep_loaded(aw_home, monkeypatch):
+    (aw_home / "config.toml").write_text(
+        '[profiles.k]\nvoice = "kokoro:af_heart"\n\n[profiles.q]\nvoice = "builtin:Ryan"\n\n'
+        '[profiles.c]\nvoice = "clone:me"\n')
+    d = make_daemon(aw_home, monkeypatch, BoomSynth())
+    assert d.models_in_use() == ["kokoro", "custom_voice", "base"]
+    assert d.models_to_warm(1) == ["kokoro", "custom_voice"]
+    assert d.models_to_warm(2) == ["kokoro", "custom_voice", "base"]

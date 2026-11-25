@@ -94,7 +94,11 @@ func langMatches(_ voiceLang: String, _ want: String) -> Bool {
 func pickVoice(_ spec: String, _ lang: String) -> AVSpeechSynthesisVoice? {
     let all = AVSpeechSynthesisVoice.speechVoices().filter { !isPersonal($0) }
     if !spec.isEmpty {
-        if let v = AVSpeechSynthesisVoice(identifier: spec) { return v }
+        if let v = AVSpeechSynthesisVoice(identifier: spec) {
+            // Personal Voice cannot be written to buffers (only spoken aloud).
+            if isPersonal(v) { fail(2, "\(v.name) is a Personal Voice, which other apps cannot render") }
+            return v
+        }
         // By name, e.g. "Ava" or "Ava (Premium)": the best quality, in --lang if given.
         let bare = spec.replacingOccurrences(of: #"\s*\((Premium|Enhanced|Default)\)$"#, with: "",
                                              options: [.regularExpression, .caseInsensitive])
