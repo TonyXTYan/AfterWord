@@ -4801,6 +4801,8 @@ document.addEventListener("selectionchange", () => {
 });
 window.addEventListener("scroll", fwPlace, true);
 window.addEventListener("resize", fwPlace);
+// Leaving the Transcript (a tab, a shortcut, an old #link) closes the popover.
+document.addEventListener("aw:route", (ev) => { if (!ev.detail || ev.detail.view !== "log") fwClose(); });
 // ---------- end fix word
 
 // Four pages; the keys are the element-id suffixes (view-<key>, tab-<key>,
