@@ -199,8 +199,8 @@ def lang_iso(lang: str | None) -> str | None:
         return None
     if value == "en-gb":
         return value
-    for iso, name in ISO_TO_QWEN.items():
-        if value == name:
+    for iso, name in LANGUAGE_NAMES.items():  # every engine's languages, not only Qwen's
+        if value == name.lower():
             return iso
     base = value.split("-", 1)[0]
     return base if re.fullmatch(r"[a-z]{2,3}", base) else None

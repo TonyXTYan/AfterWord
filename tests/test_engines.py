@@ -567,3 +567,13 @@ def test_no_mlx_audio_keeps_the_voice_router(aw_home, monkeypatch, apple_stub):
     monkeypatch.setattr(server, "mlx_audio_available", lambda: (False, "mlx-audio is not installed"))
     monkeypatch.delenv("AFTERWORD_SYNTH", raising=False)
     assert d._make_synth("qwen").name == "qwen"  # apple: and say: still routed, models fall back
+
+
+def test_language_names_reach_the_models(tmp_path):
+    assert voices.lang_iso("hindi") == "hi" and voices.lang_iso("Arabic") == "ar"
+    clips = voices.ClipStore(tmp_path)
+    clips.add("me", voices.silence_wav(2.0, 24000))
+    req = qwen.build_request("hi", voices.parse_voice("chatterbox:me"), clips, lang="arabic", style=None,
+                             mood=None, ref_text=None, seed=None, temperature=None)
+    assert req.lang == "ar" and voices.chatterbox_lang(req.lang) == "ar"
+    assert voices.kokoro_lang("af_heart", "hindi") == "h"
