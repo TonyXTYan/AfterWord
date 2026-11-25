@@ -311,16 +311,21 @@
   .panel > h2 .grow, .grow { flex: 1; }
   .panel > h2 button { font-weight: 400; font-size: 12px; padding: 2px 8px; }
   h3.sub { font-size: 13px; color: var(--ink); font-weight: 600; margin: 14px 0 8px;
-           padding-top: 10px; border-top: 1px solid var(--line); }
+           padding-top: 10px; border-top: 1px solid var(--rule); }
+  /* hints and messages inside headings stay light (h2 and h3.sub are semibold) */
+  .panel > h2 .hint, .panel > h2 .msg, h3.sub .hint, h3.sub .msg { font-weight: 400; }
   .field { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 4px 8px; align-items: center; margin-bottom: 7px; }
-  .field > .lbl { font-size: 12px; color: var(--muted); }
+  .field > .lbl { font-size: 12px; color: var(--slate); }
   .field.top { align-items: start; } .field.top > .lbl { padding-top: 5px; }
   .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 0; }
   .row > input[type=text], .row > select { flex: 1; min-width: 0; }
   #view-lab input[type=text], #view-lab input[type=number], #view-lab select, #view-lab textarea { width: 100%; min-width: 0; }
   #view-lab input[type=number] { width: 110px; }
-  #view-lab input[type=checkbox], #view-lab input[type=radio] { width: auto; accent-color: var(--accent); margin: 0; }
-  #view-lab input[type=range] { padding: 0; border: 0; background: none; accent-color: var(--accent); flex: 1; min-width: 80px; }
+  #view-lab input[type=checkbox], #view-lab input[type=radio] { width: auto; accent-color: var(--cue); margin: 0; }
+  #view-lab input[type=range] { padding: 0; border: 0; background: none; accent-color: var(--cue); flex: 1; min-width: 80px; }
+  /* anything that will be spoken is set in the serif */
+  #view-lab #t-text, #view-lab #ab-text, #view-lab #ex-text { font: 15px/1.55 var(--serif); }
+  #view-lab #b-ref, #view-lab #cl-ref { font: 14px/1.5 var(--serif); }
   ::placeholder { color: var(--slate); opacity: .8; }
   textarea { font: inherit; font-size: 13px; color: var(--ink); background: var(--sheet); border: 1px solid var(--rule);
              border-radius: 6px; padding: 6px 9px; resize: vertical; }
@@ -331,18 +336,20 @@
   button.small { font-size: 12px; padding: 2px 8px; }
   label.chk { display: inline-flex; gap: 5px; align-items: center; font-size: 12px; color: var(--slate); white-space: nowrap; cursor: pointer; }
   .val { font-family: var(--mono); font-size: 12px; min-width: 52px; text-align: right; color: var(--ink); }
-  .muted { color: var(--muted); } .mono { font-family: var(--mono); font-size: 12px; }
+  .muted { color: var(--slate); } .mono { font-family: var(--mono); font-size: 12px; }
   .hint { font-size: 12px; color: var(--slate); }
-  code, .code { font-family: var(--mono); font-size: 12px; background: color-mix(in srgb, var(--muted) 14%, transparent);
+  code, .code { font-family: var(--mono); font-size: 12px; background: color-mix(in srgb, var(--slate) 14%, transparent);
                 padding: 1px 5px; border-radius: 4px; word-break: break-all; }
-  .seg { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
-  .seg label { font-size: 12px; text-align: center; padding: 5px 4px; cursor: pointer; color: var(--muted); line-height: 1.2; }
-  .seg label { position: relative; }
-  .seg label + label { border-left: 1px solid var(--line); }
+  /* segmented control: a recessed track, the chosen segment raised on the sheet; wraps to extra rows in the narrow column */
+  .seg { display: flex; flex-wrap: wrap; gap: 2px; padding: 2px; margin-bottom: 10px; border: 1px solid var(--rule);
+         border-radius: 6px; background: var(--paper); }
+  .seg label { position: relative; flex: 1 1 auto; font-size: 12px; text-align: center; padding: 5px 10px; cursor: pointer;
+               color: var(--slate); line-height: 1.2; border-radius: 4px; white-space: nowrap; }
+  .seg label:hover { color: var(--ink); }
   .seg input { position: absolute; opacity: 0; pointer-events: none; }
-  .seg label:has(input:checked) { background: var(--soft); color: var(--ink); font-weight: 600; }
-  .seg label:has(input:focus-visible) { outline: 2px solid var(--cue); outline-offset: -2px; }
-  .spec { margin-top: 8px; font-size: 12px; color: var(--muted); display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+  .seg label:has(input:checked) { background: var(--sheet); color: var(--ink); font-weight: 600; box-shadow: 0 0 0 1px var(--rule); }
+  .seg label:has(input:focus-visible) { outline: 2px solid var(--cue); outline-offset: 1px; }
+  .spec { margin-top: 8px; font-size: 12px; color: var(--slate); display: flex; gap: 6px; align-items: baseline; min-width: 0; }
   .spec code { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; word-break: normal; }
   .msg { font-size: 12px; min-height: 0; }
   .msg:empty { display: none; }
@@ -370,78 +377,88 @@
 
   /* results */
   .results { display: flex; flex-direction: column; }
-  .card { padding: 10px 0 10px 8px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  /* a card (or A/B slot) from a profile carries .spk-N; --spk-bar is the speaker colour for the playing highlight, else --cue */
+  .card, .ab .slot { --spk-bar: var(--spk, var(--cue)); }
+  .card.spk-4, .ab .slot.spk-4 { --spk-bar: var(--spk-ink); }
+  .card { padding: 10px 0 10px 10px; border-top: 1px solid var(--rule); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
   .results > .card:first-child, .results > .group:first-child { border-top: 0; padding-top: 0; }
   .card-top { display: flex; gap: 8px; align-items: center; min-width: 0; flex-wrap: wrap; }
+  .card-top .spk { flex: none; max-width: 40%; font-size: 13px; }
   .card aw-audio { height: 30px; flex: 1; min-width: 200px; max-width: 420px; }
-  .card .txt { font-size: 13px; white-space: pre-wrap; word-break: break-word; }
-  .kv { display: flex; flex-wrap: wrap; gap: 2px 12px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); min-width: 0; }
+  .card .txt { font: 15px/1.55 var(--serif); max-width: 80ch; white-space: pre-wrap; word-break: break-word; }
+  .card .spoken-as { font: 14px/1.5 var(--serif); color: var(--slate); }
+  .kv { display: flex; flex-wrap: wrap; gap: 2px 12px; font-family: var(--mono); font-size: 12px; color: var(--slate); min-width: 0; }
   .kv span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .kv b { color: var(--ink); font-weight: 500; }
+  .kv b { color: var(--slate); font-weight: 600; }
   .kv .load { color: var(--queued); }
   .actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 2px; }
   .actions button { font-size: 12px; padding: 2px 8px; }
-  .card.playing { box-shadow: inset 3px 0 0 var(--accent); }
-  .tag { font-family: var(--mono); font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 4px;
-         background: var(--soft); color: var(--accent); white-space: nowrap; }
-  .group { border-top: 1px solid var(--line); padding: 10px 0; }
+  .card.playing { box-shadow: inset 3px 0 0 var(--spk-bar); }
+  .tag { font-family: var(--mono); font-size: 11px; font-weight: 600; padding: 0 7px; border-radius: 999px; line-height: 18px;
+         border: 1px solid var(--rule); color: var(--slate); white-space: nowrap; }
+  .group { border-top: 1px solid var(--rule); padding: 10px 0; }
   .group-h { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; margin-bottom: 4px; }
   .group-h b { font-size: 13px; }
-  .group-body { border-left: 2px solid var(--line); padding-left: 12px; }
+  .group-body { border-left: 2px solid var(--rule); padding-left: 12px; }
   .group-body .card:first-child { border-top: 0; }
   .ab { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
   @media (max-width: 700px) { .ab { grid-template-columns: 1fr; } }
-  .ab .slot { border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; min-width: 0; }
+  .ab .slot { border: 1px solid var(--rule); border-radius: 6px; padding: 8px 10px; min-width: 0; }
+  .ab .slot > .spk { margin-bottom: 2px; font-size: 13px; }
   .ab .slot .card { border-top: 0; padding: 4px 0 0 6px; }
   .ab .slot .card aw-audio { min-width: 140px; max-width: none; }
-  .ab .slot.playing { border-color: var(--accent); }
+  .ab .slot.playing { border-color: var(--spk-bar); box-shadow: 0 0 0 1px var(--spk-bar); }
   .langs { display: inline-flex; gap: 8px; flex-wrap: wrap; }
   .samples { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
 
   /* lists */
   .list { display: flex; flex-direction: column; }
-  .item { border-top: 1px solid var(--line); padding: 8px 0; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .item { border-top: 1px solid var(--rule); padding: 8px 0; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
   .item:first-child { border-top: 0; padding-top: 0; }
   .item-h { display: flex; gap: 8px; align-items: center; min-width: 0; }
   .item-h .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item-h .spk.nm { flex: 0 1 auto; max-width: 45%; }
   .item-h .grow { min-width: 0; }
   .item aw-audio { height: 28px; width: 100%; }
-  .item .tr { font-size: 12px; color: var(--muted); font-style: italic; word-break: break-word; }
+  .item .tr { font: 14px/1.5 var(--serif); max-width: 80ch; word-break: break-word; }
   .rec { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .rec .clock { font-family: var(--mono); font-size: 13px; }
+  .rec .clock { font-family: var(--mono); font-size: 12px; }
   .rec .clock.on { color: var(--error); }
-  .readme { font-size: 13px; border-left: 3px solid var(--accent); padding: 4px 10px; background: var(--soft); border-radius: 0 6px 6px 0; }
+  .readme { font: 15px/1.55 var(--serif); border-left: 3px solid var(--cue); padding: 4px 10px; background: var(--soft); border-radius: 0 6px 6px 0; }
 
   /* seed explorer */
   #view-lab .ex-num { width: 6.5em; flex: none; }
-  .ex-status { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 6px; min-height: 1.4em; overflow-wrap: anywhere; }
+  .ex-keys { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-bottom: 8px; }
+  .ex-status { font-family: var(--mono); font-size: 12px; color: var(--slate); margin-top: 6px; min-height: 1.4em; overflow-wrap: anywhere; }
   .ex-status b { color: var(--ink); font-weight: 600; }
-  .ex-takes { display: flex; flex-direction: column; max-height: 340px; overflow-y: auto; border: 1px solid var(--line);
-              border-radius: 7px; margin-top: 6px; outline: none; }
+  .ex-takes { display: flex; flex-direction: column; max-height: 340px; overflow-y: auto; border: 1px solid var(--rule);
+              border-radius: 6px; margin-top: 6px; }
   .ex-takes:empty { display: none; }
+  .ex-takes:focus-visible { outline: 2px solid var(--cue); outline-offset: 2px; }
   .ex-take { display: grid; grid-template-columns: auto 5em minmax(0, 1fr) auto auto; gap: 4px 8px; align-items: center;
-             padding: 4px 8px; border-top: 1px solid var(--line); font-size: 12.5px; cursor: pointer; min-width: 0; }
+             padding: 4px 8px; border-top: 1px solid var(--rule); font-size: 12px; cursor: pointer; min-width: 0; }
   .ex-take:first-child { border-top: 0; }
-  .ex-take:hover { background: color-mix(in srgb, var(--accent) 4%, transparent); }
-  .ex-take.sel { background: var(--soft); box-shadow: inset 3px 0 0 var(--accent); }
+  .ex-take:hover { background: color-mix(in srgb, var(--cue) 5%, transparent); }
+  .ex-take.sel { background: var(--soft); outline: 2px solid var(--cue); outline-offset: -2px; }
   .ex-take.dropped { opacity: .45; }
-  .ex-take.pending { color: var(--muted); cursor: default; grid-template-columns: auto minmax(0, 1fr); }
-  .ex-take .seed { font-family: var(--mono); font-weight: 600; white-space: nowrap; }
-  .ex-take .meta { display: flex; gap: 10px; align-items: center; min-width: 0; font-family: var(--mono); font-size: 11.5px; color: var(--muted); flex-wrap: wrap; }
+  .ex-take.pending { color: var(--slate); cursor: default; grid-template-columns: auto minmax(0, 1fr); }
+  .ex-take .seed { font-family: var(--mono); font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .ex-take .meta { display: flex; gap: 10px; align-items: center; min-width: 0; font-family: var(--mono); font-size: 12px; color: var(--slate); flex-wrap: wrap; }
   .ex-take .meta b { color: var(--ink); font-weight: 500; }
   .ex-take button { font-size: 12px; padding: 1px 7px; }
-  .ex-take button.on { color: var(--queued); border-color: color-mix(in srgb, var(--queued) 45%, var(--line)); }
-  .ex-take.playing .play { color: var(--accent); border-color: var(--accent); }
+  .ex-take button.on { color: var(--queued); border-color: color-mix(in srgb, var(--queued) 45%, var(--rule)); }
+  .ex-take.playing .play { color: var(--cue); border-color: var(--cue); }
   .f0bar { position: relative; display: inline-block; width: 64px; height: 6px; border-radius: 3px; flex: none;
-           background: color-mix(in srgb, var(--muted) 18%, transparent); }
-  .f0bar i { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: color-mix(in srgb, var(--accent) 35%, transparent); }
-  .f0bar b { position: absolute; top: -2px; width: 2px; height: 10px; background: var(--accent); }
-  .ex-star .res { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; padding-left: 10px; border-left: 2px solid var(--line); }
+           background: color-mix(in srgb, var(--slate) 18%, transparent); }
+  .f0bar i { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: color-mix(in srgb, var(--cue) 35%, transparent); }
+  .f0bar b { position: absolute; top: -2px; width: 2px; height: 10px; background: var(--cue); }
+  .ex-star .nm { font-family: var(--mono); font-size: 12px; }
+  .ex-star .res { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; padding-left: 10px; border-left: 2px solid var(--rule); }
   .ex-star .res .r { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; min-width: 0; }
   .ex-star .res aw-audio { height: 26px; flex: 1; min-width: 160px; max-width: 320px; }
-  .ex-star .res .txt { font-size: 12px; color: var(--muted); flex-basis: 100%; overflow-wrap: anywhere; }
+  .ex-star .res .txt { font: 13px/1.5 var(--serif); color: var(--slate); flex-basis: 100%; overflow-wrap: anywhere; }
   .drift-ok { color: var(--spoken); } .drift-warn { color: var(--queued); } .drift-bad { color: var(--error); }
-  kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
+  kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
 </style>
 </head>
 <body>
@@ -590,7 +607,7 @@
       </section>
 
       <section class="panel" aria-label="profiles">
-        <h2>Profiles <span class="grow"></span><span class="hint" id="pr-synth" style="text-transform:none;letter-spacing:0;font-weight:400"></span></h2>
+        <h2>Profiles <span class="grow"></span><span class="hint" id="pr-synth"></span></h2>
         <div class="list" id="pr-list"><span class="hint">No profiles yet.</span></div>
         <h3 class="sub">Save builder as profile</h3>
         <div class="field"><label class="lbl" for="pr-name">Name</label>
@@ -598,7 +615,7 @@
         <div class="field"><label class="lbl" for="pr-max">Max chars</label>
           <div class="row"><input type="number" id="pr-max" min="1" step="1" value="400"></div></div>
         <div class="field"><label class="lbl" for="pr-sayv">Fallback say</label><select id="pr-sayv"></select></div>
-        <h3 class="sub">Voice per language <span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">(optional)</span></h3>
+        <h3 class="sub">Voice per language <span class="hint">(optional)</span></h3>
         <div class="hint" style="margin-bottom:6px">Mixed lines are split by script (Chinese, Japanese, Korean, the rest) and each part is spoken with its language’s voice. Empty fields use the profile’s.</div>
         <div id="pr-langs"></div>
         <div class="bar"><button id="pr-addlang" class="small" title="Give one more language its own voice">+ Language</button><span class="msg" id="pr-langmsg"></span></div>
@@ -636,7 +653,7 @@
 
     <div class="col">
       <section class="panel" aria-label="preview">
-        <h2>Text <span class="grow"></span><span class="hint" id="t-count" style="text-transform:none;letter-spacing:0;font-weight:400">0 / 1000</span></h2>
+        <h2>Text <span class="grow"></span><span class="hint" id="t-count">0 / 1000</span></h2>
         <textarea id="t-text" rows="3" maxlength="1000" placeholder="Type a line to hear it. ⌘/Ctrl + Enter previews."></textarea>
         <div class="samples" style="margin-top:6px"><span class="hint">samples</span><span id="t-samples" class="samples"></span></div>
         <div class="bar">
@@ -674,9 +691,9 @@
       </section>
 
       <section class="panel" aria-label="explore seeds" id="ex-panel">
-        <h2>Explore seeds <span class="grow"></span><span class="msg" id="ex-msg" style="text-transform:none;letter-spacing:0;font-weight:400"></span></h2>
-        <div class="hint" style="margin-bottom:8px">Renders the builder’s voice with seed after seed (start, start + 1, …), a few takes ahead of the one you are on, so you can listen through them quickly. Live speech always goes first.
-          Keys: <kbd>space</kbd> play · <kbd>j</kbd> / <kbd>k</kbd> next / previous · <kbd>s</kbd> star · <kbd>x</kbd> drop.</div>
+        <h2>Explore seeds <span class="grow"></span><span class="msg" id="ex-msg"></span></h2>
+        <div class="hint" style="margin-bottom:4px">Renders the builder’s voice with seed after seed (start, start + 1, …), a few takes ahead of the one you are on, so you can listen through them quickly. Live speech always goes first.</div>
+        <div class="hint ex-keys"><span><kbd>space</kbd> play</span><span><kbd>j</kbd> / <kbd>k</kbd> next / previous</span><span><kbd>s</kbd> star</span><span><kbd>x</kbd> drop</span></div>
         <div class="field top"><label class="lbl" for="ex-text">Text</label>
           <div><textarea id="ex-text" rows="2" maxlength="1000" placeholder="Leave empty to use the main text"></textarea></div></div>
         <div class="field"><label class="lbl" for="ex-seed">Start seed</label>
@@ -693,8 +710,8 @@
           <label class="chk"><input type="checkbox" id="ex-showdrop"> show dropped</label>
         </div>
         <div class="ex-status" id="ex-status">Not running.</div>
-        <div class="ex-takes" id="ex-takes" role="listbox" aria-label="takes"></div>
-        <h3 class="sub">Starred <span class="hint" id="ex-starcount" style="text-transform:none;letter-spacing:0;font-weight:400"></span></h3>
+        <div class="ex-takes" id="ex-takes" role="listbox" aria-label="takes" tabindex="0"></div>
+        <h3 class="sub">Starred <span class="hint" id="ex-starcount"></span></h3>
         <div class="list" id="ex-stars"><span class="hint">Star a take (<kbd>s</kbd>) to keep it; stars survive daemon restarts.</span></div>
       </section>
 
@@ -2127,12 +2144,15 @@ const Lab = (() => {
     if (Number(res.load_ms) > 0) tim.push(h("span", {class: "load", title: "a model had to be loaded first"}, "load ", h("b", null, num(res.load_ms) + " ms"), " (model load)"));
     tim.push(kv("audio", num(res.audio_s, 2) != null ? num(res.audio_s, 2) + " s" : null), kv("rtf", num(res.rtf, 2)),
              kv("model", res.model || res.backend));
-    const card = h("div", {class: "card"},
-      h("div", {class: "card-top"}, opt.tag ? h("span", {class: "tag"}, opt.tag) : null, audio,
+    // A card from a profile (an A/B profile slot, or a builder loaded from one) wears that speaker's colour.
+    const prof = opt.profile !== undefined ? opt.profile : res.pronounce_profile;
+    const card = h("div", {class: "card" + (prof ? " spk-" + speakerSlot(prof) : "")},
+      h("div", {class: "card-top"}, opt.tag ? h("span", {class: "tag"}, opt.tag) : null,
+        prof && !opt.noSpeaker ? speakerTag(prof, {title: "profile " + prof}) : null, audio,
         h("span", {class: "mono muted", title: "preview id"}, res.id || "")),
       opt.hideText ? null : h("div", {class: "txt"}, res.text || ""),
       res.spoken_text ? h("div", {class: "hint", title: res.pronounce_profile ? `after the pronunciation list (global + ${res.pronounce_profile})` : "after the pronunciation list (global)"},
-        "spoken as: ", h("span", {class: "mono"}, res.spoken_text)) : null,
+        "spoken as: ", h("span", {class: "spoken-as"}, res.spoken_text)) : null,
       h("div", {class: "kv"}, set),
       h("div", {class: "kv"}, tim),
       h("div", {class: "actions"},
@@ -2228,7 +2248,7 @@ const Lab = (() => {
         // macOS say returns seed null: keep looking for a seed from the next Qwen render.
         if (seed == null && r.data.seed != null) { seed = r.data.seed; seedLbl.textContent = `seed ${seed}`; noteSeed(seed); }
         else if (seed == null) seedLbl.textContent = seedText(r.data);
-        const card = resultCard(r.data, {tag: code.toUpperCase()});
+        const card = resultCard(r.data, {tag: code});
         cards.push(card);
         body.append(card);
         playAll.disabled = false;
@@ -2285,7 +2305,7 @@ const Lab = (() => {
     abCards = [null, null];
     $("ab-play").disabled = true;
     $("ab-out").hidden = false;
-    outs.forEach((o, i) => o.replaceChildren(h("div", {class: "hint"}, `${"AB"[i]}: waiting…`)));
+    outs.forEach((o, i) => { o.className = "slot"; o.replaceChildren(h("div", {class: "hint"}, `${"AB"[i]}: waiting…`)); });
     const errs = [];
     const got = [null, null];   // each slot's response, for the seed summary
     await withBusy("ab-msg", "", async (setLabel) => {
@@ -2298,13 +2318,15 @@ const Lab = (() => {
         got[i] = r.data;
         // A say render has no seed (null); B then adopts the seed of the first Qwen render.
         if (same && shared == null && r.data.seed != null) shared = r.data.seed;
-        const label = slots[i] === "@builder" ? "builder" : slots[i].slice(2);
-        const card = resultCard(r.data, {tag: "AB"[i], hideText: true});
+        // A profile slot takes its speaker's colour and tag; the builder slot stays on --cue.
+        const prof = slots[i] === "@builder" ? null : slots[i].slice(2);
+        const card = resultCard(r.data, {tag: "AB"[i], hideText: true, profile: prof, noSpeaker: true});
         abCards[i] = card;
         const slotEl = outs[i];
+        if (prof) slotEl.classList.add("spk-" + speakerSlot(prof));
         card._audio.addEventListener("play", () => slotEl.classList.add("playing"));
         for (const ev of ["pause", "ended"]) card._audio.addEventListener(ev, () => slotEl.classList.remove("playing"));
-        outs[i].replaceChildren(h("div", {class: "hint", style: "margin-bottom:2px"}, label), card);
+        outs[i].replaceChildren(prof ? speakerTag(prof, {title: "profile " + prof}) : h("div", {class: "hint", style: "margin-bottom:2px"}, "builder"), card);
       }
     });
     $("ab-play").disabled = !(abCards[0] && abCards[1]);
@@ -2565,7 +2587,7 @@ const Lab = (() => {
     const rows = c.takes.map(t => {
       const a = makeAudio(t.url, t.pace ?? (t.settings || {}).pace);
       a.preload = "none";
-      return h("div", {class: "r"}, h("span", {class: "tag"}, String(t.check_lang || "").toUpperCase()), a,
+      return h("div", {class: "r"}, h("span", {class: "tag"}, String(t.check_lang || "")), a,
         h("span", {class: "mono"}, f0Text(t), " ", spreadText(t)),
         isNum(t.f0_delta_st) ? h("span", {class: "mono " + driftClass(t.f0_delta_st), title: "pitch against the starred take, in semitones"},
           (t.f0_delta_st > 0 ? "+" : "") + t.f0_delta_st.toFixed(1) + " st") : null,
@@ -2666,14 +2688,16 @@ const Lab = (() => {
       const pl = Object.entries(p.langs || {});
       if (pl.length) meta.push("langs " + pl.map(([c, v]) => v && v.voice ? `${c} (${v.voice})` : c).join(", "));
       return h("div", {class: "item"},
-        h("div", {class: "item-h"}, h("span", {class: "nm"}, name),
+        h("div", {class: "item-h"}, speakerTag(name, {class: "nm"}),
           h("span", {class: "grow mono muted", style: "overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: p.voice || ""}, p.voice || ""),
           h("button", {class: "small", onclick: () => loadProfile(name)}, "Load"),
           h("button", {class: "small danger", onclick: () => deleteProfile(name, msg)}, "Delete")),
-        h("div", {class: "kv"}, meta.join(" · "), p.style ? h("span", {title: p.style}, "style ", h("b", null, p.style)) : null),
+        h("div", {class: "kv"}, meta.map(m => h("span", null, m)), p.style ? h("span", {title: p.style}, "style ", h("b", null, p.style)) : null),
         msg);
     }));
   }
+  // The speaker colours follow the configured profile order: redraw the list when that changes.
+  document.addEventListener("aw:speakers", () => { delete sig.profiles; renderProfiles(); });
   function loadProfile(name) {
     const p = profilesMap()[name];
     if (!p) return;
@@ -2772,7 +2796,7 @@ const Lab = (() => {
     const res = await withBusy("pr-langmsg", `${langName(r.lang)}…`, () => preview(previewBody(text, settings)));
     if (!res) return;
     if (!res.ok) return note(msg, res.error, "err");
-    const card = resultCard(res.data, {tag: r.lang.toUpperCase()});
+    const card = resultCard(res.data, {tag: r.lang});
     pushResult(card);
     play(card._audio);
     refreshSoon();
@@ -2836,7 +2860,7 @@ const Lab = (() => {
       const when = c.created ? new Date(c.created * 1000).toLocaleDateString() : "";
       return h("div", {class: "item"},
         h("div", {class: "item-h"}, h("span", {class: "nm"}, c.name),
-          h("span", {class: "grow mono muted"}, [c.duration_s != null ? Number(c.duration_s).toFixed(1) + " s" : "", when].filter(Boolean).join(" · ")),
+          h("span", {class: "grow mono muted ell"}, [c.duration_s != null ? Number(c.duration_s).toFixed(1) + " s" : "", when].filter(Boolean).join(", ")),
           h("button", {class: "small", title: "Use clone:" + c.name + " in the builder", onclick: () => {
             writeBuilder({...readBuilder(), voice: "clone:" + c.name, ref_text: null});
             note(msg, `Builder now uses clone:${c.name}.`, "ok");
