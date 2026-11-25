@@ -103,31 +103,62 @@
           border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
   th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
   th { font-size: 12px; color: var(--slate); font-weight: 500; }
+
+  /* log: transcript lines on the page, hairlines between them */
+  table.log { background: none; border: 0; border-radius: 0; overflow: visible; }
+  table.log > thead th { padding: 4px 12px 6px; border-bottom: 1px solid var(--rule); font-size: 12px; font-weight: 500; color: var(--slate); }
+  table.log > tbody > tr > td { padding: 10px 12px; border-bottom: 1px solid color-mix(in srgb, var(--rule) 55%, transparent); }
   tr.ev { cursor: pointer; }
-  tr.ev:hover td { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+  tr.ev:hover td { background: color-mix(in srgb, var(--cue) 6%, transparent); }
   tr.ev.flash td { animation: flash 1.2s ease-out; }
-  @keyframes flash { from { background: color-mix(in srgb, var(--accent) 18%, transparent); } }
-  td.t { font-family: var(--mono); font-size: 12px; color: var(--muted); white-space: nowrap; }
-  td.sess { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
-  td.sess small { display: block; color: var(--muted); font-family: inherit; }
-  td.text { min-width: 300px; max-width: 560px; }
-  #rows td.t:last-child { white-space: normal; max-width: 260px; line-height: 1.6; }
-  td.text .reason { color: var(--muted); font-size: 12px; }
+  @keyframes flash { from { background: color-mix(in srgb, var(--cue) 18%, transparent); } }
+  td.t { font-family: var(--mono); font-size: 12px; color: var(--slate); white-space: nowrap; }
+  td.when { width: 1%; }
+  td.when .eid { display: block; margin-top: 2px; }
+  td.who { min-width: 110px; max-width: 200px; font-size: 12px; color: var(--slate); }
+  td.who .spk { display: flex; font-size: 13px; margin-bottom: 3px; }
+  td.who .sid { display: block; font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+  td.who small { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td.kind { font-size: 13px; }
+  td.kind .badge { margin-top: 3px; }
+  td.text { min-width: 300px; max-width: 640px; font: 15px/1.55 var(--serif); color: var(--ink); }
+  td.text .reason { font: 12px/1.45 var(--sans); color: var(--slate); margin-top: 2px; }
+  td.tim { font-family: var(--mono); font-size: 12px; color: var(--slate); line-height: 1.6; max-width: 260px; }
+  td.tim div { overflow-wrap: anywhere; }
   .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap;
            border: 1px solid color-mix(in srgb, currentColor 40%, transparent); background: color-mix(in srgb, currentColor 9%, transparent); }
   .s-spoken { color: var(--spoken); } .s-queued, .s-synthesizing { color: var(--queued); }
   .s-playing { color: var(--playing); } .s-skipped { color: var(--skipped); }
   .s-error { color: var(--error); } .s-info { color: var(--info); }
-  .via { font-size: 11px; color: var(--muted); }
-  tr.detail td { background: color-mix(in srgb, var(--bg) 60%, var(--panel)); padding: 0; }
-  .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; padding: 14px; }
-  .detail-grid h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 6px; font-weight: 500; }
+  .via { font-size: 11px; color: var(--slate); }
+  tr.detail td { background: var(--sheet); padding: 0; border-bottom: 1px solid var(--rule); }
+  .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; padding: 14px 12px; }
+  .detail-grid h3 { font-size: 12px; color: var(--slate); margin: 0 0 6px; font-weight: 500; }
+  .detail-grid h3.next { margin-top: 12px; }
   pre { margin: 0; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-word;
         max-height: 360px; overflow: auto; background: var(--panel); border: 1px solid var(--line);
         border-radius: 6px; padding: 8px; }
   dl.timings { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; font-family: var(--mono); font-size: 12px; }
-  dl.timings dt { color: var(--muted); }
+  dl.timings dt { color: var(--slate); }
   dl.timings dd { margin: 0; }
+  @media (max-width: 720px) {
+    table.log, table.log > tbody { display: block; }
+    table.log > thead { display: none; }
+    table.log > tbody > tr.ev { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 14px; padding: 10px 4px;
+                                border-bottom: 1px solid color-mix(in srgb, var(--rule) 55%, transparent); }
+    table.log > tbody > tr.ev > td { display: block; padding: 0; border: 0; min-width: 0; max-width: none; width: auto; }
+    tr.ev td.when .eid { display: inline; margin: 0 0 0 8px; }
+    tr.ev td.who { grid-column: 2; grid-row: 1; max-width: none; }
+    tr.ev td.who .spk { display: inline-flex; margin: 0 8px 0 0; }
+    tr.ev td.who .sid, tr.ev td.who small { display: inline; }
+    tr.ev td.who small { margin-left: 8px; }
+    tr.ev td.kind, tr.ev td.text, tr.ev td.tim { grid-column: 1 / -1; }
+    tr.ev td.kind .badge { margin: 0 0 0 8px; }
+    tr.ev td.tim { max-width: none; }
+    table.log > tbody > tr.detail { display: block; }
+    table.log > tbody > tr.detail > td { display: block; }
+    table.log > tbody > tr:not(.ev):not(.detail) > td { display: block; }
+  }
   .empty { text-align: center; color: var(--muted); padding: 40px; }
   .warn { color: var(--error); font-size: 12px; }
   .warn:empty { display: none; }
@@ -196,20 +227,21 @@
   .hitem .ctl { display: flex; gap: 6px; align-items: center; min-width: 0; }
 
   /* stats */
-  details.panel > summary { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600;
+  details.panel > summary { font-size: 13px; color: var(--ink); font-weight: 600;
                             cursor: pointer; display: flex; gap: 8px; align-items: center; list-style: none; }
   details.panel > summary::-webkit-details-marker { display: none; }
-  details.panel > summary::before { content: "▸"; font-size: 10px; }
-  details.panel[open] > summary::before { content: "▾"; }
+  details.panel > summary::before { content: "\25B8"; font-size: 10px; color: var(--slate); }
+  details.panel[open] > summary::before { content: "\25BE"; }
   details.panel[open] > summary { margin-bottom: 10px; }
-  details.panel > summary .hint, details.panel > summary .msg { text-transform: none; letter-spacing: 0; font-weight: 400; }
-  #view-log > details.panel { margin-bottom: 12px; }
+  details.panel > summary .hint, details.panel > summary .msg { font-weight: 400; }
+  details.panel > summary:focus-visible { outline-offset: 4px; border-radius: 4px; }
+  #view-log > details.panel { margin-bottom: 14px; background: none; border: 0; border-bottom: 1px solid var(--rule); border-radius: 0; padding: 0 0 12px; }
   .stats { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(200px, 1fr) minmax(360px, 2fr); gap: 14px; align-items: start; }
   @media (max-width: 980px) { .stats { grid-template-columns: minmax(0, 1fr); } }
-  .stats h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 6px; font-weight: 500; }
+  .stats h3 { font-size: 12px; color: var(--slate); margin: 0 0 6px; font-weight: 500; }
   .counts { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
   .counts div { display: flex; gap: 8px; align-items: center; min-width: 0; }
-  .counts .n { font-family: var(--mono); min-width: 34px; text-align: right; color: var(--ink); }
+  .counts .n { font-family: var(--mono); min-width: 34px; text-align: right; color: var(--slate); }
   .counts .k { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   table.mini { border: 0; border-radius: 0; background: none; }
   table.mini th, table.mini td { padding: 3px 8px; }
@@ -419,9 +451,9 @@
     <summary>Timings <span class="hint" id="st-scope"></span><span class="grow"></span><span class="msg" id="st-msg"></span></summary>
     <div class="stats" id="st-body"><span class="hint">Loading…</span></div>
   </details>
-  <table>
-    <thead><tr><th>#</th><th>time</th><th>session</th><th>event</th><th>status</th><th>text / reason</th><th>timings</th></tr></thead>
-    <tbody id="rows"><tr><td colspan="7" class="empty">No events yet.</td></tr></tbody>
+  <table class="log">
+    <thead><tr><th>Time</th><th>Speaker</th><th>Event</th><th>Line</th><th>Timings</th></tr></thead>
+    <tbody id="rows"><tr><td colspan="5" class="empty">No events yet.</td></tr></tbody>
   </table>
 </main>
 
@@ -1118,20 +1150,19 @@ function matches(e) {
 
 function rowHtml(e) {
   const alertEv = e.kind === "alert" && e.parsed && e.parsed.alert ? e.parsed.alert.event : null;
-  const evName = e.kind === "hook" ? (e.hook_event || "hook") : alertEv ? `alert · ${alertEv}` : e.kind;
+  const evName = e.kind === "hook" ? (e.hook_event || "hook") : alertEv ? `alert: ${alertEv}` : e.kind;
   const via = e.delivery === "spool" ? ` <span class="via" title="daemon was down; imported from spool">(spooled)</span>` : "";
   const text = e.text ? esc(e.text) : "";
   const spoken = e.timings && typeof e.timings.spoken_text === "string" ? `<div class="reason" title="after the pronunciation list">spoken as: ${esc(e.timings.spoken_text)}</div>` : "";
   const reason = (e.reason ? `<div class="reason">${esc(e.reason)}</div>` : "") + spoken;
-  const prof = e.profile ? `<small>${esc(e.profile)}</small>` : "";
+  const spk = e.profile ? speakerTagHTML(e.profile) : "";
+  const tim = timingsLine(e.timings).split(" \u00b7 ").filter(Boolean).map((b) => `<div>${esc(b)}</div>`).join("");
   return `<tr class="ev" data-id="${esc(e.id)}">
-    <td class="t">${esc(e.id)}</td>
-    <td class="t">${esc(fmtTime(e.ts))}</td>
-    <td class="sess" title="${esc(e.session_id)}\n${esc(e.cwd)}">${esc(shortId(e.session_id))}<small>${esc(base(e.cwd))}</small>${prof}</td>
-    <td${e.hook_event === "early" && e.kind === "hook" ? ' title="spoken while Claude was still writing (MessageDisplay hook)"' : ""}>${esc(evName)}${via}</td>
-    <td><span class="badge s-${esc(cls(e.status))}">${esc(e.status)}</span></td>
+    <td class="t when">${esc(fmtTime(e.ts))}<span class="eid">#${esc(e.id)}</span></td>
+    <td class="who" title="${esc(e.session_id)}\n${esc(e.cwd)}">${spk}<span class="sid">${esc(shortId(e.session_id))}</span><small>${esc(base(e.cwd))}</small></td>
+    <td class="kind"${e.hook_event === "early" && e.kind === "hook" ? ' title="spoken while Claude was still writing (MessageDisplay hook)"' : ""}>${esc(evName)}${via}<br><span class="badge s-${esc(cls(e.status))}">${esc(e.status)}</span></td>
     <td class="text">${text}${reason}</td>
-    <td class="t">${esc(timingsLine(e.timings))}</td>
+    <td class="tim">${tim}</td>
   </tr>`;
 }
 
@@ -1141,12 +1172,12 @@ function detailHtml(d) {
   const rate = replayRate(t);
   const src = d.clip ? clipUrl(null, d.id) : null;
   const clip = src ? `<p><aw-audio preload="none" src="${esc(src)}"${rate != null ? ` data-rate="${esc(rate)}"` : ""}></aw-audio>${rate != null ? ` <span class="via">plays at ${esc(rate)}× (the pace it was heard at)</span>` : ""}</p>` : "";
-  return `<tr class="detail" data-for="${esc(d.id)}"><td colspan="7"><div class="detail-grid">
-    <div><h3>decision</h3><pre>${esc(JSON.stringify({kind: d.kind, decision: d.decision, status: d.status,
+  return `<tr class="detail" data-for="${esc(d.id)}"><td colspan="5"><div class="detail-grid">
+    <div><h3>Decision</h3><pre>${esc(JSON.stringify({kind: d.kind, decision: d.decision, status: d.status,
        reason: d.reason, profile: d.profile, delivery: d.delivery, error: d.error, attrs: d.attrs}, null, 2))}</pre>
-       <h3 style="margin-top:12px">timings</h3><dl class="timings">${dl}</dl>${clip}</div>
-    <div><h3>parsed tags</h3><pre>${esc(JSON.stringify(d.parsed, null, 2))}</pre></div>
-    <div><h3>raw payload</h3><pre>${esc(JSON.stringify(d.payload, null, 2))}</pre></div>
+       <h3 class="next">Timings</h3><dl class="timings">${dl}</dl>${clip}</div>
+    <div><h3>Parsed tags</h3><pre>${esc(JSON.stringify(d.parsed, null, 2))}</pre></div>
+    <div><h3>Raw payload</h3><pre>${esc(JSON.stringify(d.payload, null, 2))}</pre></div>
   </div></td></tr>`;
 }
 function trFrom(html) {
@@ -1198,7 +1229,7 @@ function render() {
     }
     for (const [id, n] of rowNodes) if (!keep.has(id)) { n.tr && n.tr.remove(); n.det && n.det.remove(); rowNodes.delete(id); }
     if (!list.length) {
-      emptyRow = emptyRow || trFrom(`<tr><td colspan="7" class="empty"></td></tr>`);
+      emptyRow = emptyRow || trFrom(`<tr><td colspan="5" class="empty"></td></tr>`);
       emptyRow.firstElementChild.textContent = `No events${events.size ? " match the filter" : " yet"}.`;
       want.push(emptyRow);
     }
@@ -1215,6 +1246,8 @@ function render() {
   });
 }
 const flashing = new Set();
+// Speaker colours follow the profile order; redraw the rows when it changes.
+document.addEventListener("aw:speakers", () => { for (const n of rowNodes.values()) n.sig = null; render(); });
 
 async function toggle(id) {
   if (open.has(id)) { open.delete(id); render(); return; }
@@ -1368,7 +1401,7 @@ function connect() {
 // ===================================================================
 const Stats = (() => {
   const METRICS = [
-    ["hook_ms", "hook", "ms"], ["hook_to_daemon_ms", "hook → daemon", "ms"], ["synth_ms", "synthesis", "ms"],
+    ["hook_ms", "hook", "ms"], ["hook_to_daemon_ms", "hook to daemon", "ms"], ["synth_ms", "synthesis", "ms"],
     ["rtf", "real-time factor", ""], ["first_chunk_ms", "first chunk", "ms"], ["first_audio_ms", "first audio", "ms"],
   ];
   let visible = false, timer = null, loading = false;
@@ -1389,15 +1422,15 @@ const Stats = (() => {
     const t = (d && d.timings) || {};
     $("st-scope").textContent = isNum(d.count) ? `over the newest ${d.count} hook/test events` : "";
     const table = h("table", {class: "mini"},
-      h("thead", null, h("tr", null, h("th", null, "timing"), h("th", {class: "num"}, "n"), h("th", {class: "num"}, "p50"),
+      h("thead", null, h("tr", null, h("th", null, "Timing"), h("th", {class: "num"}, "N"), h("th", {class: "num"}, "p50"),
         h("th", {class: "num"}, "p95"), h("th", {class: "num"}, "max"))),
       h("tbody", null, METRICS.map(([key, label, unit]) => {
         const m = t[key] || {};
         return h("tr", null, h("td", {title: key}, label), h("td", {class: "num"}, isNum(m.n) ? String(m.n) : "—"),
           h("td", {class: "num"}, fmt(m.p50, unit)), h("td", {class: "num"}, fmt(m.p95, unit)), h("td", {class: "num"}, fmt(m.max, unit)));
       })));
-    $("st-body").replaceChildren(counts("by status", d.by_status, true), counts("by reason", d.by_reason, false),
-      h("div", null, h("h3", null, "latency"), table));
+    $("st-body").replaceChildren(counts("By status", d.by_status, true), counts("By reason", d.by_reason, false),
+      h("div", null, h("h3", null, "Latency"), table));
   }
   async function load() {
     if (loading) return;
