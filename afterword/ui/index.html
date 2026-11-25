@@ -2325,6 +2325,7 @@ const Sessions = (() => {
   const saving = new Map();       // name -> description being saved
   let editing = null;             // name of the profile whose description is being edited
   let pv = null;                  // preview: {name, phase: "render" | "play"}
+  let pvGen = 0;                  // bumped on hide: a render still in flight is then dropped
   let vBusy = false, vTimer = null, vTick = null;
   const player = new AwAudio();
 
@@ -2502,7 +2503,11 @@ const Sessions = (() => {
     const name = p.name;
     const lang = String(p.lang || "").toLowerCase().split(/[-_]/)[0];
     pv = {name, phase: "render"}; vnotes.delete(name); renderVoices();
+    const gen = ++pvGen;
     const r = await api("POST", "/api/lab/preview", {text: SAMPLES[lang] || SAMPLES.en, profile: name});
+    // The page was left (or another preview started) while it rendered: don't
+    // play from a hidden page, which would also cut off audio on the new one.
+    if (gen !== pvGen || !visible) return;
     if (!r.ok || !r.data || typeof r.data.url !== "string" || !r.data.url.startsWith("/api/lab/")) {
       pv = null; return setVNote(name, r.error || "render failed", "err", 6000);
     }
@@ -2529,6 +2534,8 @@ const Sessions = (() => {
     hide() {
       visible = false;
       clearInterval(vTick); vTick = null;
+      pvGen++;                    // drop a preview still rendering
+      if (pv && pv.phase === "render") pv = null;
       player.pause();
     },
   };
