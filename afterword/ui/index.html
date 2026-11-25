@@ -116,6 +116,17 @@
   .now-acts #stop:hover:not(:disabled), .q-drawer button.danger:hover:not(:disabled) { color: var(--error); }
   .now-acts #q-toggle[aria-expanded="true"] { color: var(--ink); font-weight: 600; }
   .now-acts #q-n { font-family: var(--mono); font-size: 12px; }
+  /* Say…: a quiet text button at the right of the bar (also when idle) that opens a
+     one-line form inside the bar: the line in the serif, a voice, Speak. */
+  .now-say { flex: none; display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .now-say #say-msg { max-width: 32ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #say-open { background: none; border-color: transparent; color: var(--slate); font-size: var(--ctl-fs); padding: 2px 8px; }
+  #say-open:hover, #say-open[aria-expanded="true"] { color: var(--ink); border-color: transparent; background: color-mix(in srgb, var(--ink) 6%, transparent); }
+  .say-form { order: 9; flex: 1 0 100%; display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 0 3px; }
+  .say-form input { flex: 1 1 auto; min-width: 0; font: var(--line-fs)/1.3 var(--serif); }
+  .say-form select { flex: 0 1 auto; min-width: 0; max-width: 150px; }
+  .say-form button { flex: none; }
+  @media (max-width: 640px) { #say-open, .say-form button { min-height: 32px; } .now-say #say-msg { max-width: 18ch; } }
 
   /* Up next: the pending lines, in a drawer right under the bar */
   .q-drawer { padding: 6px var(--pad-x) 8px; background: var(--sheet); border-top: 1px solid var(--rule);
@@ -691,6 +702,12 @@
       <button id="stop" title="Stop and clear the queue" disabled>Stop all</button>
       <button id="q-toggle" aria-expanded="false" aria-controls="q-drawer" title="Lines waiting to be spoken" hidden>Up next (<span id="q-n">0</span>)</button>
     </span>
+    <span class="now-say"><span class="msg" id="say-msg" role="status"></span><button id="say-open" type="button" aria-expanded="false" aria-controls="say-form" title="Type a line for a voice to speak">Say…</button></span>
+    <form class="say-form" id="say-form" autocomplete="off" title="" hidden>
+      <input type="text" id="say-text" maxlength="2000" placeholder="Type a line to speak" aria-label="Line to speak" enterkeyhint="send">
+      <select id="say-profile" aria-label="Voice"></select>
+      <button type="submit" id="say-go">Speak</button>
+    </form>
   </div>
   <section class="q-drawer" id="q-drawer" aria-label="Up next" hidden>
     <div class="q-head"><span id="q-count"></span><span class="msg" id="q-msg"></span><span class="grow"></span><button id="q-close" title="Close Up next (Esc)">Close</button></div>
@@ -1507,6 +1524,7 @@ function detailHtml(d, id) {
   const dlUrl = d.clip ? clipUrl(null, id, true) : null;
   const acts = [
     typeof d.text === "string" && d.text ? `<button type="button" data-act="copy">Copy text</button>` : "",
+    typeof d.text === "string" && d.text.trim() && d.kind !== "system" ? `<button type="button" data-act="replay" title="Queue this line again with the same voice">Speak again</button>` : "",
     dlUrl ? `<a class="btn" href="${esc(dlUrl)}" download="afterword-${esc(id)}.wav" title="Download the WAV">Download clip</a>` : "",
     rate != null ? `<span class="via">the clip plays at ${esc(rate)}× (the pace it was heard at)</span>` : "",
     d.error && !d.kind ? `<span class="warn">${esc(d.error)}</span>` : "",
@@ -1716,6 +1734,25 @@ $("rows").addEventListener("click", (ev) => {
   if (row && !String(window.getSelection ? window.getSelection() : "")) toggleDetail(Number(row.dataset.id));
 });
 for (const id of ["filter", "q", "hideSystem", "showHooks", "sessfilter"]) $(id).addEventListener("input", render);
+// "Speak again" in a row's detail: queue its line again (POST /api/events/{id}/replay).
+$("rows").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest('[data-act="replay"]');
+  const holder = btn && btn.closest("[data-id]");
+  if (!holder || btn.disabled) return;
+  const id = Number(holder.dataset.id);
+  btn.disabled = true;
+  const r = await api("POST", `/api/events/${id}/replay`);
+  const d = r.data || {};
+  const failed = !r.ok || d.status === "skipped";
+  const why = !r.ok ? r.error : d.reason || "skipped";
+  btn.textContent = !r.ok ? "Failed" : failed ? "Not spoken" : `Queued #${d.event_id}`;
+  btn.title = failed ? why : "Queued again";
+  if (failed) flashNote("hdr-msg", `Speak again: ${why}`, "err");
+  setTimeout(() => {
+    if (!btn.isConnected) return;
+    btn.disabled = false; btn.textContent = "Speak again"; btn.title = "Queue this line again with the same voice";
+  }, 2000);
+});
 
 // Transport (the subtitle bar, on every tab).
 async function queueAction(path, label, msgId = "hdr-msg") {
@@ -1725,6 +1762,55 @@ async function queueAction(path, label, msgId = "hdr-msg") {
 }
 $("skip").onclick = () => queueAction("/api/queue/skip", "Skip");
 $("stop").onclick = () => queueAction("/api/queue/stop", "Stop all");
+
+// Say…: type any line and have a voice speak it (POST /api/speak). The form
+// opens inside the bar; Enter speaks, Esc closes. The voice defaults to the
+// last one used here (localStorage "aw-say-profile").
+(() => {
+  const KEY = "aw-say-profile";
+  const form = $("say-form"), input = $("say-text"), sel = $("say-profile"), go = $("say-go"), openBtn = $("say-open");
+  let busy = false;
+  const remembered = () => { try { return localStorage.getItem(KEY); } catch { return null; } };
+  const remember = (name) => { try { localStorage.setItem(KEY, name); } catch { /* storage blocked */ } };
+  function fill() {
+    const cur = sel.value || remembered();
+    const names = speakerProfiles.slice();
+    sel.replaceChildren(...(names.length ? names.map((p) => h("option", {value: p}, p))
+      : [h("option", {value: ""}, "No voices")]));
+    sel.value = names.includes(cur) ? cur : (names[0] || "");
+    sel.disabled = !names.length;
+    go.disabled = busy || !names.length;
+  }
+  function setOpen(v) {
+    form.hidden = !v;
+    openBtn.setAttribute("aria-expanded", String(v));
+    if (v) { fill(); input.focus(); }
+  }
+  openBtn.addEventListener("click", () => {
+    if (form.hidden) setOpen(true); else { setOpen(false); openBtn.focus(); }
+  });
+  form.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); setOpen(false); openBtn.focus(); }
+  });
+  sel.addEventListener("change", () => { if (sel.value) remember(sel.value); });
+  document.addEventListener("aw:speakers", () => { if (!form.hidden) fill(); });
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    if (busy) return;
+    const text = input.value.trim(), profile = sel.value;
+    if (!text) { flashNote("say-msg", "Type something to say.", "err", 3000); input.focus(); return; }
+    if (!profile) { flashNote("say-msg", "No voices configured.", "err"); return; }
+    busy = true; go.disabled = true;
+    remember(profile);
+    const r = await api("POST", "/api/speak", {text, profile});
+    busy = false; go.disabled = !sel.value;
+    if (!r.ok) { flashNote("say-msg", `Not spoken: ${r.error}`, "err", 6000); input.focus(); return; }
+    const d = r.data || {};
+    if (d.status === "skipped") flashNote("say-msg", `Not spoken: ${d.reason || "skipped"}`, "err", 6000);
+    else { flashNote("say-msg", `Queued #${d.event_id}`, "ok", 3000); input.value = ""; }
+    input.focus();
+  });
+})();
 
 // Subtitle bar (#now). Playing: tally, speaker tag, the line being spoken, a
 // left edge in the speaker colour, then Skip, Stop all and "Up next (N)".

@@ -148,6 +148,42 @@ and clears the queue, and new:
 `POST /api/queue/remove/{event_id}` drops one pending line →
 `{"removed": event_id}` (404 if not pending).
 
+## Speak and replay
+
+`POST /api/speak` speaks any text, as `afterword test` does (the socket
+`test` request): the same parse (`<say>` blocks are honoured, else the text
+is cleaned), the profile's `max_chars`, mute-all, the pronunciation list and
+the profile's language voices.
+```json
+{"text": "Deploy is done.",   // required: 1..2000 characters after trimming
+ "profile": "nova",           // required: a configured profile
+ "lang": "ja"}                // optional: ISO code or language name, or "auto"
+```
+→ `{"ok": true, "event_id": 52, "status": "queued", "position": 0}`. The row is
+`kind: "test"` with `session_id: "gui"` (the Transcript shows it as from
+"gui"). With `lang` every block is spoken in that language's voice
+(`[profiles.x.langs.<lang>]`); without it a profile with `[langs]` splits the
+line by script as usual. Lines typed this way queue after each other (one
+turn), never superseding one another. When everything is muted the line is
+logged and the answer is `{"ok": true, "event_id": 53, "status": "skipped",
+"reason": "all muted"}`. 400 for empty or too long text, a missing or unknown
+profile (the message lists the profiles) or an unknown language.
+
+`POST /api/events/{id}/replay` (no body) queues a past event's spoken text
+again, as a new event: the same profile, session and folder; its `<say>`
+blocks again one by one with their attrs (`lang`, `mood`, `pace`) when it had
+several (found from `parsed.segments`), else the text as one block. The new
+row is `kind: "test"`, `hook_event: "replay"`, `payload: {"replay_of": id}`
+and, while it waits, `reason: "replay of #<id>"` (the reason then follows its
+status, as for any line). It queues after that session's waiting lines
+instead of superseding them, and is skipped (`session muted`, `all muted`)
+like any line of that session. → the same answer as `/api/speak`. 404 for an
+unknown event; 400 when the event has no spoken text (a system row, a skipped
+row without `<say>`).
+
+Both answer 503 when the daemon cannot queue the line: it is stopping, or the
+queue is full (`daemon busy`; that row is logged as `skipped`).
+
 ## History
 
 `GET /api/history?limit=50&before=<id>`

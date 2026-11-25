@@ -22,6 +22,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 
 from . import alerts as alerting
 from . import state
+from .config import lang_code
 from .lab import LabError, pronounce_view, save_pronounce
 from .voices import CLIP_MAX_BYTES
 
@@ -31,6 +32,9 @@ if TYPE_CHECKING:
 UI_INDEX = Path(__file__).resolve().parent.parent / "ui" / "index.html"
 SSE_HEARTBEAT_S = 15.0
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
+SPEAK_MAX_CHARS = 2000  # POST /api/speak, after trimming
+SPEAK_SESSION = "gui"  # the session id of lines typed in the GUI
+REPLAY_KEY_CHARS = 40  # characters of a block's preview used to find it again
 
 
 def render_export(lines: list[dict], fmt: str, one_session: bool) -> str:
@@ -313,6 +317,86 @@ def build_app(daemon: "Daemon", port: int) -> FastAPI:
     async def stop():
         return daemon.stop_all()
 
+    # -- speak anything, replay (contract: docs/gui-api.md, "Speak and replay") --
+
+    def can_queue() -> None:
+        if getattr(daemon, "_stopping", False):
+            raise LabError(503, "the daemon is stopping")
+
+    def join_turn(session_id: str, fallback: str) -> str:
+        """The turn of the session's waiting lines, so a new line goes after
+        them instead of superseding them (else `fallback`)."""
+        waiting = [i for i in daemon.queue._items if i.session_id == session_id and i.kind != "alert"]
+        return waiting[-1].turn if waiting and waiting[-1].turn else fallback
+
+    def queued(ack: dict) -> dict:
+        if not ack.get("ok"):
+            raise LabError(503, ack.get("error") or "could not queue the line")
+        if ack.get("reason") == "daemon busy":
+            raise LabError(503, f"daemon busy: the queue is full (#{ack.get('event_id')} skipped)")
+        return ack
+
+    @app.post("/api/speak")
+    async def speak(request: Request):
+        body = await json_body(request)
+        if not isinstance(body, dict) or not isinstance(body.get("text"), str):
+            raise LabError(400, "send {\"text\": \"…\", \"profile\": \"name\"} (\"lang\" optional)")
+        text = body["text"].strip()
+        if not text:
+            raise LabError(400, "text is empty")
+        if len(text) > SPEAK_MAX_CHARS:
+            raise LabError(400, f"text is longer than {SPEAK_MAX_CHARS} characters")
+        profiles = list(daemon.store.get().profiles)
+        name = body.get("profile")
+        if not isinstance(name, str) or name not in profiles:
+            known = ", ".join(profiles) or "none configured"
+            raise LabError(400, f"unknown profile {name!r} (profiles: {known})" if name else f"send a profile ({known})")
+        lang = body.get("lang")
+        if lang is not None and not isinstance(lang, str):
+            raise LabError(400, "lang must be a string")
+        lang = (lang or "").strip()
+        if lang and lang.lower() != "auto":
+            lang = lang_code(lang) or ""
+            if not lang:
+                raise LabError(400, f"unknown language {body['lang']!r}")
+        can_queue()
+        msg = {"type": "test", "text": text, "profile": name, "session_id": SPEAK_SESSION,
+               "turn": join_turn(SPEAK_SESSION, SPEAK_SESSION)}
+        if lang:
+            msg["attrs"] = {"lang": lang.lower()}
+        return queued(daemon.ingest_test(msg, time.time()))
+
+    @app.post("/api/events/{event_id}/replay")
+    async def replay(event_id: int):
+        ev = daemon.events.get(event_id)
+        if ev is None:
+            raise LabError(404, "no such event")
+        text = ev.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise LabError(400, f"#{event_id} has no spoken text")
+        can_queue()
+        says = replay_says(ev)
+        session_id = ev.get("session_id") or SPEAK_SESSION
+        fields = dict(
+            ts=time.time(),
+            kind="test",
+            hook_event="replay",
+            session_id=session_id,
+            cwd=ev.get("cwd"),
+            profile=ev.get("profile"),
+            decision="speak",
+            text=" ".join(s["text"] for s in says),
+            attrs=dict(says[0]["attrs"]),
+            parsed=ev.get("parsed") if isinstance(ev.get("parsed"), dict) else None,
+            payload={"replay_of": event_id},
+            timings={},
+        )
+        ack = queued(daemon._enqueue(fields, None, says=says,
+                                     turn=join_turn(session_id, f"replay-{event_id}-{time.time_ns()}")))
+        if ack.get("status") == "queued":
+            daemon.events.update(ack["event_id"], reason=f"replay of #{event_id}")
+        return ack
+
     @app.get("/api/clips/{event_id}")
     async def clip(event_id: int, download: int = 0):
         path = daemon.clips_dir / f"{event_id}.wav"
@@ -480,6 +564,46 @@ def build_app(daemon: "Daemon", port: int) -> FastAPI:
         )
 
     return app
+
+
+def replay_says(ev: dict) -> list[dict]:
+    """A past event's spoken text as <say> blocks again. The event keeps the
+    joined text plus a preview of each block (parsed.segments: the first
+    characters and the attrs), so each block is found again in the text by
+    its preview, in order; blocks not found (dropped for length or spoken
+    early) are left out. One block of the whole text when that fails."""
+    from .server import _say_attrs
+
+    text = ev["text"].strip()
+    parsed = ev.get("parsed") if isinstance(ev.get("parsed"), dict) else {}
+    segs = parsed.get("segments")
+    if isinstance(segs, list) and len(segs) > 1:
+        starts: list[tuple[int, dict]] = []
+        pos = 0
+        for seg in segs:
+            t = seg.get("text") if isinstance(seg, dict) else None
+            if not isinstance(t, str) or not t.strip():
+                continue
+            t = t.strip()
+            key = t[:REPLAY_KEY_CHARS]
+            i = text.find(key, pos)
+            if i < 0:
+                continue
+            starts.append((i, _say_attrs(seg.get("attrs"))))
+            # A whole block (its preview is all of it) is skipped past, so a
+            # later block's words inside it are not taken for its start.
+            whole = seg.get("chars") == len(t) and text.startswith(t, i)
+            pos = i + (len(t) if whole else len(key))
+        if len(starts) > 1 and starts[0][0] == 0:
+            out = []
+            for n, (i, attrs) in enumerate(starts):
+                end = starts[n + 1][0] if n + 1 < len(starts) else len(text)
+                piece = text[i:end].strip()
+                if piece:
+                    out.append({"text": piece, "attrs": attrs})
+            if len(out) > 1:
+                return out
+    return [{"text": text, "attrs": _say_attrs(ev.get("attrs"))}]
 
 
 def _sse(kind: str, data) -> str:
