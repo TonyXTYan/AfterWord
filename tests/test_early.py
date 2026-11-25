@@ -614,3 +614,15 @@ def test_message_display_is_fast(aw_home, daemon):
     full = min(best(md_payload(0, "<say>Line %d.</say>\n" % i, final=True, message="F%d" % i), n=1) for i in range(5))
     print("MessageDisplay in-hook: voice off %.1f ms, no <say> %.1f ms, early say %.1f ms" % (off, no_say, full))
     assert off < 15 * TIME_SCALE and no_say < 20 * TIME_SCALE and full < 60 * TIME_SCALE
+
+
+def test_a_reply_spoken_only_early_still_counts_as_voice_use(aw_home, daemon):
+    # voices.json drives the /afterword:voice pick menu: a session whose lines
+    # all go out early must not look idle there.
+    voice_on(aw_home)
+    feed(["<say>All done early.</say>\n", ""])
+    settled(daemon, 1, "early")
+    run_hook(stop_payload("<say>All done early.</say>\n", session_id="s1", prompt_id="P1"))
+    assert settled(daemon, 1, "Stop")[0]["reason"] == "spoken early"
+    usage = json.loads((Path(aw_home) / "voices.json").read_text())["profiles"]
+    assert "s1" in usage["nova"]["sessions"]

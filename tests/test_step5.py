@@ -112,11 +112,157 @@ def test_voice_off_on_mute_status(home):
 
 
 @pytest.mark.parametrize("arg", ["nobody", "../etc", "a b"])
-def test_unknown_profile_leaves_voice_unchanged(home, arg):
+def test_unknown_profile_asks_claude_to_pick_and_leaves_voice_unchanged(home, arg):
     prompt("/afterword:voice nova")
     ctx = context(prompt(f"/afterword:voice {arg}")[0])
-    assert "no voice profile" in ctx and "nova, ember" in ctx
+    assert "pick this session's voice" in ctx and f"asked for: {json.dumps(arg)}" in ctx
+    assert "- nova:" in ctx and "- ember:" in ctx and '<voice set="NAME"/>' in ctx
     assert state(home)["profile"] == "nova"
+
+
+# --------------------------------------------------------------------------- #
+# Claude picks the voice: the menu and voices.json                             #
+# --------------------------------------------------------------------------- #
+
+PICK_CONFIG = """
+[profiles.nova]
+voice = "builtin:Serena"
+lang = "en"
+style = "calm, slightly wry"
+[profiles.ember]
+voice = "kokoro:af_heart"
+lang = "en"
+description = "warm storyteller for long explanations"
+persona = "not shown: the description wins"
+[profiles.tutor]
+voice = "say:Samantha"
+lang = "zh"
+persona = "a patient teacher"
+[profiles.tutor.langs.en]
+voice = "say:Daniel"
+"""
+
+
+@pytest.fixture
+def pick_home(aw_home):
+    (aw_home / "config.toml").write_text(PICK_CONFIG)
+    return aw_home
+
+
+def voices(home):
+    p = home / "voices.json"
+    return json.loads(p.read_text())["profiles"] if p.exists() else {}
+
+
+def menu_lines(ctx):
+    return [line for line in ctx.splitlines() if line.startswith("- ")]
+
+
+@pytest.mark.parametrize("cmd", ["/afterword:voice", "/afterword:voice pick", "/afterword:voice auto",
+                                 "afterword:voice pick", "/afterword-voice ?"])
+def test_pick_lists_every_profile_with_its_description(pick_home, cmd):
+    ctx = context(prompt(cmd)[0])
+    assert "pick this session's voice" in ctx and "asked for" not in ctx
+    lines = menu_lines(ctx)
+    assert len(lines) == 3
+    assert "- ember: warm storyteller for long explanations (kokoro, en); free, never used" in lines
+    assert "- nova: calm, slightly wry (builtin, en); free, never used" in lines
+    assert "- tutor: a patient teacher (say, zh/en); free, never used" in lines
+    assert '<voice set="NAME"/>' in ctx and "<say>" in ctx
+    assert len(ctx) < 900  # about 150 tokens for three profiles
+    assert state(pick_home) is None  # nothing changes until Claude answers
+
+
+def test_bare_command_shows_the_state_while_the_voice_is_on(pick_home):
+    prompt("/afterword:voice nova")
+    ctx = context(prompt("/afterword:voice")[0])
+    assert "voice for this session: nova" in ctx and "pick" not in ctx
+    assert "voice for this session: nova" in context(prompt("/afterword:voice status")[0])
+
+
+def test_free_text_is_passed_on_as_the_request(pick_home):
+    ctx = context(prompt("/afterword:voice something calm,\n  for \"long\" reads")[0])
+    assert 'The user asked for: "something calm, for \\"long\\" reads".' in ctx
+    long = context(prompt("/afterword:voice " + "x " * 400)[0])
+    assert "..." in long and len(long) < 1200
+
+
+def test_free_and_least_recently_used_voices_come_first(pick_home):
+    from afterword.hooks import common
+
+    now = time.time()
+    common.note_voice("old", "tutor", "/a", now=now - 5 * 3600)   # used, but long enough ago to be free
+    prompt("/afterword:voice nova", sid="s2")                     # another session uses nova now
+    ctx = context(prompt("/afterword:voice pick")[0])
+    names = [line.split(":")[0][2:] for line in menu_lines(ctx)]
+    assert names == ["ember", "tutor", "nova"]
+    assert "tutor: a patient teacher (say, zh/en); free, last used 5 h ago" in ctx
+    assert "nova: calm, slightly wry (builtin, en); in use by 1 other session" in ctx
+    # This session's own voice is not "in use by another session", but goes after the free ones.
+    prompt("/afterword:voice ember")
+    ctx = context(prompt("/afterword:voice choose")[0])  # a new prompt (the same text twice is a duplicate)
+    assert [line.split(":")[0][2:] for line in menu_lines(ctx)] == ["tutor", "ember", "nova"]
+    assert "ember: warm storyteller for long explanations (kokoro, en); this session's voice now" in ctx
+
+
+def test_voices_json_follows_each_session(pick_home):
+    prompt("/afterword:voice nova")
+    v = voices(pick_home)
+    assert v["nova"]["last_session"] == "s1" and v["nova"]["sessions"]["s1"]["cwd"] == "/w/p"
+    prompt("/afterword:voice ember")  # moves: one profile per session
+    v = voices(pick_home)
+    assert "s1" not in v["nova"]["sessions"] and "s1" in v["ember"]["sessions"]
+    assert v["nova"]["last_used"] is not None  # the history stays
+    prompt("/afterword:voice mute")
+    assert "s1" in voices(pick_home)["ember"]["sessions"]  # muted is still using it
+    prompt("/afterword:voice off")
+    assert all("s1" not in e["sessions"] for e in voices(pick_home).values())
+    start(sid="s3", AFTERWORD_VOICE="tutor")
+    assert "s3" in voices(pick_home)["tutor"]["sessions"]
+
+
+def test_claude_answers_the_menu_with_a_voice_tag(pick_home, say_stub):
+    context(prompt("/afterword:voice something warm")[0])
+    reply = 'Ember fits a warm request. <voice set="ember"/> <say>Hello, I am ember.</say>'
+    run_hook(stop_payload(reply, session_id="s1"))
+    assert state(pick_home)["profile"] == "ember" and state(pick_home)["source"] == "voice-tag"
+    assert wait_for(lambda: say_stub.exists() and "Hello, I am ember." in say_stub.read_text())
+    first = voices(pick_home)["ember"]["sessions"]["s1"]["ts"]
+    time.sleep(0.01)
+    run_hook(stop_payload("Done. <say>Done.</say>", session_id="s1"))  # each spoken reply refreshes it
+    assert voices(pick_home)["ember"]["sessions"]["s1"]["ts"] > first
+
+
+def test_gui_voice_change_is_logged(pick_home):
+    from afterword.daemon import state as st
+
+    st.set_session("g1", profile="nova", known_profiles=["nova", "ember", "tutor"])
+    assert "g1" in voices(pick_home)["nova"]["sessions"]
+    st.set_session("g1", profile=None)
+    assert "g1" not in voices(pick_home)["nova"]["sessions"]
+
+
+def test_voices_json_prunes_and_survives_corruption(pick_home):
+    from afterword.hooks import common
+
+    now = time.time()
+    for i in range(common.VOICE_SESSIONS_MAX + 5):
+        common.note_voice(f"x{i}", "nova", None, now=now + i)
+    common.note_voice("stale", "ember", None, now=now - common.VOICE_SESSION_KEEP_S - 10)
+    common.note_voice("s9", "tutor", None, now=now + 100)
+    v = voices(pick_home)
+    assert len(v["nova"]["sessions"]) == common.VOICE_SESSIONS_MAX and "x0" not in v["nova"]["sessions"]
+    assert v["ember"]["sessions"] == {} and v["ember"]["last_used"] is not None
+    (pick_home / "voices.json").write_text("{not json")
+    ctx = context(prompt("/afterword:voice pick")[0])
+    assert len(menu_lines(ctx)) == 3 and "never used" in ctx
+    prompt("/afterword:voice nova")
+    assert "s1" in voices(pick_home)["nova"]["sessions"]
+
+
+def test_pick_without_profiles(aw_home):
+    ctx = context(prompt("/afterword:voice pick")[0])
+    assert "no voice profiles configured" in ctx
 
 
 @pytest.mark.parametrize("text", ["please explain the /afterword:voice nova command", "/voice nova", "/voice",
@@ -450,7 +596,8 @@ def test_dotted_profile_names_on_system_python(home):
     assert "profile nova.v2" in proc.stdout.decode()
     proc, _ = run_hook({"session_id": "d2", "prompt": "/afterword:voice nova"}, args=("user-prompt-submit",),
                        python=SYSTEM_PYTHON)
-    assert "no voice profile" in proc.stdout.decode()
+    out = proc.stdout.decode()
+    assert "pick this session's voice" in out and "- nova.v2: (builtin, auto)" in out
 
 
 def test_mini_toml_quoted_headers():
@@ -466,7 +613,7 @@ def test_mini_toml_quoted_headers():
 def test_long_voice_argument_is_not_echoed(home):
     junk = "x" * 5000
     ctx = context(prompt(f"/afterword:voice {junk}")[0])
-    assert len(ctx) < 400
+    assert len(ctx) < 900 and "x" * 201 not in ctx  # passed on to Claude, capped
     assert len(json.dumps(hook_log(home)[-1])) < 2000
 
 

@@ -7,13 +7,13 @@ in Claude's reply. See [DESIGN.md](DESIGN.md) (v1) and
 [docs/design-v2.md](docs/design-v2.md) (pronunciations, a voice per language,
 streaming and early speaking, spoken alerts, the seed explorer).
 
-![AfterWord demo: a spoken reply, the live log, sessions, the voice lab, history and config](docs/demo.gif)
+![The AfterWord GUI: the line being spoken in the subtitle bar, and the transcript of what each voice said, one colour per voice](docs/gui.png)
 
 Status: the v1 build order is done: tag parser, hooks (`SessionStart`,
 `UserPromptSubmit`, `Stop`, `MessageDisplay` for early speaking, and
 `PermissionRequest` / `Notification` for spoken alerts) with a `say` fallback, the daemon (queue, event log,
 Qwen3-TTS through mlx-audio), the voice command, the Claude Code plugin, and the GUI
-(log, sessions, queue, history, voice lab, config). The v2 features of
+(transcript, sessions and voices, voice lab, config). The v2 features of
 [docs/design-v2.md](docs/design-v2.md) are built too: pronunciations, a voice
 per language with several `<say>` blocks per reply, streaming playback and
 early speaking, spoken alerts, and the seed explorer. More engines (see
@@ -48,9 +48,22 @@ Turn the voice on for a session:
 - at launch: `AFTERWORD_VOICE=nova claude` (the `SessionStart` hook reads it);
 - mid-session: `/afterword:voice nova` with the plugin, or `/afterword-voice nova`
   with `install-hooks` (not bare `/voice`: that is Claude Code's own dictation
-  command). Also `off`, `on` (the last profile), `mute`, `unmute`, and no
-  argument for the current state. In Codex, type it without the slash:
-  `afterword:voice nova` (Codex rejects slash commands it doesn't know);
+  command). Also `off`, `on` (the last profile), `mute`, `unmute`, and
+  `status`. In Codex, type it without the slash: `afterword:voice nova`
+  (Codex rejects slash commands it doesn't know);
+- let Claude choose: `/afterword:voice pick`, or describe what you want,
+  `/afterword:voice something calm for long reads` (anything that is not a
+  profile name). With no argument it picks while the voice is off and shows
+  the current state while it is on. Claude gets a short menu of the
+  profiles, the ones no other session is using and the least recently used
+  first, each with its `description` (else its `persona`, else its `style`),
+  and answers with a `<voice set="..."/>` tag and a line in the new voice.
+  Fill the descriptions with `/afterword:describe-voices` (Claude proposes a
+  line per profile, you approve, then it writes them), or by hand with
+  `afterword voices describe nova "calm British narrator"`; `afterword voices`
+  lists the profiles and how they are used (add `--json` for scripts).
+  Which profile each session uses, and when each was last used, is kept in
+  `~/.afterword/voices.json`;
 - in the GUI's Sessions page.
 
 Claude can also switch it with a `<voice set="nova"/>` tag (`set="off"` to stop).
@@ -93,8 +106,10 @@ Enhanced ones in System Settings → Accessibility → Spoken Content.
 uv run afterword serve
 ```
 
-Open http://127.0.0.1:47800 for the live log, and http://127.0.0.1:47800/#lab
-for the voice lab. Then, in another shell:
+Open http://127.0.0.1:47800 for the live transcript, and http://127.0.0.1:47800/#lab
+for the voice lab. Clips in the GUI play through Web Audio, not `<audio>`, so
+the browser never becomes the macOS Now Playing app: the keyboard's media keys
+keep controlling your music. Then, in another shell:
 
 ```bash
 uv run afterword test "Hello from AfterWord" --profile nova --wait
@@ -113,6 +128,7 @@ style = "calm, slightly wry" # style instruction (builtin and design voices)
 seed = 1234                  # optional: the same line always sounds the same
 max_chars = 400
 say_voice = "Samantha"       # macOS voice used if Qwen3-TTS is unavailable
+description = "calm narrator for long explanations"  # optional: for /afterword:voice pick
 ```
 
 | `voice` | Model | Notes |
@@ -206,7 +222,7 @@ If the audio device cannot be opened, or PortAudio is not installed, the
 daemon renders each whole line first (each part of a line with several
 voices, joined into one clip) and plays it with `afplay`, as before,
 and says why once in `afterwordd.log`. `[daemon] stream = false` chooses that
-way on purpose. Either way the line is kept in History. If the device stops
+way on purpose. Either way the line's clip is kept (the Transcript's "Has audio" view). If the device stops
 working part-way through a line (headphones unplugged), the render stops too,
 the line is marked as an error with the part that was heard, and the next
 line tries the device again.
@@ -383,7 +399,7 @@ claude --plugin-dir /path/to/AfterWord
 ```
 
 **Or with settings.json.** `install-hooks` writes the same six hooks into a
-settings file and an `/afterword-voice` command next to it (not for
+settings file and the `/afterword-voice` and `/afterword-describe-voices` commands next to it (not for
 `--scope local`). Preview the change first;
 `--scope user` (default) edits `~/.claude/settings.json`, and `project` and
 `local` edit `./.claude/`. A backup is written next to the file, and other hooks
@@ -440,24 +456,33 @@ Claude Code. Turn the voice on with `AFTERWORD_VOICE=nova codex`, by typing
 
 ## The GUI
 
-http://127.0.0.1:47800 has six pages:
+http://127.0.0.1:47800 has four pages. Each voice profile has its own
+colour (in the order of `config.toml`), used everywhere that voice appears.
+Under the header, a subtitle bar shows the line being spoken, with Skip,
+Stop all and an "Up next" drawer for the lines waiting; when nothing plays
+it shows the last line. **Mute all** sits in the header.
 
-- **Log**: every hook call with its raw payload, parsed tags, decision and
-  reason (`session off`, `no <say> tag`, `daemon busy`, `duplicate`, …), and
-  timings (hook, hook to daemon, synthesis, real-time factor, first chunk,
-  first audio, and whether it was streamed), with p50/p95 stats. Prompt and session hooks are hidden unless you ask.
-- **Sessions**: each session's folder, voice (pick a profile or off), mute,
-  what set the voice, and its last line. **Mute all** sits in the header.
-- **Queue**: what is playing and waiting; skip, remove or stop.
-- **History**: recent spoken lines, replayable at the pace they were spoken,
-  and downloadable as WAV.
+- **Transcript**: every spoken line, newest first, by voice and folder, with
+  a play button where the clip is kept (replayed at the pace it was spoken).
+  Filter by text, status, voice, session or "Has audio". Click a line for
+  its raw payload, parsed tags, decision and reason (`session off`,
+  `no <say> tag`, `daemon busy`, `duplicate`, …) and timings (hook, hook to
+  daemon, synthesis, real-time factor, first chunk, first audio, and whether
+  it was streamed); "Timings" shows p50/p95 stats. Prompt and session hooks
+  are hidden unless you ask. Old `#log`, `#history` and `#queue` links land
+  here.
+- **Sessions**: the Voices roster first: each profile's voice, language,
+  description (editable in place; `/afterword:voice pick` offers voices by
+  it), which sessions use it now or when it was last used, and a Preview.
+  Then each session by folder: its voice (pick a profile or off), mute and
+  last line.
 - **Voice lab**: try voices and save profiles (below).
 - **Config**: `config.toml` as loaded, warnings or parse errors, the synth in
-  use, and model status; reload on demand. Its Pronunciations table edits the
-  `[pronounce]` lists (global or per profile) and writes them back into
-  `config.toml`, keeping your comments. Its Spoken alerts panel turns alerts
-  on and off, picks the events, voice and timing, and edits, generates and
-  plays the phrase pools.
+  use, and model status (warm a model here); reload on demand. Its
+  Pronunciations table edits the `[pronounce]` lists (global or per profile)
+  and writes them back into `config.toml`, keeping your comments. Its Spoken
+  alerts panel turns alerts on and off, picks the events, voice and timing,
+  and edits, generates and plays the phrase pools.
 
 ## Files
 

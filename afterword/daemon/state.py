@@ -98,7 +98,12 @@ def set_session(
 
     # Under the state lock: a hook's own read-modify-write of this file
     # (turn start, pending permission) cannot undo this change.
-    common.update_state(session_id, change)
+    st = common.update_state(session_id, change)
+    if profile is not ...:
+        try:  # voices.json, for the /afterword:voice pick menu; never fails the change
+            common.note_voice(session_id, profile or None, st.get("cwd"))
+        except Exception:
+            pass
     return common.load_state(session_id)
 
 

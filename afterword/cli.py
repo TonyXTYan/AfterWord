@@ -33,6 +33,8 @@ HOOK_EVENTS = {
 }
 VOICE_COMMAND_SRC = Path(__file__).resolve().parent.parent / "commands" / "voice.md"
 VOICE_COMMAND_MARKER = "afterword:voice-command"
+DESCRIBE_COMMAND_SRC = Path(__file__).resolve().parent.parent / "commands" / "describe-voices.md"
+DESCRIBE_COMMAND_MARKER = "afterword:describe-voices-command"
 
 
 class DaemonUnreachable(Exception):
@@ -300,15 +302,33 @@ def voice_command_text() -> str:
 
 
 VOICE_COMMAND_FILE = "afterword-voice.md"  # /afterword-voice; Claude Code has its own /voice
+DESCRIBE_COMMAND_FILE = "afterword-describe-voices.md"  # /afterword-describe-voices
 
 
-def _voice_command_plan(settings_path: Path, scope: str | None, remove: bool) -> tuple[str, Path]:
-    """What install/uninstall would do with the command file:
+def describe_command_text() -> str:
+    try:
+        return DESCRIBE_COMMAND_SRC.read_text(encoding="utf-8")
+    except OSError:  # installed without the plugin files
+        return (
+            "---\ndescription: Write one-line descriptions for AfterWord's voice profiles\n"
+            "argument-hint: \"[profile ...]\"\n"
+            "disable-model-invocation: true\n---\n"
+            f"<!-- {DESCRIBE_COMMAND_MARKER} -->\n"
+            "Run `afterword voices --json`. For each profile without a description (or the ones named in\n"
+            "`$ARGUMENTS`), propose a one-line description (80 characters at most), show the proposals to\n"
+            "the user and ask which to keep, then write each kept one with\n"
+            "`afterword voices describe <name> \"<text>\"` and finish with `afterword voices`.\n"
+        )
+
+
+def _command_plan(settings_path: Path, scope: str | None, remove: bool, filename: str,
+                  marker: str) -> tuple[str, Path]:
+    """What install/uninstall would do with a command file:
     ('write'|'remove'|'leave'|'skip', path)."""
-    target = settings_path.parent / "commands" / VOICE_COMMAND_FILE
+    target = settings_path.parent / "commands" / filename
     if scope == "local" and not remove:
         return "skip", target  # .claude/commands is shared with the project; local settings are not
-    ours = target.is_file() and VOICE_COMMAND_MARKER in target.read_text(encoding="utf-8", errors="replace")
+    ours = target.is_file() and marker in target.read_text(encoding="utf-8", errors="replace")
     if remove:
         return ("remove" if ours else "leave"), target
     if target.exists() and not ours:
@@ -316,14 +336,19 @@ def _voice_command_plan(settings_path: Path, scope: str | None, remove: bool) ->
     return "write", target
 
 
-def _install_voice_command(settings_path: Path, scope: str | None, remove: bool, dry_run: bool) -> None:
-    """`/afterword-voice` as a plain command next to the settings file
-    (~/.claude/commands/ for user scope). The plugin provides
-    `/afterword:voice` instead."""
-    action, target = _voice_command_plan(settings_path, scope, remove)
+def _voice_command_plan(settings_path: Path, scope: str | None, remove: bool) -> tuple[str, Path]:
+    return _command_plan(settings_path, scope, remove, VOICE_COMMAND_FILE, VOICE_COMMAND_MARKER)
+
+
+def _install_command(settings_path: Path, scope: str | None, remove: bool, dry_run: bool,
+                     filename: str, marker: str, text_fn) -> None:
+    """A plain command next to the settings file (~/.claude/commands/ for
+    user scope), e.g. `/afterword-voice`. The plugin provides `/afterword:voice`."""
+    action, target = _command_plan(settings_path, scope, remove, filename, marker)
+    slash = "/" + filename[:-3]
     prefix = "# would " if dry_run else ""
     if action == "skip":
-        print(f"{prefix}skip the /afterword-voice command for --scope local (use user or project scope for it)")
+        print(f"{prefix}skip the {slash} command for --scope local (use user or project scope for it)")
         return
     if action == "leave":
         if target.exists():
@@ -337,8 +362,104 @@ def _install_voice_command(settings_path: Path, scope: str | None, remove: bool,
         print(f"removed {target}")
         return
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(voice_command_text(), encoding="utf-8")
-    print(f"  /afterword-voice -> {target}")
+    target.write_text(text_fn(), encoding="utf-8")
+    print(f"  {slash} -> {target}")
+
+
+def _install_voice_command(settings_path: Path, scope: str | None, remove: bool, dry_run: bool) -> None:
+    _install_command(settings_path, scope, remove, dry_run, VOICE_COMMAND_FILE, VOICE_COMMAND_MARKER,
+                     voice_command_text)
+    _install_command(settings_path, scope, remove, dry_run, DESCRIBE_COMMAND_FILE, DESCRIBE_COMMAND_MARKER,
+                     describe_command_text)
+
+
+def _ago(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    for unit, size in (("d", 86400), ("h", 3600), (" min", 60)):
+        if seconds >= size:
+            return f"{seconds // size}{unit} ago"
+    return "just now"
+
+
+def _voices_items() -> list[dict]:
+    """The same entries as GET /api/voices, from the config file and
+    voices.json directly (no daemon needed)."""
+    from afterword.daemon import lab
+    from afterword.daemon.config import ConfigStore
+
+    cfg = ConfigStore().get()
+    usage = common.load_voice_usage()
+    now = time.time()
+    return [lab.voice_item(p, usage, now) for p in cfg.profiles.values()]
+
+
+def cmd_voices(args: argparse.Namespace) -> int:
+    """`afterword voices [--json]` lists the profiles; `afterword voices
+    describe <name> <text>` sets one's description in config.toml."""
+    if args.action == "describe":
+        return _voices_describe(args)
+    if args.rest:
+        print("usage: afterword voices [--json] | afterword voices describe <name> <text>", file=sys.stderr)
+        return 2
+    items = _voices_items()
+    if args.json:
+        print(json.dumps({"profiles": items}, indent=2, ensure_ascii=False))
+        return 0
+    if not items:
+        print("no voice profiles configured")
+        return 0
+    now = time.time()
+    for it in items:
+        n = len(it["in_use"])
+        if n:
+            use = f"in use by {n} session{'s' if n != 1 else ''}"
+        elif it.get("last_used"):
+            use = f"last used {_ago(now - it['last_used'])}"
+        else:
+            use = "never used"
+        persona = " ".join((it.get("persona") or "").split())
+        if len(persona) > 60:
+            persona = persona[:59].rstrip() + "\u2026"
+        print(it["name"])
+        print(f"  voice:       {it['voice'] or '(default)'}")
+        print(f"  lang:        {it['lang']}")
+        print(f"  style:       {it['style'] or '(none)'}")
+        print(f"  persona:     {persona or '(none)'}")
+        print(f"  description: {it.get('description') or '(none)'}")
+        print(f"  usage:       {use}")
+    return 0
+
+
+def _voices_describe(args: argparse.Namespace) -> int:
+    from afterword.daemon import lab
+    from afterword.daemon.config import ConfigStore
+
+    if len(args.rest) != 2:
+        print('usage: afterword voices describe <name> "<text>"  ("" removes the description)', file=sys.stderr)
+        return 2
+    name, text = args.rest[0], args.rest[1].strip()
+    if len(text) > lab.DESCRIPTION_MAX:
+        print(f"description is {len(text)} characters; at most {lab.DESCRIPTION_MAX}.", file=sys.stderr)
+        return 1
+    store = ConfigStore()
+    profiles = store.get().profiles
+    if name not in profiles:
+        names = ", ".join(profiles) or "(none)"
+        print(f"no profile named {name!r}. Profiles: {names}", file=sys.stderr)
+        return 1
+    old = profiles[name].description
+    try:
+        found = lab.write_description(store.path, name, text)
+    except (ValueError, OSError) as exc:
+        print(f"config.toml could not be updated: {exc}", file=sys.stderr)
+        return 1
+    if not found:
+        print(f"no profile named {name!r} in {store.path}", file=sys.stderr)
+        return 1
+    print(f"{name}: description")
+    print(f"  was: {old or '(none)'}")
+    print(f"  now: {text or '(none)'}")
+    return 0
 
 
 def cmd_install_hooks(args: argparse.Namespace) -> int:
@@ -431,6 +552,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--lang", help="show: only this language")
     s.set_defaults(func=cmd_alerts)
 
+    s = sub.add_parser("voices", help="list the voice profiles, or describe one for /afterword:voice pick")
+    s.add_argument("action", nargs="?", choices=("list", "describe"), default="list")
+    s.add_argument("rest", nargs="*", metavar="name text", help="describe: the profile and its description")
+    s.add_argument("--json", action="store_true", help="same data as GET /api/voices")
+    s.set_defaults(func=cmd_voices)
+
     s = sub.add_parser("install-hooks", help="add AfterWord's hooks to a Claude Code settings file")
     s.add_argument("--scope", choices=("user", "project", "local"), default="user",
                    help="user: ~/.claude/settings.json; project/local: ./.claude/settings(.local).json")
@@ -438,7 +565,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--python", help="interpreter for the hook (default: this one)")
     s.add_argument("--dry-run", action="store_true", help="print the result, write nothing")
     s.add_argument("--uninstall", action="store_true", help="remove AfterWord's hooks")
-    s.add_argument("--no-command", action="store_true", help="do not install the /afterword-voice command file")
+    s.add_argument("--no-command", action="store_true", help="do not install the /afterword-voice and /afterword-describe-voices command files")
     s.set_defaults(func=cmd_install_hooks)
     return p
 

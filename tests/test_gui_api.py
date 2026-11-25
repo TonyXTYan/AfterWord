@@ -188,3 +188,107 @@ def test_session_activity_for_matches_bulk(gui):
     bulk = d.events.session_activity(100)
     assert d.events.session_activity_for("x")["events"] == bulk["x"]["events"] == 2
     assert d.events.session_activity_for("nobody") is None
+
+
+# --------------------------------------------------------------------------- #
+# Voices: GET /api/voices, PATCH /api/lab/profiles/{name}                      #
+# --------------------------------------------------------------------------- #
+
+COMMENTED = """# my voices
+[profiles.nova]   # the first one
+voice = "say:Samantha"
+style = "calm"
+description = "old text"   # keep my comment
+custom_key = "stay"
+
+[profiles.ember]
+voice = "say:Alex"
+"""
+
+
+def _write_cfg(aw_home, d, text=COMMENTED):
+    (aw_home / "config.toml").write_text(text)
+    d.store.reload(force=True)
+
+
+def test_voices_lists_profiles_with_usage(gui, aw_home):
+    d, client = gui
+    _write_cfg(aw_home, d)
+    now = time.time()
+    common.note_voice("s-old", "nova", "/old", now=now - 3 * 3600)  # past the in-use window
+    common.note_voice("s-a", "nova", "/a", now=now - 600)
+    common.note_voice("s-b", "nova", None, now=now - 60)
+    r = client.get("/api/voices")
+    assert r.status_code == 200
+    profiles = r.json()["profiles"]
+    assert [p["name"] for p in profiles] == list(d.store.get().profiles)
+    assert [p["name"] for p in profiles][:2] == ["nova", "ember"]
+    nova, ember = profiles[0], profiles[1]
+    assert nova["voice"] == "say:Samantha" and nova["style"] == "calm" and nova["description"] == "old text"
+    assert nova["lang"] == "en" and nova["persona"] == ""
+    assert [u["session_id"] for u in nova["in_use"]] == ["s-b", "s-a"]  # newest first, stale one out
+    assert nova["in_use"][1]["cwd"] == "/a" and nova["in_use"][0]["cwd"] is None
+    assert nova["last_session"] == "s-b" and nova["last_used"] == pytest.approx(now - 60)
+    assert nova["last_cwd"] is None
+    assert ember["in_use"] == [] and ember["last_used"] is None
+    assert ember["last_session"] is None and ember["last_cwd"] is None and ember["description"] == ""
+
+
+def test_voices_without_usage_file(gui):
+    _, client = gui
+    for p in client.get("/api/voices").json()["profiles"]:
+        assert p["in_use"] == [] and p["last_used"] is None
+
+
+def test_patch_description_sets_trims_and_removes(gui, aw_home):
+    d, client = gui
+    _write_cfg(aw_home, d)
+    r = client.patch("/api/lab/profiles/ember", json={"description": "  warm and low  "}, headers=H)
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert r.json()["profile"]["name"] == "ember" and r.json()["profile"]["description"] == "warm and low"
+    assert "in_use" in r.json()["profile"] and "persona" in r.json()["profile"]
+    text = (aw_home / "config.toml").read_text()
+    assert 'description = "warm and low"' in text
+    # comments, other keys and the other profile are untouched
+    for kept in ("# my voices", "# the first one", "# keep my comment", 'custom_key = "stay"',
+                 'description = "old text"', 'voice = "say:Alex"'):
+        assert kept in text
+    assert d.store.get().profiles["ember"].description == "warm and low"
+    r = client.patch("/api/lab/profiles/nova", json={"description": ""}, headers=H)
+    assert r.status_code == 200 and r.json()["profile"]["description"] == ""
+    text = (aw_home / "config.toml").read_text()
+    assert "old text" not in text and 'custom_key = "stay"' in text and "# my voices" in text
+    assert d.store.get().profiles["nova"].description == ""
+
+
+def test_patch_description_errors(gui, aw_home):
+    d, client = gui
+    _write_cfg(aw_home, d)
+    before = (aw_home / "config.toml").read_text()
+    assert client.patch("/api/lab/profiles/nope", json={"description": "x"}, headers=H).status_code == 404
+    assert client.patch("/api/lab/profiles/nova", json={"description": "x" * 301}, headers=H).status_code == 400
+    assert client.patch("/api/lab/profiles/nova", json={"description": 5}, headers=H).status_code == 400
+    assert client.patch("/api/lab/profiles/nova", json={"description": None}, headers=H).status_code == 400
+    assert client.patch("/api/lab/profiles/nova", json={}, headers=H).status_code == 400
+    assert client.patch("/api/lab/profiles/nova", json=["x"], headers=H).status_code == 400
+    assert client.patch("/api/lab/profiles/nova", json={"description": "x"}).status_code == 403  # no header
+    assert (aw_home / "config.toml").read_text() == before
+    assert client.patch("/api/lab/profiles/nova", json={"description": "x" * 300}, headers=H).status_code == 200
+
+
+def test_lab_save_keeps_description_unless_given(gui, aw_home):
+    d, client = gui
+    _write_cfg(aw_home, d)
+    body = {"name": "nova", "voice": "say:Daniel", "overwrite": True}
+    r = client.post("/api/lab/profiles", json=body, headers=H)
+    assert r.status_code == 200
+    assert r.json()["profile"]["voice"] == "say:Daniel" and r.json()["profile"]["description"] == "old text"
+    assert d.store.get().profiles["nova"].description == "old text"
+    r = client.post("/api/lab/profiles", json={**body, "description": " new one "}, headers=H)
+    assert r.json()["profile"]["description"] == "new one"
+    r = client.post("/api/lab/profiles", json={**body, "description": ""}, headers=H)
+    assert r.json()["profile"]["description"] == ""
+    assert "description" not in (aw_home / "config.toml").read_text().split("[profiles.ember]")[0]
+    assert client.post("/api/lab/profiles", json={**body, "description": "y" * 301}, headers=H).status_code == 400
+    r = client.post("/api/lab/profiles", json={"name": "fresh", "voice": "say:Alex", "description": "hi"}, headers=H)
+    assert r.status_code == 200 and d.store.get().profiles["fresh"].description == "hi"

@@ -662,6 +662,10 @@ def handle_stop(payload: dict) -> dict:
     }
 
     outcome = {"decision": decision, "reason": reason, "text": text, "profile": profile}
+    # Lines spoken early (MessageDisplay) count as use too: a session that
+    # only speaks that way would otherwise look idle in voices.json.
+    if session_id and not duplicate and (state_changed or decision == "speak" or early_dropped):
+        _note_voice(session_id, profile, payload.get("cwd"))
     if early_dropped:
         outcome["early_dropped"] = early_dropped
     alerts = _alert_settings(cfg)
@@ -1091,8 +1095,10 @@ def apply_voice_command(session_id: str, arg: str, cfg: dict, state: dict, cwd: 
         return "AfterWord voice for this session: %s%s. Profiles: %s." % (
             voice, " (muted)" if state.get("muted") else "", listed)
 
-    if low in ("", "status"):
+    if low == "status" or (low == "" and current):
         return describe() + " Tell the user this in one short sentence.", False
+    if low == "" or low in PICK_WORDS:
+        return voice_menu(session_id, cfg, state), False
     if low in ("off", "stop", "none"):
         state["profile"] = None
         changed = current is not None
@@ -1107,9 +1113,9 @@ def apply_voice_command(session_id: str, arg: str, cfg: dict, state: dict, cwd: 
         if low == "on":
             target = state.get("last_profile") or (names[0] if names else "")
         if not target or not tags.PROFILE_NAME_RE.match(target) or (names and target not in names):
-            shown = word if len(word) <= 64 else word[:64] + "..."
-            return ("AfterWord has no voice profile %r; the voice is unchanged. "
-                    "Tell the user, and list the profiles: %s." % (shown, listed)), False
+            # Not a profile name: what the user wants ("something calm", a
+            # typo) is Claude's to match against the profiles.
+            return voice_menu(session_id, cfg, state, hint=word), False
         state["profile"] = target
         state["last_profile"] = target
         changed = target != current
@@ -1119,7 +1125,102 @@ def apply_voice_command(session_id: str, arg: str, cfg: dict, state: dict, cwd: 
         if isinstance(cwd, str):
             state["cwd"] = cwd
         _common.update_state(session_id, _merge_keys(state, ("profile", "last_profile", "muted", "source", "cwd")))
+        if low not in ("mute", "unmute"):
+            _note_voice(session_id, state.get("profile"), cwd)
     return note, changed
+
+
+PICK_WORDS = ("pick", "auto", "any", "choose", "random", "?")
+VOICE_IN_USE_S = 2 * 3600  # another session that chose or spoke with a voice this recently is using it
+VOICE_MENU_MAX = 12
+HINT_MAX_CHARS = 200
+
+
+def _note_voice(session_id: str, profile, cwd) -> None:
+    """common.note_voice, never raising (the usage log is a nicety)."""
+    if not session_id:
+        return
+    try:
+        _common.note_voice(session_id, profile if isinstance(profile, str) else None, cwd)
+    except Exception as exc:
+        _log("error", "could not update voices.json", error=repr(exc))
+
+
+def _ago(seconds: float) -> str:
+    if seconds < 90:
+        return "just now"
+    if seconds < 90 * 60:
+        return "%d min ago" % round(seconds / 60)
+    if seconds < 36 * 3600:
+        return "%d h ago" % round(seconds / 3600)
+    return "%d d ago" % round(seconds / 86400)
+
+
+def _profile_blurb(cfg: dict, name: str) -> str:
+    """'calm, slightly wry (builtin, en)': the profile's description (else its
+    persona, else its style), its voice kind and languages."""
+    import re
+
+    table = _profile_table(cfg, name, borrow=False)
+    desc = ""
+    for key in ("description", "persona", "style"):
+        v = table.get(key)
+        if isinstance(v, str) and v.strip():
+            desc = re.sub(r"\s+", " ", v).strip()
+            break
+    if len(desc) > 70:
+        desc = desc[:69].rstrip() + "\u2026"
+    voice = table.get("voice") if isinstance(table.get("voice"), str) else ""
+    kind = voice.split(":", 1)[0].strip() if ":" in voice else ("say" if not voice else voice)
+    langs = _profile_langs(cfg, name) or [_lang_code(table.get("lang")) or "auto"]
+    tail = "%s, %s" % (kind, "/".join(langs))
+    return "%s (%s)" % (desc, tail) if desc else "(%s)" % tail
+
+
+def voice_menu(session_id: str, cfg: dict, state: dict, hint: str = "", now=None) -> str:
+    """The note that asks Claude to pick this session's voice: the profiles,
+    free ones and the least recently used first, each with a short
+    description; Claude answers with <voice set="..."/>. About 150 tokens."""
+    import json
+
+    names = _profile_names(cfg)
+    if not names:
+        return ("AfterWord has no voice profiles configured, so the voice is unchanged. Tell the user to "
+                "add a [profiles.<name>] table to ~/.afterword/config.toml (or use the voice lab).")
+    now = time.time() if now is None else now
+    try:
+        usage = _common.load_voice_usage()
+    except Exception:
+        usage = {}
+    current = state.get("profile") if isinstance(state.get("profile"), str) else None
+    rows = []
+    for name in names:
+        u = usage.get(name) or {}
+        others = [sid for sid, s in (u.get("sessions") or {}).items()
+                  if sid != session_id and now - s["ts"] < VOICE_IN_USE_S]
+        last = u.get("last_used")
+        if name == current:
+            status = "this session's voice now"
+        elif others:
+            status = "in use by %d other session%s" % (len(others), "" if len(others) == 1 else "s")
+        elif last:
+            status = "free, last used %s" % _ago(max(0.0, now - last))
+        else:
+            status = "free, never used"
+        rows.append(((bool(others), name == current, last or 0.0), "- %s: %s; %s" % (name, _profile_blurb(cfg, name), status)))
+    rows.sort(key=lambda r: r[0])
+    lines = [line for _, line in rows[:VOICE_MENU_MAX]]
+    if len(rows) > VOICE_MENU_MAX:
+        lines.append("- (%d more in use)" % (len(rows) - VOICE_MENU_MAX))
+    hint = " ".join(hint.split())
+    if len(hint) > HINT_MAX_CHARS:
+        hint = hint[:HINT_MAX_CHARS] + "..."
+    asked = " The user asked for: %s." % json.dumps(hint, ensure_ascii=False) if hint else ""
+    return ("AfterWord: the user wants you to pick this session's voice.%s Profiles, best first:\n%s\n"
+            "Choose the one that fits best, preferring a free one (if the request names a profile, "
+            "maybe misspelled, take that one). Reply with one short sentence saying which voice and why, "
+            "and include <voice set=\"NAME\"/> and <say>a short line in that voice</say>."
+            % (asked, "\n".join(lines)))
 
 
 def _notify(event: str, payload: dict, profile, reason: str, state_changed: bool) -> str:
@@ -1236,6 +1337,7 @@ def handle_session_start(payload: dict) -> dict:
             if isinstance(payload.get("cwd"), str):
                 state["cwd"] = payload["cwd"]
             _common.update_state(session_id, _merge_keys(state, ("profile", "last_profile", "source", "cwd")))
+            _note_voice(session_id, profile, payload.get("cwd"))
             changed = True
             reason = "voice seeded from AFTERWORD_VOICE=%s" % (profile or "off")
         else:

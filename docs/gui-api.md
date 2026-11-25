@@ -148,6 +148,42 @@ and clears the queue, and new:
 `POST /api/queue/remove/{event_id}` drops one pending line →
 `{"removed": event_id}` (404 if not pending).
 
+## Speak and replay
+
+`POST /api/speak` speaks any text, as `afterword test` does (the socket
+`test` request): the same parse (`<say>` blocks are honoured, else the text
+is cleaned), the profile's `max_chars`, mute-all, the pronunciation list and
+the profile's language voices.
+```json
+{"text": "Deploy is done.",   // required: 1..2000 characters after trimming
+ "profile": "nova",           // required: a configured profile
+ "lang": "ja"}                // optional: ISO code or language name, or "auto"
+```
+→ `{"ok": true, "event_id": 52, "status": "queued", "position": 0}`. The row is
+`kind: "test"` with `session_id: "gui"` (the Transcript shows it as from
+"gui"). With `lang` every block is spoken in that language's voice
+(`[profiles.x.langs.<lang>]`); without it a profile with `[langs]` splits the
+line by script as usual. Lines typed this way queue after each other (one
+turn), never superseding one another. When everything is muted the line is
+logged and the answer is `{"ok": true, "event_id": 53, "status": "skipped",
+"reason": "all muted"}`. 400 for empty or too long text, a missing or unknown
+profile (the message lists the profiles) or an unknown language.
+
+`POST /api/events/{id}/replay` (no body) queues a past event's spoken text
+again, as a new event: the same profile, session and folder; its `<say>`
+blocks again one by one with their attrs (`lang`, `mood`, `pace`) when it had
+several (found from `parsed.segments`), else the text as one block. The new
+row is `kind: "test"`, `hook_event: "replay"`, `payload: {"replay_of": id}`
+and, while it waits, `reason: "replay of #<id>"` (the reason then follows its
+status, as for any line). It queues after that session's waiting lines
+instead of superseding them, and is skipped (`session muted`, `all muted`)
+like any line of that session. → the same answer as `/api/speak`. 404 for an
+unknown event; 400 when the event has no spoken text (a system row, a skipped
+row without `<say>`).
+
+Both answer 503 when the daemon cannot queue the line: it is stopping, or the
+queue is full (`daemon busy`; that row is logged as `skipped`).
+
 ## History
 
 `GET /api/history?limit=50&before=<id>`
@@ -161,6 +197,22 @@ and clears the queue, and new:
 Lines whose audio clip is still on disk (the last `history` clips, 50 by
 default), newest first. `?download=1` serves the WAV as an attachment
 (`afterword-41.wav`). Play at `playback_rate` to hear it as it was spoken.
+
+## Export
+
+`GET /api/export?session_id=<id>&format=md|txt&limit=1000` downloads the
+spoken lines (status `spoken`, newest last) as an attachment
+(`Content-Disposition: attachment; filename="afterword-<session|all>-transcript.md"`).
+`session_id` is optional (all sessions when absent); `format` defaults to `md`;
+`limit` (1 to 5000, default 1000) keeps the most recent lines; out-of-range
+values give 422.
+
+- `md`: a `# AfterWord transcript` title, then one paragraph per line,
+  `**nova** · 2026-11-25 14:02 — text`. Without `session_id` the lines are
+  grouped under a `## folder (session)` heading per session.
+- `txt`: one line each, `[2026-11-25 14:02] nova: text`.
+
+Times are the daemon's local time. A plain GET, so no `X-AfterWord` header.
 
 ## Timings
 
@@ -198,6 +250,41 @@ counting the `info` rows that UserPromptSubmit and SessionStart log)
 }
 ```
 `POST /api/config/reload` forces a reload and returns the same shape.
+
+## Voices
+
+`GET /api/voices` → every voice profile with its usage, in config order (the
+same order as `/api/status` `config.profiles`):
+```json
+{"profiles": [{"name": "nova", "description": "calm narrator", "voice": "say:Samantha",
+  "lang": "en", "style": "…", "persona": "", "pace": 1.0, "langs": {},
+  "last_used": 1795597634.0, "last_session": "abc", "last_cwd": "/path",
+  "in_use": [{"session_id": "abc", "cwd": "/path", "ts": 1795597634.0}],
+  "stats": {"lines_7d": 38, "audio_s_7d": 712.4, "synth_ms_avg_7d": 912.0}}]}
+```
+The usage fields come from `~/.afterword/voices.json` (written by the hooks
+and the daemon): `last_used`, `last_session` and `last_cwd` are null for a
+voice nobody has used. `in_use` lists the sessions that chose or spoke with
+the voice within the last 2 hours (`common.VOICE_IN_USE_S`), newest first.
+`stats` covers the last 7 days of spoken events with that profile, from the
+events DB: `lines_7d` (count), `audio_s_7d` (summed `audio_s`) and
+`synth_ms_avg_7d` (mean `synth_ms`, null when nothing was timed). A voice not
+used that week reports `0`, `0.0`, `null`. Only `GET /api/voices` carries it.
+Each profile also carries the other lab fields (`ref_text`, `max_chars`,
+`say_voice`, `seed`, `temperature`).
+
+`PATCH /api/lab/profiles/<name>` with `{"description": "text"}` sets the
+profile's one-line description (trimmed, at most 300 characters; `""` removes
+it) and returns `{"ok": true, "profile": {…one item of GET /api/voices…}}`.
+Only that key of `[profiles.<name>]` is written, so comments and the rest of
+the table stay as they are; the daemon then reloads the config. 404 for an
+unknown profile, 400 for a missing, non-string or too long description,
+403 without the `X-AfterWord: 1` header.
+
+`POST /api/lab/profiles` (save from the lab) takes the same optional
+`description` (at most 300 characters). When it is present it is written
+(`""` removes it); when it is left out, a description already in the file is
+kept, so a save from the lab never deletes it.
 
 ## Pronunciations
 

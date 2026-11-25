@@ -166,6 +166,7 @@ class Profile:
     seed: int | None = None  # fixed sampling seed: the same line always sounds the same
     temperature: float | None = None  # None: the model's default
     persona: str = ""  # free text, only for `afterword alerts generate`
+    description: str = ""  # one line for the `/afterword:voice pick` menu
     known: bool = True  # False when the name was not in config.toml
     pronounce: _pron.Pairs = ()  # [profiles.x.pronounce]: (word, spoken as) pairs
     # [profiles.x.langs.<iso>]: a voice per language (read-only mapping)
@@ -384,6 +385,7 @@ def build_config(raw: dict[str, Any]) -> tuple[Config, list[str]]:
             seed=_num(p.get("seed"), int, None, 0, 2**31 - 1, f"{where}.seed", errors),
             temperature=_num(p.get("temperature"), float, None, 0.05, 2.0, f"{where}.temperature", errors),
             persona=_str(p.get("persona"), base.persona, f"{where}.persona", errors)[:2000],
+            description=_str(p.get("description"), base.description, f"{where}.description", errors)[:300],
             pronounce=_pron.clean_table(p.get("pronounce"), errors, f"{where}.pronounce"),
             langs=_langs(p.get("langs"), f"{where}.langs", errors),
         )
