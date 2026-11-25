@@ -356,6 +356,24 @@
                   background: color-mix(in srgb, var(--paper) 70%, var(--sheet)); border-right: 1px solid var(--rule); min-width: 44px; }
   .toml pre.src { flex: 1; min-width: 0; }
   .toml pre, .toml pre.gut { font-family: var(--mono); font-size: 12px; }
+  .toml.short { max-height: none; overflow-y: hidden; }
+  .toml pre { margin: 0; }
+  #view-config { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+  #view-config .cfg-body { display: flex; flex-direction: column; gap: 14px; min-width: 0; max-width: 980px; }
+  #view-config .cfg-sec { scroll-margin-top: 112px; }
+  #view-config h3.cfg-phr { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
+  .cfg-index { display: flex; gap: 2px 16px; overflow-x: auto; border-bottom: 1px solid var(--rule); }
+  .cfg-index a { flex: none; font-size: 13px; padding: 6px 2px; color: var(--slate); text-decoration: none;
+                 border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .cfg-index a:hover { color: var(--ink); }
+  .cfg-index a.on { color: var(--ink); font-weight: 600; border-bottom-color: var(--cue); }
+  .cfg-index a:focus-visible { outline: 2px solid var(--cue); outline-offset: 1px; border-radius: 3px; }
+  @media (min-width: 900px) {
+    #view-config { grid-template-columns: 168px minmax(0, 1fr); gap: 28px; }
+    .cfg-index { flex-direction: column; gap: 2px; overflow: visible; border-bottom: 0; position: sticky; top: 112px; }
+    .cfg-index a { padding: 4px 10px; border-bottom: 0; margin: 0; border-left: 2px solid transparent; }
+    .cfg-index a.on { border-left-color: var(--cue); }
+  }
   table.pn td { padding: 4px 6px; }
   table.pn td:first-child { width: 34%; } table.pn td:last-child { width: 1%; white-space: nowrap; }
   table.pn th { font-size: 12px; font-weight: 400; color: var(--slate); text-transform: none; letter-spacing: 0; }
@@ -429,7 +447,7 @@
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
   .al-set { display: flex; gap: 8px 10px; align-items: center; flex-wrap: wrap; }
   .al-pools { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
-  .al-pools textarea { width: 100%; min-height: 120px; resize: vertical; font-family: var(--serif); font-size: 15px; line-height: 1.55; }
+  .al-pools textarea { width: 100%; min-height: 4.6em; max-height: 300px; resize: none; overflow-y: auto; font-family: var(--serif); font-size: 15px; line-height: 1.55; }
   .al-pools .ev { display: flex; gap: 6px; align-items: center; font-size: 12px; margin-bottom: 4px; }
   .al-pools .ev b { font-size: 13px; font-weight: 600; color: var(--ink); }
   .al-pools .msg.info { font-family: var(--serif); font-size: 13px; }
@@ -870,18 +888,26 @@
   </div>
 </main>
 
-<main id="view-config" class="page" hidden>
+<main id="view-config" class="page cfg" hidden>
+  <nav class="cfg-index" id="cfg-index" aria-label="Config sections">
+    <a href="#config" data-sec="cfg-file">File</a>
+    <a href="#config" data-sec="cfg-engine">Engine</a>
+    <a href="#config" data-sec="cfg-pron">Pronunciations</a>
+    <a href="#config" data-sec="cfg-alerts">Spoken alerts</a>
+    <a href="#config" data-sec="cfg-toml">config.toml</a>
+  </nav>
+  <div class="cfg-body">
   <div class="banner" id="c-err" hidden></div>
-  <section class="panel" aria-label="config file">
-    <h2>Config <span class="grow"></span><span class="msg" id="c-msg"></span><button id="c-reload" title="Re-read config.toml now">Reload</button></h2>
+  <section class="panel cfg-sec" id="cfg-file" aria-label="config file">
+    <h2>File <span class="grow"></span><span class="msg" id="c-msg"></span><button id="c-reload" title="Re-read config.toml now">Reload</button></h2>
     <dl class="cfg-meta" id="c-meta"><dd class="hint">Loading…</dd></dl>
     <div class="hint cfg-note">Edit the file in your editor; the daemon picks up changes automatically (Reload forces it). The voice lab’s profile editor writes to the same file. If the file has a parse error, the daemon keeps using the last good config.</div>
   </section>
-  <section class="panel" aria-label="engine status">
+  <section class="panel cfg-sec" id="cfg-engine" aria-label="engine status">
     <h2>Engine</h2>
     <div class="engine" id="c-engine"><span class="hint">Loading…</span></div>
   </section>
-  <section class="panel" aria-label="pronunciations">
+  <section class="panel cfg-sec" id="cfg-pron" aria-label="pronunciations">
     <h2>Pronunciations <span class="grow"></span><span class="msg" id="pn-msg"></span>
       <label class="hint" for="pn-table">table</label><select id="pn-table" title="Which [pronounce] table to edit"></select></h2>
     <div class="hint" style="margin-bottom:8px;max-width:80ch">Words rewritten before they are spoken, in every line, the voice lab and the <code>say</code> fallback. The longest match wins; a word that begins or ends with a letter or digit only matches whole words (<code>uv</code> leaves <code>uvicorn</code> alone); an all-lowercase word ignores case, one with capitals matches exactly. Profile tables override the global one.</div>
@@ -895,7 +921,7 @@
     <div class="hint pv" id="pn-hearhint" style="margin-top:6px"></div>
     <div class="msg err" id="pn-warn" hidden style="display:block;margin-top:6px"></div>
   </section>
-  <section class="panel" aria-label="spoken alerts">
+  <section class="panel cfg-sec" id="cfg-alerts" aria-label="spoken alerts">
     <h2>Spoken alerts <span class="grow"></span><span class="msg" id="al-msg"></span></h2>
     <div class="hint" style="margin-bottom:8px;max-width:80ch">A short line when Claude needs you (a permission prompt, a question), sits idle, or finished a long turn with nothing spoken. Alerts speak even when a session’s voice is off, but not when it (or everything) is muted. Changes here are written to <code>[alerts]</code> in config.toml.</div>
     <div class="al-set">
@@ -906,8 +932,8 @@
         <option value="away">when away (after ~6 s)</option><option value="now">at once</option></select>
       <label class="hint" for="al-after">done after</label><input type="number" id="al-after" min="0" max="86400" step="5" style="width:80px" title="[alerts] done_after_s"><span class="hint">s</span>
     </div>
-    <h2 style="margin-top:16px">Phrases <span class="grow"></span>
-      <label class="hint" for="al-lang">language</label><select id="al-lang"></select></h2>
+    <h3 class="sub cfg-phr">Phrases <span class="grow"></span>
+      <label class="hint" for="al-lang">language</label><select id="al-lang"></select></h3>
     <div class="hint" id="al-src" style="margin-bottom:6px"></div>
     <div class="al-pools" id="al-pools"><span class="hint">Loading…</span></div>
     <div class="bar">
@@ -924,10 +950,12 @@
     </div>
     <div class="msg err" id="al-warn" hidden style="display:block;margin-top:6px"></div>
   </section>
-  <section class="panel" aria-label="config.toml">
+  <section class="panel cfg-sec" id="cfg-toml" aria-label="config.toml">
     <h2>config.toml <span class="hint" id="c-lines"></span><span class="grow"></span><span class="hint">read-only</span></h2>
     <div class="toml" id="c-toml"><pre class="gut"></pre><pre class="src"></pre></div>
+    <div class="bar"><button id="c-toggle" class="small" hidden aria-expanded="false" aria-controls="c-toml"></button></div>
   </section>
+  </div>
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -4080,7 +4108,7 @@ const Alerts = (() => {
     $("al-pools").replaceChildren(...data.events.map(ev => {
       const allowed = ((data.placeholders || {})[ev] || []).map(p => `{${p}}`).join(" ");
       const ta = h("textarea", {"data-ev": ev, spellcheck: "false", "aria-label": `${ev} phrases`,
-        oninput: (e) => { edits[ev] = e.target.value; syncState(); }});
+        oninput: (e) => { edits[ev] = e.target.value; fit(e.target); syncState(); }});
       ta.value = savedText(ev);
       const msg = h("span", {class: "msg"});
       const hear = h("button", {class: "small", title: "Hear a random phrase from this box (sample values filled in)",
@@ -4088,8 +4116,19 @@ const Alerts = (() => {
       return h("div", null, h("div", {class: "ev"}, h("b", null, ev), h("span", {class: "hint grow", title: EV_HELP[ev] || ""}, allowed), hear),
         ta, msg);
     }));
+    fitAll();
     syncState();
   }
+  // Phrase boxes grow to fit their text (CSS caps the height; beyond that they scroll).
+  function fit(ta) {
+    if (!ta.offsetParent) return;      // hidden page: scrollHeight is 0, refit when shown
+    ta.style.height = "auto";
+    ta.style.height = (ta.scrollHeight + ta.offsetHeight - ta.clientHeight) + "px";
+  }
+  const fitAll = () => $("al-pools").querySelectorAll("textarea").forEach(fit);
+  let fitW = 0;
+  window.addEventListener("resize", () => { if (visibleEl()) { cancelAnimationFrame(fitW); fitW = requestAnimationFrame(fitAll); } });
+  const visibleEl = () => !!$("al-pools").offsetParent;
   function paintWarnings() {
     const w = [...(data.error ? [`alerts.json: ${data.error}`] : []), ...(data.warnings || []).map(String)];
     $("al-warn").hidden = !w.length;
@@ -4197,7 +4236,7 @@ const Alerts = (() => {
   });
   $("al-gen").addEventListener("click", generate);
   window.addEventListener("beforeunload", (ev) => { if (dirty()) { ev.preventDefault(); ev.returnValue = ""; } });
-  return {load};
+  return {load, fit: fitAll};
 })();
 
 // ===================================================================
@@ -4206,6 +4245,8 @@ const Alerts = (() => {
 const Config = (() => {
   let visible = false, timer = null, loading = false;
   let textSig = null, metaSig = null, engSig = null;
+  let tomlAll = false, tomlLines = [];      // config.toml shows 12 lines until expanded
+  const TOML_HEAD = 12;
 
   function renderCfg(d) {
     const err = typeof d.error === "string" && d.error ? d.error : null;
@@ -4236,19 +4277,29 @@ const Config = (() => {
     const text = typeof d.text === "string" ? d.text : "";
     if (text !== textSig) {
       textSig = text;
-      const [gut, src] = $("c-toml").children;
-      if (!text) {
-        gut.textContent = ""; src.textContent = "";
-        src.append(h("span", {class: "muted"}, "(file is empty or missing: built-in defaults are in use)"));
-        $("c-lines").textContent = "";
-      } else {
-        const lines = text.replace(/\n$/, "").split("\n");
-        gut.textContent = lines.map((_, i) => i + 1).join("\n");
-        src.textContent = lines.join("\n");
-        $("c-lines").textContent = `${lines.length} line${lines.length === 1 ? "" : "s"}`;
-      }
+      tomlLines = text ? text.replace(/\n$/, "").split("\n") : [];
+      $("c-lines").textContent = tomlLines.length ? `${tomlLines.length} line${tomlLines.length === 1 ? "" : "s"}` : "";
+      paintToml();
     }
   }
+  function paintToml() {
+    const [gut, src] = $("c-toml").children;
+    const n = tomlLines.length, more = n > TOML_HEAD;
+    if (!n) {
+      gut.textContent = ""; src.textContent = "";
+      src.append(h("span", {class: "muted"}, "(file is empty or missing: built-in defaults are in use)"));
+    } else {
+      const shown = more && !tomlAll ? tomlLines.slice(0, TOML_HEAD) : tomlLines;
+      gut.textContent = shown.map((_, i) => i + 1).join("\n");
+      src.textContent = shown.join("\n");
+    }
+    $("c-toml").classList.toggle("short", more && !tomlAll);
+    const btn = $("c-toggle");
+    btn.hidden = !more;
+    btn.textContent = tomlAll ? "Show first 12 lines" : `Show all ${n} lines`;
+    btn.setAttribute("aria-expanded", String(tomlAll));
+  }
+  $("c-toggle").addEventListener("click", () => { tomlAll = !tomlAll; paintToml(); });
   async function load(reload = false) {
     if (loading) return;
     loading = true;
@@ -4266,9 +4317,48 @@ const Config = (() => {
     renderCfg(r.data);
   }
   $("c-reload").addEventListener("click", () => { load(true); Pronounce.load(); Alerts.load(); });
+
+  // In-page index: the link of the section in view gets .on (a --cue marker in CSS).
+  const links = [...$("cfg-index").querySelectorAll("a[data-sec]")];
+  const secs = links.map(a => $(a.dataset.sec));
+  const inView = new Set();
+  let current = null;
+  function mark(id) {
+    if (id === current) return;
+    current = id;
+    for (const a of links) {
+      const on = a.dataset.sec === id;
+      a.classList.toggle("on", on);
+      if (on) a.setAttribute("aria-current", "location"); else a.removeAttribute("aria-current");
+    }
+  }
+  function pick() {
+    if (visible && innerHeight + scrollY >= document.documentElement.scrollHeight - 2) return mark(secs[secs.length - 1].id);
+    const first = secs.find(el => inView.has(el));
+    if (first) mark(first.id); else if (!current) mark(secs[0].id);
+  }
+  if ("IntersectionObserver" in window) {
+    // A band just under the sticky header + bar: the first section touching it is "in view".
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) { if (e.isIntersecting) inView.add(e.target); else inView.delete(e.target); }
+      pick();
+    }, {rootMargin: "-120px 0px -65% 0px"});
+    secs.forEach(el => io.observe(el));
+    addEventListener("scroll", () => { if (visible) pick(); }, {passive: true});
+  }
+  mark(secs[0].id);
+  $("cfg-index").addEventListener("click", (ev) => {
+    const a = ev.target.closest("a[data-sec]");
+    if (!a) return;
+    ev.preventDefault();    // keep #config in the address bar; the router owns the hash
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    $(a.dataset.sec).scrollIntoView({behavior: reduce ? "auto" : "smooth", block: "start"});
+    mark(a.dataset.sec);
+  });
   return {
     show() {
       visible = true; load(); Pronounce.load(); Alerts.load();
+      requestAnimationFrame(() => Alerts.fit());
       // Pick up hot reloads while the page is open (unchanged text is not re-rendered).
       if (!timer) timer = setInterval(() => { if (visible && document.visibilityState === "visible") { load(); Pronounce.load(); Alerts.load(); } }, 10000);
     },
