@@ -634,6 +634,99 @@ def update_state(session_id: object, change) -> Dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# Voice usage: which profile each session uses, and when it was last used     #
+# --------------------------------------------------------------------------- #
+#
+# voices.json: {"v": 1, "profiles": {"nova": {"last_used": ts, "last_session":
+# id, "sessions": {id: {"ts": ts, "cwd": path}}}}}. A session sits under the
+# profile it uses now (it moves when it switches, leaves when it turns off),
+# and its "ts" is the last time it chose or spoke with that voice. The
+# `/afterword:voice pick` menu reads it to offer the voices nobody else uses.
+
+VOICES_MAX_BYTES = 256 * 1024
+VOICE_SESSION_KEEP_S = 3 * 86400  # a session not heard from for this long is dropped
+VOICE_SESSIONS_MAX = 16           # per profile, the most recent ones
+VOICE_PROFILES_MAX = 200
+
+
+def voices_path() -> Path:
+    return home() / "voices.json"
+
+
+def load_voice_usage() -> Dict[str, Dict[str, Any]]:
+    """{profile: {"last_used", "last_session", "sessions"}}; {} if missing or corrupt."""
+    try:
+        data = json.loads(read_regular_file(voices_path(), VOICES_MAX_BYTES).decode("utf-8"))
+    except Exception:
+        return {}
+    profiles = data.get("profiles") if isinstance(data, dict) else None
+    if not isinstance(profiles, dict):
+        return {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for name, entry in profiles.items():
+        if not isinstance(name, str) or not isinstance(entry, dict):
+            continue
+        last = entry.get("last_used")
+        sessions = entry.get("sessions") if isinstance(entry.get("sessions"), dict) else {}
+        out[name] = {
+            "last_used": float(last) if isinstance(last, (int, float)) and not isinstance(last, bool) else None,
+            "last_session": entry.get("last_session") if isinstance(entry.get("last_session"), str) else None,
+            "sessions": {
+                sid: {"ts": float(s["ts"]), "cwd": s.get("cwd") if isinstance(s.get("cwd"), str) else None}
+                for sid, s in sessions.items()
+                if isinstance(sid, str) and isinstance(s, dict)
+                and isinstance(s.get("ts"), (int, float)) and not isinstance(s.get("ts"), bool)
+            },
+        }
+    return out
+
+
+def _save_voice_usage(profiles: Dict[str, Dict[str, Any]]) -> None:
+    import tempfile
+
+    d = home()
+    d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".voices-", suffix=".tmp", dir=str(d))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump({"v": 1, "profiles": profiles}, fh, ensure_ascii=False, indent=1)
+        os.replace(tmp, voices_path())
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def note_voice(session_id: object, profile: Optional[str], cwd: object = None, now: Optional[float] = None) -> None:
+    """Record that `session_id` uses `profile` now (None: its voice is off).
+    Takes state_lock(), so never call it from inside update_state()."""
+    if not isinstance(session_id, str) or not session_id:
+        return
+    now = time.time() if now is None else now
+    with state_lock():
+        usage = load_voice_usage()
+        for name, entry in usage.items():
+            if name != profile:
+                entry["sessions"].pop(session_id, None)
+        if profile:
+            entry = usage.setdefault(profile, {"last_used": None, "last_session": None, "sessions": {}})
+            entry["last_used"] = now
+            entry["last_session"] = session_id
+            entry["sessions"][session_id] = {"ts": now, "cwd": cwd if isinstance(cwd, str) else None}
+        for entry in usage.values():
+            keep = sorted(
+                ((sid, s) for sid, s in entry["sessions"].items() if now - s["ts"] < VOICE_SESSION_KEEP_S),
+                key=lambda kv: kv[1]["ts"], reverse=True)[:VOICE_SESSIONS_MAX]
+            entry["sessions"] = dict(keep)
+        if len(usage) > VOICE_PROFILES_MAX:
+            ranked = sorted(usage.items(), key=lambda kv: kv[1]["last_used"] or 0.0, reverse=True)
+            usage = dict(ranked[:VOICE_PROFILES_MAX])
+        _save_voice_usage(usage)
+
+
+# --------------------------------------------------------------------------- #
 # Append-only JSONL helpers                                                   #
 # --------------------------------------------------------------------------- #
 

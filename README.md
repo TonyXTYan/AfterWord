@@ -48,9 +48,18 @@ Turn the voice on for a session:
 - at launch: `AFTERWORD_VOICE=nova claude` (the `SessionStart` hook reads it);
 - mid-session: `/afterword:voice nova` with the plugin, or `/afterword-voice nova`
   with `install-hooks` (not bare `/voice`: that is Claude Code's own dictation
-  command). Also `off`, `on` (the last profile), `mute`, `unmute`, and no
-  argument for the current state. In Codex, type it without the slash:
-  `afterword:voice nova` (Codex rejects slash commands it doesn't know);
+  command). Also `off`, `on` (the last profile), `mute`, `unmute`, and
+  `status`. In Codex, type it without the slash: `afterword:voice nova`
+  (Codex rejects slash commands it doesn't know);
+- let Claude choose: `/afterword:voice pick`, or describe what you want,
+  `/afterword:voice something calm for long reads` (anything that is not a
+  profile name). With no argument it picks while the voice is off and shows
+  the current state while it is on. Claude gets a short menu of the
+  profiles, the ones no other session is using and the least recently used
+  first, each with its `description` (else its `persona`, else its `style`),
+  and answers with a `<voice set="..."/>` tag and a line in the new voice.
+  Which profile each session uses, and when each was last used, is kept in
+  `~/.afterword/voices.json`;
 - in the GUI's Sessions page.
 
 Claude can also switch it with a `<voice set="nova"/>` tag (`set="off"` to stop).
@@ -115,6 +124,7 @@ style = "calm, slightly wry" # style instruction (builtin and design voices)
 seed = 1234                  # optional: the same line always sounds the same
 max_chars = 400
 say_voice = "Samantha"       # macOS voice used if Qwen3-TTS is unavailable
+description = "calm narrator for long explanations"  # optional: for /afterword:voice pick
 ```
 
 | `voice` | Model | Notes |
