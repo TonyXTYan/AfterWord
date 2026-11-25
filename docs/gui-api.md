@@ -162,6 +162,22 @@ Lines whose audio clip is still on disk (the last `history` clips, 50 by
 default), newest first. `?download=1` serves the WAV as an attachment
 (`afterword-41.wav`). Play at `playback_rate` to hear it as it was spoken.
 
+## Export
+
+`GET /api/export?session_id=<id>&format=md|txt&limit=1000` downloads the
+spoken lines (status `spoken`, newest last) as an attachment
+(`Content-Disposition: attachment; filename="afterword-<session|all>-transcript.md"`).
+`session_id` is optional (all sessions when absent); `format` defaults to `md`;
+`limit` (1 to 5000, default 1000) keeps the most recent lines; out-of-range
+values give 422.
+
+- `md`: a `# AfterWord transcript` title, then one paragraph per line,
+  `**nova** · 2026-11-25 14:02 — text`. Without `session_id` the lines are
+  grouped under a `## folder (session)` heading per session.
+- `txt`: one line each, `[2026-11-25 14:02] nova: text`.
+
+Times are the daemon's local time. A plain GET, so no `X-AfterWord` header.
+
 ## Timings
 
 `GET /api/stats?limit=200` (over the newest `limit` hook/test events, not
@@ -207,12 +223,17 @@ same order as `/api/status` `config.profiles`):
 {"profiles": [{"name": "nova", "description": "calm narrator", "voice": "say:Samantha",
   "lang": "en", "style": "…", "persona": "", "pace": 1.0, "langs": {},
   "last_used": 1795597634.0, "last_session": "abc", "last_cwd": "/path",
-  "in_use": [{"session_id": "abc", "cwd": "/path", "ts": 1795597634.0}]}]}
+  "in_use": [{"session_id": "abc", "cwd": "/path", "ts": 1795597634.0}],
+  "stats": {"lines_7d": 38, "audio_s_7d": 712.4, "synth_ms_avg_7d": 912.0}}]}
 ```
 The usage fields come from `~/.afterword/voices.json` (written by the hooks
 and the daemon): `last_used`, `last_session` and `last_cwd` are null for a
 voice nobody has used. `in_use` lists the sessions that chose or spoke with
 the voice within the last 2 hours (`common.VOICE_IN_USE_S`), newest first.
+`stats` covers the last 7 days of spoken events with that profile, from the
+events DB: `lines_7d` (count), `audio_s_7d` (summed `audio_s`) and
+`synth_ms_avg_7d` (mean `synth_ms`, null when nothing was timed). A voice not
+used that week reports `0`, `0.0`, `null`. Only `GET /api/voices` carries it.
 Each profile also carries the other lab fields (`ref_text`, `max_chars`,
 `say_voice`, `seed`, `temperature`).
 

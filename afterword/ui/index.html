@@ -344,6 +344,12 @@
   .sx-meta { flex: none; display: flex; flex-wrap: nowrap; align-items: center; gap: 0 10px; white-space: nowrap; font-size: var(--fs-meta); color: var(--slate); }
   .sx-meta .mono { color: var(--slate); }
   .sx-meta .tag { font-weight: 600; color: var(--slate); }
+  .sx-exp { font-size: var(--fs-meta); color: var(--slate); }
+  .sx-exp a { color: inherit; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 2px; }
+  .sx-exp a:hover { color: var(--ink); }
+  .sx-head > a.sx-exp { text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 2px; margin-left: auto; }
+  .sx-head > a.sx-exp:hover { color: var(--ink); }
+  .vx-stats { color: var(--slate); }
   .sx-mute { font-size: var(--fs-sm); padding: 1px 8px; }
   .sx-mute[aria-pressed="true"] { color: var(--error); font-weight: 600; background: none; border-color: color-mix(in srgb, var(--error) 45%, var(--rule)); }
   .sx-row.muted .sx-line { opacity: .6; }
@@ -726,7 +732,7 @@
     <div id="v-body"><span class="hint">Loading…</span></div>
   </section>
   <section aria-labelledby="s-h">
-    <div class="sx-head"><h3 id="s-h">Sessions</h3><span class="hint" id="s-count"></span></div>
+    <div class="sx-head"><h3 id="s-h">Sessions</h3><span class="hint" id="s-count"></span><a class="sx-exp" id="s-export-all" href="/api/export?format=md" download title="Download every spoken line as Markdown">Export all</a></div>
     <div id="s-body"><span class="hint">Loading…</span></div>
   </section>
 </main>
@@ -2144,6 +2150,9 @@ const Sessions = (() => {
           s.muted ? h("span", {class: "tag"}, "muted") : null,
           isNum(s.last_seen) ? h("span", {title: events || spoken ? `${events} events logged, ${spoken} spoken` : ""}, "seen ", relSpan(s.last_seen)) : null,
           src && src !== "gui" ? h("span", {title: src}, "set by ", SOURCES[src] || src) : null,
+          spoken ? h("span", {class: "sx-exp", title: "Download this session's spoken lines"}, "Export ",
+            h("a", {href: "/api/export?format=md&session_id=" + encodeURIComponent(id), download: "", "aria-label": `Export ${folder || shortId(id)} as Markdown`}, "Markdown"), " · ",
+            h("a", {href: "/api/export?format=txt&session_id=" + encodeURIComponent(id), download: "", "aria-label": `Export ${folder || shortId(id)} as text`}, "Text")) : null,
           n ? h("span", {class: "msg " + n.kind}, n.text) : null,
           mute)));
   }
@@ -2256,6 +2265,17 @@ const Sessions = (() => {
     }
     return h("span", null, "never used");
   }
+  // "38 lines · 12 min this week · synth 0.9 s"; nothing when the week was silent.
+  function statsNote(p) {
+    const st = p.stats && typeof p.stats === "object" ? p.stats : null;
+    if (!st || !isNum(st.lines_7d) || st.lines_7d <= 0) return null;
+    const parts = [`${st.lines_7d} ${st.lines_7d === 1 ? "line" : "lines"}`];
+    if (isNum(st.audio_s_7d) && st.audio_s_7d > 0)
+      parts.push(st.audio_s_7d < 60 ? `${Math.round(st.audio_s_7d)} s this week` : `${Math.round(st.audio_s_7d / 60)} min this week`);
+    else parts[0] += " this week";
+    if (isNum(st.synth_ms_avg_7d) && st.synth_ms_avg_7d > 0) parts.push(`synth ${(st.synth_ms_avg_7d / 1000).toFixed(1)} s`);
+    return h("span", {class: "vx-stats", title: "Spoken in the last 7 days"}, parts.join(" · "));
+  }
 
   function setVNote(name, text, kind = "info", ms = 4000) {
     const n = {text, kind};
@@ -2283,7 +2303,7 @@ const Sessions = (() => {
     return h("li", {class: "vx-row", "data-name": name},
       h("div", {class: "vx-id"}, speakerTag(name),
         h("div", {class: "vx-voice"}, h("span", {class: "mono", title: "voice id"}, p.voice || "default voice"), lang ? ` · ${lang}` : "")),
-      h("div", {class: "vx-main"}, h("div", {class: "vx-descwrap"}, desc), h("div", {class: "vx-use"}, usageLine(p))),
+      h("div", {class: "vx-main"}, h("div", {class: "vx-descwrap"}, desc), h("div", {class: "vx-use"}, usageLine(p), statsNote(p) ? " · " : null, statsNote(p))),
       h("div", {class: "vx-act"}, hear, edit, n ? h("span", {class: "msg " + n.kind}, n.text) : null));
   }
 

@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 from . import alerts as alerting
 from . import state
@@ -29,6 +31,27 @@ if TYPE_CHECKING:
 UI_INDEX = Path(__file__).resolve().parent.parent / "ui" / "index.html"
 SSE_HEARTBEAT_S = 15.0
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
+
+
+def render_export(lines: list[dict], fmt: str, one_session: bool) -> str:
+    """Spoken lines (oldest first) as Markdown or plain text."""
+    def when(ts):
+        return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts or 0))
+    text = lambda l: " ".join(str(l.get("text") or "").split())
+    who = lambda l: l.get("profile") or "voice"
+    if fmt == "txt":
+        return "".join(f"[{when(l['ts'])}] {who(l)}: {text(l)}\n" for l in lines)
+    out = ["# AfterWord transcript", ""]
+    if one_session or not lines:
+        out += [f"**{who(l)}** · {when(l['ts'])} — {text(l)}\n" for l in lines]
+    else:
+        groups: dict[str, list[dict]] = {}
+        for l in lines:
+            folder = Path(l.get("cwd") or "").name or str(l.get("session_id") or "unknown session")[:8]
+            groups.setdefault(f"{folder} ({str(l.get('session_id') or '')[:8]})", []).append(l)
+        for title, ls in groups.items():
+            out += [f"## {title}", ""] + [f"**{who(l)}** · {when(l['ts'])} — {text(l)}\n" for l in ls]
+    return "\n".join(out).rstrip() + "\n"
 
 
 def build_app(daemon: "Daemon", port: int) -> FastAPI:
@@ -126,6 +149,15 @@ def build_app(daemon: "Daemon", port: int) -> FastAPI:
     @app.get("/api/history")
     async def history(limit: int = 50, before: int | None = None):
         return {"items": await asyncio.to_thread(daemon.events.history, limit, before)}
+
+    @app.get("/api/export")
+    async def export(format: str = Query("md", pattern="^(md|txt)$"), session_id: str | None = None,
+                     limit: int = Query(1000, ge=1, le=5000)):
+        lines = await asyncio.to_thread(daemon.events.spoken_lines, session_id or None, limit)
+        body = render_export(lines, format, bool(session_id))
+        stem = "afterword-" + (re.sub(r"[^A-Za-z0-9_-]", "", session_id)[:12] if session_id else "all") + "-transcript"
+        return Response(body, media_type="text/markdown; charset=utf-8" if format == "md" else "text/plain; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{stem}.{format}"'})
 
     @app.get("/api/stats")
     async def stats(limit: int = 200):
@@ -331,7 +363,13 @@ def build_app(daemon: "Daemon", port: int) -> FastAPI:
 
     @app.get("/api/voices")
     async def voices_view():
-        return await asyncio.to_thread(daemon.lab.voices)
+        def build():
+            body = daemon.lab.voices()
+            stats = daemon.events.voice_stats()
+            for p in body["profiles"]:
+                p["stats"] = stats.get(p["name"]) or {"lines_7d": 0, "audio_s_7d": 0.0, "synth_ms_avg_7d": None}
+            return body
+        return await asyncio.to_thread(build)
 
     @app.patch("/api/lab/profiles/{name}")
     async def lab_describe_profile(name: str, request: Request):

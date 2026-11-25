@@ -270,6 +270,44 @@ class EventLog:
                     break
         return out
 
+    def spoken_lines(self, session_id: str | None = None, limit: int = 1000) -> list[dict[str, Any]]:
+        """The last `limit` spoken lines (optionally of one session), oldest first."""
+        limit = max(1, min(int(limit), 5000))
+        sql = "SELECT id, ts, session_id, cwd, profile, text FROM events WHERE status = 'spoken' AND text IS NOT NULL AND text != ''"
+        args: list[Any] = []
+        if session_id:
+            sql += " AND session_id = ?"
+            args.append(session_id)
+        sql += " ORDER BY id DESC LIMIT ?"
+        args.append(limit)
+        with self._lock:
+            rows = self._db.execute(sql, args).fetchall()
+        return [dict(r) for r in reversed(rows)]
+
+    def voice_stats(self, days: float = 7, now: float | None = None) -> dict[str, dict[str, Any]]:
+        """Per profile over the last `days`: spoken lines, audio seconds, mean synth ms."""
+        since = (time.time() if now is None else now) - days * 86400
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT profile, timings FROM events WHERE status = 'spoken' AND profile IS NOT NULL AND ts >= ?", (since,)).fetchall()
+        acc: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            try:
+                t = json.loads(r["timings"]) if r["timings"] else {}
+            except ValueError:
+                t = {}
+            if not isinstance(t, dict):
+                t = {}
+            a = acc.setdefault(r["profile"], {"lines": 0, "audio": 0.0, "synth": []})
+            a["lines"] += 1
+            if isinstance(t.get("audio_s"), (int, float)):
+                a["audio"] += float(t["audio_s"])
+            if isinstance(t.get("synth_ms"), (int, float)):
+                a["synth"].append(float(t["synth_ms"]))
+        return {name: {"lines_7d": a["lines"], "audio_s_7d": round(a["audio"], 2),
+                       "synth_ms_avg_7d": round(sum(a["synth"]) / len(a["synth"]), 1) if a["synth"] else None}
+                for name, a in acc.items()}
+
     def stats(self, limit: int = 200) -> dict[str, Any]:
         limit = max(1, min(int(limit), 5000))
         with self._lock:
