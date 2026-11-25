@@ -169,7 +169,7 @@ def test_wiring():
     # a repaint keeps a row's state cell (a running Warm) while its state is unchanged
     assert "old && old.key === stKey ? old.node : enStateNode(row)" in paint
     # programmatic builder loads (Load, Use in builder, Open in voice lab) refresh the rows
-    wb = lab[lab.index("function writeBuilder(s)"):]
+    wb = lab[lab.index("function writeBuilder(s, opt = {})"):]
     wb = wb[:wb.index("\n  }\n")]
     assert "enPaint();" in wb
     assert 'const EN_KEY = "aw.lab.engines";' in lab and "localStorage.setItem(EN_KEY" in lab

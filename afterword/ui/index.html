@@ -3425,6 +3425,15 @@ const Lab = (() => {
     const parts = [s.voice, s.lang, clampPace(s.pace).toFixed(2) + "×", s.seed != null ? `seed ${s.seed}` : "random seed"];
     if (s.style || s.mood) parts.push("style “" + [s.style, s.mood].filter(Boolean).join(", ") + "”");
     $("pr-summary").textContent = "Saves: " + parts.join(" · ") + (s.mood ? " (mood is folded into style; profiles have no mood field)" : "");
+    const t = forkTarget();
+    if (t) $("pr-summary").append(h("br"), `Into ${t}; the base voice stays. `,
+      h("button", {type: "button", class: "small", onclick: () => { forkLang = null; syncSpec(); }}, "Save as the base voice instead"));
+  }
+  // "[profiles.nova.langs.zh]" while Save would write the builder into that
+  // language's table (the name field still holds that profile), else null.
+  function forkTarget() {
+    const name = ($("pr-name") && $("pr-name").value || "").trim();
+    return forkLang && forkLang.profile === name ? `[profiles.${name}.langs.${forkLang.lang}]` : null;
   }
   function readBuilder() {
     const src = srcValue();
@@ -3458,7 +3467,7 @@ const Lab = (() => {
     if (s.seed != null && (!Number.isFinite(s.seed) || s.seed < 0)) return "Seed must be a non-negative integer.";
     return null;
   }
-  function writeBuilder(s) {
+  function writeBuilder(s, opt = {}) {
     s = s || {};
     const spec = String(s.voice || "");
     const i = spec.indexOf(":");
@@ -3484,7 +3493,10 @@ const Lab = (() => {
     if (s.temperature != null && s.temperature !== "") { $("b-tempon").checked = true; $("b-temp").value = s.temperature; }
     else $("b-tempon").checked = false;
     syncSource();
-    forkLang = null;   // whatever the builder held, it is these settings now
+    // Whatever the builder held, it is these settings now; only a render of
+    // the forked voice saved as a profile (saveAsProfile) keeps the language target.
+    if (!opt.keepFork) forkLang = null;
+    syncSpec();        // the Save summary names where Save goes
     enPaint();         // no change event fires: the Engines language and "builder's description" follow
   }
   function noteSeed(seed) {
@@ -3613,8 +3625,12 @@ const Lab = (() => {
   }
 
   function saveAsProfile(res) {
-    writeBuilder({...(res.settings || {}), seed: res.seed ?? (res.settings || {}).seed});
-    note("pr-msg", "Builder loaded with this render's settings and seed; name it and save.", "info");
+    // A take of the voice opened from the Transcript stays aimed at that
+    // profile's language table: Save must not quietly replace the base voice.
+    writeBuilder({...(res.settings || {}), seed: res.seed ?? (res.settings || {}).seed}, {keepFork: true});
+    note("pr-msg", forkTarget()
+      ? `Builder loaded with this render's settings and seed. Save puts them in ${forkTarget()}; the base voice is unchanged.`
+      : "Builder loaded with this render's settings and seed; name it and save.", "info");
     $("pr-name").scrollIntoView({block: "center", behavior: "smooth"});
     $("pr-name").focus();
   }
@@ -3993,6 +4009,7 @@ const Lab = (() => {
       if (fs.override) {
         writeBuilder(fs.settings);
         forkLang = {profile: f.profile, lang: fs.override};
+        syncSpec();   // the Save summary shows the language table it now targets
         msg = `Loaded “${f.profile}” with its ${langName(fs.override)} voice ([profiles.${f.profile}.langs.${fs.override}]), which spoke the line. ` +
           `Preview to hear it, then tweak; Save profile keeps the tweak as its ${langName(fs.override)} voice, the base voice unchanged.`;
       } else if (fs.lang && fs.lang !== $("b-lang").value) {
@@ -4401,9 +4418,9 @@ const Lab = (() => {
     }
     return null;
   }
-  function langsBody() {
+  function langsBody(rows = langRows) {
     const out = {};
-    for (const r of langRows) {
+    for (const r of rows) {
       const e = {};
       for (const k of ["voice", "say_voice", "ref_text", "style"]) if (r[k] != null && String(r[k]).trim() !== "") e[k] = String(r[k]).trim();
       if (r.pace != null && r.pace !== "") e.pace = Number(r.pace);
@@ -4485,24 +4502,28 @@ const Lab = (() => {
     if (bad) return note("pr-msg", bad, "err");
     const lp = langProblem();
     if (lp) return note("pr-msg", "Voice per language: " + lp, "err");
+    const desc = $("pr-desc").value.trim();
+    if (desc.length > 300) return note("pr-msg", "Description: at most 300 characters.", "err");
     // The builder holds this profile's voice for one language (Open in voice
-    // lab): the save goes to that language's row; the base voice stays.
-    let folded = null;
+    // lab): the save goes to that language's row; the base voice stays. The
+    // rows are folded into a copy: nothing changes until the save succeeds
+    // (a failed check or a cancelled overwrite leaves the table as it was).
+    let folded = null, rows = langRows;
     const base = forkLang && forkLang.profile === name ? profilesMap()[name] : null;
     if (base) {
       folded = forkLang.lang;
-      let row = langRows.find((r) => r.lang === folded);
-      if (!row) langRows.push(row = {lang: folded});
+      rows = langRows.map((r) => ({...r}));
+      let row = rows.find((r) => r.lang === folded);
+      if (!row) rows.push(row = {lang: folded});
       const style = [s.style, s.mood].filter(Boolean).join(", ");
       row.voice = s.voice;
       if (s.ref_text) row.ref_text = s.ref_text; else delete row.ref_text;
       if (style && style !== (base.style || "")) row.style = style; else delete row.style;
       if (s.pace !== clampPace(base.pace ?? 1)) row.pace = s.pace; else delete row.pace;
       if (s.seed != null && s.seed !== base.seed) row.seed = s.seed; else delete row.seed;
-      langsEdited();
-      paintLangs();
+      // Language tables have no temperature: the base keeps its own.
       s = {...s, voice: base.voice || s.voice, ref_text: base.ref_text || null, lang: base.lang || "auto", pace: clampPace(base.pace ?? 1),
-        style: base.style || null, mood: null, seed: base.seed ?? null};
+        style: base.style || null, mood: null, seed: base.seed ?? null, temperature: base.temperature ?? null};
     }
     const max = parseInt($("pr-max").value, 10);
     const body = {
@@ -4512,12 +4533,10 @@ const Lab = (() => {
       say_voice: $("pr-sayv").value || "", seed: s.seed, temperature: s.temperature,
       overwrite: false,
     };
-    const sendLangs = langRowsEdited || langRowsFor !== null;
-    if (sendLangs) body.langs = langsBody();
+    const sendLangs = folded !== null || langRowsEdited || langRowsFor !== null;
+    if (sendLangs) body.langs = langsBody(rows);
     // description: sent when written; an emptied field clears the one loaded
     // from this profile; otherwise left out, so the server keeps what is there.
-    const desc = $("pr-desc").value.trim();
-    if (desc.length > 300) return note("pr-msg", "Description: at most 300 characters.", "err");
     if (desc) body.description = desc;
     else if (descFor === name) body.description = "";
     $("pr-save").disabled = true;
@@ -4532,6 +4551,7 @@ const Lab = (() => {
         r = await api("POST", "/api/lab/profiles", {...body, overwrite: true});
       }
       if (!r.ok) return note("pr-msg", r.error, "err");
+      if (folded !== null) { langRows = rows; paintLangs(); }
       if (sendLangs) { langRowsFor = name; langRowsEdited = false; }
       descFor = desc ? name : null;
       note("pr-msg", folded ? `Saved “${name}”: the builder’s voice is its ${langName(folded)} voice ([profiles.${name}.langs.${folded}]); the base voice is unchanged. The daemon reloads config.toml automatically.`
@@ -4921,6 +4941,7 @@ const Lab = (() => {
     $("pr-save").addEventListener("click", saveProfile);
     $("pr-addlang").addEventListener("click", () => { $("pr-langfold").open = true; addLang(); });
     $("pr-name").addEventListener("keydown", (e) => { if (e.key === "Enter") saveProfile(); });
+    $("pr-name").addEventListener("input", syncSpec);   // a new name means a new profile: the summary says so
     $("cl-upload").addEventListener("click", doUploadFile);
     $("cl-file").addEventListener("change", () => {
       const f = $("cl-file").files[0];

@@ -163,3 +163,32 @@ def test_wiring():
     save = lab[lab.index("async function saveProfile()"):]
     save = save[:save.index("\n  }\n")]
     assert "forkLang.profile === name" in save and "row.voice = s.voice" in save
+
+
+def test_save_keeps_the_language_target_and_changes_nothing_until_it_succeeds():
+    # PR #3 review: "Save as profile" on a take of the forked voice must keep
+    # aiming at [profiles.x.langs.<lang>] (not quietly replace the base voice),
+    # and a cancelled or invalid save must leave the language rows untouched.
+    text = _text()
+    lab = text[text.index("const Lab = (() => {"):text.index("const Pronounce = (() => {")]
+    wb = lab[lab.index("function writeBuilder(s, opt = {})"):]
+    wb = wb[:wb.index("\n  }\n")]
+    assert "if (!opt.keepFork) forkLang = null;" in wb and "syncSpec();" in wb
+    sap = lab[lab.index("function saveAsProfile(res)"):]
+    sap = sap[:sap.index("\n  }\n")]
+    assert "{keepFork: true}" in sap
+    spec = lab[lab.index("function syncSpec()"):]
+    spec = spec[:spec.index("\n  }\n")]
+    assert "forkTarget()" in spec and "Save as the base voice instead" in spec
+    assert '$("pr-name").addEventListener("input", syncSpec)' in lab
+    save = lab[lab.index("async function saveProfile()"):]
+    save = save[:save.index("\n  }\n")]
+    # validation runs before anything is folded
+    assert save.index("desc.length > 300") < save.index("rows = langRows.map")
+    # the fold works on a copy; the table is replaced only after the POST succeeds
+    assert "rows.push(row = {lang: folded})" in save and "langRows.push" not in save
+    assert "langsBody(rows)" in save
+    ok = save.index('if (!r.ok) return note("pr-msg", r.error, "err");')
+    assert save.index("langRows = rows; paintLangs();") > ok
+    # language tables have no temperature: the base keeps its own
+    assert "temperature: base.temperature ?? null" in save
