@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 license = "MIT"
 dependencies = [
     "fastapi>=0.115",
+    "numpy>=1.26",
     "tomlkit>=0.13",
     "uvicorn>=0.32",
 ]
@@ -17,6 +18,16 @@ afterword = "afterword.cli:main"
 [project.optional-dependencies]
 qwen = [
     "mlx-audio>=0.6.8",
+]
+kokoro = [
+    "mlx-audio>=0.6.8",
+    "en-core-web-sm",
+    "misaki[en,ja,zh]>=0.9.4",
+]
+chatterbox = [
+    "mlx-audio>=0.6.8",
+    "pykakasi>=2.3",
+    "spacy-pkuseg>=1.0",
 ]
 
 [dependency-groups]
@@ -32,6 +43,9 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 module-name = "afterword"
 module-root = ""
+
+[tool.uv.sources]
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

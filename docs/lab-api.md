@@ -37,15 +37,23 @@ A profile's `voice` string picks the source:
     "models": {
       "custom_voice": {"repo": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit", "downloaded": true, "loaded": true, "load_ms": 2100.5, "error": null},
       "base":         {"repo": "...", "downloaded": true, "loaded": false, "load_ms": null, "error": null},
-      "voice_design": {"repo": "...", "downloaded": false, "loaded": false, "load_ms": null, "error": "why the last load failed, or null"}
-    },
+      "voice_design": {"repo": "...", "downloaded": false, "loaded": false, "load_ms": null, "error": "why the last load failed, or null"},
+      "kokoro":       {"label": "Kokoro", "repo": "mlx-community/Kokoro-82M-bf16", "downloaded": true, "loaded": false, "load_ms": null, "error": null},
+      "chatterbox":   {"label": "Chatterbox Multilingual", "repo": "mlx-community/chatterbox-multilingual-v3", "downloaded": true, ...}
+    },                                // every model also has "label"; chatterbox counts as downloaded only with its S3TokenizerV2
     "pull_command": "uv run afterword models pull"
   },
   "speakers": [{"name": "Ryan", "native": "english", "dialect": null},
                {"name": "Eric", "native": "chinese", "dialect": "sichuan"}],   // [] if CustomVoice not downloaded
-  "languages": ["auto", "english", "chinese", "japanese"],               // Qwen names
-  "lang_codes": {"en": "english", "zh": "chinese", "ja": "japanese"},    // ISO -> Qwen name
+  "languages": ["auto", "english", "chinese", "japanese", "hindi"],      // Qwen's, then the other engines' languages
+  "lang_codes": {"en": "english", "zh": "chinese", "hi": "hindi"},       // ISO -> language name (Qwen's names for its own)
   "say_voices": [{"name": "Samantha", "locale": "en_US"}],
+  "kokoro_voices": [{"name": "zf_xiaobei", "lang": "Mandarin Chinese", "lang_code": "zh", "gender": "female"}],  // [] if not downloaded
+  "kokoro_langs": ["en", "es", "fr", "hi", "it", "ja", "pt", "zh"],
+  "chatterbox_langs": ["ar", "da", "de", "...", "zh"],
+  "apple": {"available": true, "error": null},     // the Swift helper can run (built on first use)
+  "apple_voices": [{"id": "com.apple.voice.premium.en-US.Ava", "name": "Ava", "lang": "en-US",
+                    "quality": "premium", "novelty": false, "personal": false}],   // Personal Voice left out
   "clips": [{"name": "me", "url": "/api/lab/clips/me", "duration_s": 6.2, "ref_text": "transcript or empty", "created": 1795480000.0}],
   "profiles": {
     "nova": {"voice": "builtin:Serena", "ref_text": "", "lang": "en", "pace": 1.0, "style": "calm, slightly wry",
@@ -83,7 +91,7 @@ Response 200:
 ```json
 {"id": "p17", "url": "/api/lab/previews/p17.wav", "text": "Hello there.",
  "spoken_text": null, "skip_pronounce": false, "pronounce_profile": null,
- "backend": "qwen", "model": "custom_voice",
+ "backend": "qwen", "model": "custom_voice",   // backend: qwen | kokoro | chatterbox | apple | say
  "synth_ms": 812.3, "load_ms": 0.0, "audio_s": 2.41, "rtf": 0.34,
  "f0_hz": 142.5, "f0_spread_hz": 61.0,
  "pace": 1.1, "seed": 1234,
@@ -181,7 +189,7 @@ discarded; stars are kept).
 ```
 `settings` takes the fields of `POST /api/lab/preview` (with `text`, without
 `seed`: 400). `start_seed` 0-2147483647 (default 1), `ahead` 1-20 (default
-4). `say:` voices are refused (no seed). The voice is checked before the
+4). `say:`, `apple:` and `kokoro:` voices are refused (no seed). The voice is checked before the
 old exploration is replaced: a missing clone clip is a 404 and a model that
 is not downloaded (or no mlx-audio) a 503, and the old exploration stays.
 Response: the same as `GET`.

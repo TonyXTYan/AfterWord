@@ -1,5 +1,9 @@
-"""Qwen3-TTS through mlx-audio: one engine thread, models loaded on first use
-and kept warm.
+"""Local TTS models through mlx-audio: one engine thread, models loaded on
+first use and kept warm.
+
+Model kinds: the three Qwen3-TTS variants (custom_voice, base, voice_design),
+Kokoro-82M (kokoro) and Chatterbox Multilingual (chatterbox). The module
+keeps its v1 name; QwenEngine hosts every kind.
 
 All MLX work (loading, rendering) runs on a single dedicated thread, so the
 asyncio loop never blocks and MLX state is only touched from one thread. The
@@ -25,6 +29,7 @@ import logging
 import math
 import queue
 import random
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -36,12 +41,28 @@ from . import voices
 
 log = logging.getLogger("afterword.qwen")
 
-MODEL_KINDS = ("custom_voice", "base", "voice_design")
+QWEN_KINDS = ("custom_voice", "base", "voice_design")
+MODEL_KINDS = QWEN_KINDS + ("kokoro", "chatterbox")
 DEFAULT_REPOS = {
     "custom_voice": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
     "base": "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit",
     "voice_design": "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit",
+    "kokoro": "mlx-community/Kokoro-82M-bf16",
+    "chatterbox": "mlx-community/chatterbox-multilingual-v3",
 }
+LABELS = {
+    "custom_voice": "Qwen3-TTS CustomVoice",
+    "base": "Qwen3-TTS Base",
+    "voice_design": "Qwen3-TTS VoiceDesign",
+    "kokoro": "Kokoro",
+    "chatterbox": "Chatterbox Multilingual",
+}
+# Other repos a kind loads from at load time (pulled with it).
+EXTRA_REPOS = {"chatterbox": ("mlx-community/S3TokenizerV2",)}
+# Small models that do not count against keep_loaded (Kokoro is ~0.4 GB).
+LIGHT_KINDS = ("kokoro",)
+# mlx-audio model_type when the snapshot's config.json does not name it.
+MODEL_TYPES = {"kokoro": "kokoro"}
 PULL_COMMAND = "uv run afterword models pull"
 MAX_PENDING = 4
 WARMUP_TEXT = "Ready."
@@ -58,6 +79,14 @@ TOKENS_PER_SECOND = 12.5
 SECONDS_BASE = 8.0
 SECONDS_PER_CHAR = 0.25
 
+# Chatterbox emits 25 speech tokens per second of audio, at most 1000 per
+# call (about 40 s), and does not say when it stopped at the cap. Longer
+# text is rendered in pieces of at most CHATTERBOX_PIECE_S estimated seconds
+# (split at sentences, then clauses), so no piece comes near the cap.
+CHATTERBOX_TOKENS_PER_SECOND = 25.0
+CHATTERBOX_MAX_TOKENS = 1000
+CHATTERBOX_PIECE_S = 20.0
+
 # Files the mlx-audio loader needs, relative to the snapshot root.
 REQUIRED_FILES = (
     "config.json",
@@ -67,6 +96,82 @@ REQUIRED_FILES = (
     "speech_tokenizer/config.json",
     "speech_tokenizer/model.safetensors",
 )
+REQUIRED_FILES_FOR = {
+    "kokoro": ("config.json", "voices/af_heart.safetensors"),
+    "chatterbox": ("config.json", "tokenizer.json", "model.safetensors"),
+    "mlx-community/S3TokenizerV2": ("config.json", "model.safetensors"),
+}
+# Sentence ends: Kokoro renders (and so streams) one sentence at a time.
+SENTENCE_SPLIT = r"(?<=[.!?。！？])\s+|(?<=[。！？])"
+
+
+_CJK_RE = re.compile(r"[぀-ヿ㐀-鿿가-힯豈-﫿]")
+# Cut points (a piece keeps its trailing whitespace, so the pieces join back
+# to the exact text). ASCII marks count only before whitespace, so 3.14,
+# $12.50 and example.com stay whole; CJK marks need no space after them.
+_SENTENCE_CUT_RE = re.compile(r"[.!?]+[\"')\]]*\s+|[。！？]+[」』）\"]*\s*")
+_CLAUSE_CUT_RE = re.compile(r"[,;:]\s+|[，、；：]\s*")
+_WORD_RE = re.compile(r"\S+\s*|\s+")
+
+
+def speech_seconds(text: str) -> float:
+    """A rough spoken length: about 0.25 s per CJK character, 0.07 s per
+    other character (generous for both)."""
+    cjk = len(_CJK_RE.findall(text))
+    return 0.25 * cjk + 0.07 * (len(text) - cjk)
+
+
+def _cut(text: str, pattern: re.Pattern) -> list[str]:
+    out, start = [], 0
+    for m in pattern.finditer(text):
+        if m.end() > start:
+            out.append(text[start:m.end()])
+            start = m.end()
+    if start < len(text):
+        out.append(text[start:])
+    return out
+
+
+def split_by_duration(text: str, max_s: float) -> list[str]:
+    """`text` in pieces of at most `max_s` estimated seconds: whole
+    sentences where they fit, else clauses, else words (or characters).
+    Nothing is added or changed: the pieces joined are the text again
+    (before each piece's outer whitespace is trimmed)."""
+    text = text.strip()
+    if not text or speech_seconds(text) <= max_s:
+        return [text] if text else []
+
+    def units(part: str, level: int) -> list[str]:
+        if speech_seconds(part) <= max_s:
+            return [part]
+        if level == 0:
+            pieces = _cut(part, _SENTENCE_CUT_RE)
+        elif level == 1:
+            pieces = _cut(part, _CLAUSE_CUT_RE)
+        elif level == 2:
+            pieces = _WORD_RE.findall(part)
+        else:
+            per = max(1, int(max_s / 0.25))
+            return [part[i:i + per] for i in range(0, len(part), per)]
+        if len(pieces) <= 1:
+            return units(part, level + 1)
+        return [u for x in pieces for u in units(x, level + 1)]
+
+    out: list[str] = []
+    for unit in units(text, 0):
+        if out and speech_seconds((out[-1] + unit).strip()) <= max_s:
+            out[-1] += unit
+        else:
+            out.append(unit)
+    return [o.strip() for o in out if o.strip()]
+
+
+def required_files(kind_or_repo: str | None) -> tuple[str, ...]:
+    return REQUIRED_FILES_FOR.get(kind_or_repo or "", REQUIRED_FILES)
+
+
+def label(kind: str) -> str:
+    return LABELS.get(kind, kind)
 
 
 class EngineUnavailable(RuntimeError):
@@ -118,10 +223,10 @@ def mlx_audio_available() -> tuple[bool, str | None]:
     return True, None
 
 
-def snapshot_complete(path: Path) -> bool:
+def snapshot_complete(path: Path, required: tuple[str, ...] = REQUIRED_FILES) -> bool:
     """True if every file the loader needs is present (an interrupted
     download leaves a snapshot folder that is not)."""
-    if not all((path / rel).is_file() for rel in REQUIRED_FILES):
+    if not all((path / rel).is_file() for rel in required):
         return False
     index = path / "model.safetensors.index.json"
     if index.is_file():
@@ -133,7 +238,7 @@ def snapshot_complete(path: Path) -> bool:
     return any(path.glob("*.safetensors"))
 
 
-def local_snapshot(repo: str) -> Path | None:
+def local_snapshot(repo: str, required: tuple[str, ...] = REQUIRED_FILES) -> Path | None:
     """Path of a complete cached model snapshot, or None. Never downloads."""
     try:
         from huggingface_hub import snapshot_download
@@ -142,12 +247,17 @@ def local_snapshot(repo: str) -> Path | None:
     try:
         path = Path(snapshot_download(repo, local_files_only=True))
     except Exception:
-        return None
-    return path if snapshot_complete(path) else None
+        # A repo fetched with allow_patterns (mlx-audio does this for
+        # companion repos) is a partial snapshot: look for the files we need.
+        try:
+            path = Path(snapshot_download(repo, local_files_only=True, allow_patterns=list(required)))
+        except Exception:
+            return None
+    return path if snapshot_complete(path, required) else None
 
 
-def max_tokens_for(text: str) -> int:
-    return int(TOKENS_PER_SECOND * (SECONDS_BASE + SECONDS_PER_CHAR * len(text)))
+def max_tokens_for(text: str, per_second: float = TOKENS_PER_SECOND) -> int:
+    return int(per_second * (SECONDS_BASE + SECONDS_PER_CHAR * len(text)))
 
 
 @dataclass
@@ -160,6 +270,7 @@ class RenderRequest:
     ref_text: str | None = None
     seed: int | None = None
     temperature: float | None = None
+    lang: str | None = None  # ISO code of the line (Kokoro, Chatterbox), None = auto
 
 
 @dataclass
@@ -168,7 +279,7 @@ class RenderResult:
     sample_rate: int
     synth_s: float
     load_s: float
-    seed: int
+    seed: int | None
     model: str
     first_chunk_s: float | None = None  # generation start to the first chunk
 
@@ -213,6 +324,7 @@ class QwenEngine:
         self._stopping = False
         self._last_load_ms: dict[str, float] = {}
         self._errors: dict[str, str] = {}
+        self._conds: OrderedDict[tuple, Any] = OrderedDict()  # Chatterbox voice conditionals, per clip
         self._thread = threading.Thread(target=self._run, name="qwen", daemon=True)
         self._thread.start()
 
@@ -249,7 +361,15 @@ class QwenEngine:
 
     def _snapshot(self, repo: str) -> Path | None:
         """Seam: where a repo's complete snapshot is (tests replace it)."""
-        return local_snapshot(repo)
+        kind = next((k for k, r in self.repos.items() if r == repo), None)
+        return local_snapshot(repo, required_files(kind))
+
+    def _extra_snapshot(self, repo: str) -> Path | None:
+        """Seam: a companion repo's snapshot (EXTRA_REPOS)."""
+        return local_snapshot(repo, required_files(repo))
+
+    def _missing_extras(self, kind: str) -> list[str]:
+        return [r for r in EXTRA_REPOS.get(kind, ()) if self._extra_snapshot(r) is None]
 
     def status(self) -> dict[str, Any]:
         available, error = mlx_audio_available()
@@ -258,8 +378,9 @@ class QwenEngine:
         for kind in MODEL_KINDS:
             loaded = loaded_now.get(kind)
             models[kind] = {
+                "label": label(kind),
                 "repo": self.repos[kind],
-                "downloaded": self.snapshot_path(kind) is not None,
+                "downloaded": self.snapshot_path(kind) is not None and not self._missing_extras(kind),
                 "loaded": loaded is not None,
                 "load_ms": loaded.load_ms if loaded else self._last_load_ms.get(kind),
                 "error": self._errors.get(kind),
@@ -334,9 +455,10 @@ class QwenEngine:
         if not available:
             raise EngineUnavailable(error)
         repo = self.repos[kind]
-        if self._snapshot(repo) is None:
+        missing = ([repo] if self._snapshot(repo) is None else []) + self._missing_extras(kind)
+        if missing:
             raise ModelNotDownloaded(
-                f"Qwen3-TTS model {repo} is not downloaded (or the download is incomplete); "
+                f"{label(kind)} model {', '.join(missing)} is not downloaded (or the download is incomplete); "
                 f"run `{PULL_COMMAND} {kind}`"
             )
 
@@ -470,8 +592,16 @@ class QwenEngine:
         for kind in list(self._models):
             if self._models[kind].repo != self.repos[kind]:
                 self._unload(kind)
-        while len(self._models) > self.keep_loaded:
-            self._unload(next(iter(self._models)))
+        while self._heavy_count() > self.keep_loaded:
+            self._unload(self._oldest_heavy())
+
+    def _heavy_count(self, extra: str | None = None) -> int:
+        """Loaded models counted against keep_loaded (LIGHT_KINDS are not)."""
+        kinds = list(self._models) + ([extra] if extra else [])
+        return sum(1 for k in kinds if k not in LIGHT_KINDS)
+
+    def _oldest_heavy(self) -> str:
+        return next(k for k in self._models if k not in LIGHT_KINDS)
 
     def _ensure(self, kind: str) -> tuple[Any, float]:
         repo = self.repos[kind]
@@ -483,8 +613,8 @@ class QwenEngine:
             self._unload(kind)  # config now points at another repo
         self.check_ready(kind)
         path = self._snapshot(repo)
-        while len(self._models) >= self.keep_loaded:
-            self._unload(next(iter(self._models)))
+        while kind not in LIGHT_KINDS and self._heavy_count(kind) > self.keep_loaded:
+            self._unload(self._oldest_heavy())
         t = time.perf_counter()
         try:
             model = self._load_model(kind, path)
@@ -502,7 +632,8 @@ class QwenEngine:
         """Load and warm one model. The seam tests replace."""
         from mlx_audio.tts.utils import load_model
 
-        model = load_model(path)
+        model_type = MODEL_TYPES.get(kind)
+        model = load_model(Path(path), **({"model_type": model_type} if model_type else {}))
         self._warmup(kind, model)
         return model
 
@@ -511,9 +642,13 @@ class QwenEngine:
         """One tiny render so the first real one does not pay for kernel
         compilation (about 5 s on first use). A failure here means the model
         cannot render (e.g. missing speech tokenizer), so it fails the load."""
-        if kind == "base":
+        if kind in ("base", "chatterbox"):
             return  # needs a reference clip; the first clone render warms it
-        if kind == "custom_voice":
+        if kind == "kokoro":
+            # Builds the English pipeline (spaCy and the lexicon load once
+            # per process); other languages' pipelines are built on first use.
+            gen = model.generate(text=WARMUP_TEXT, voice="af_heart", lang_code="a", verbose=False)
+        elif kind == "custom_voice":
             speaker = (model.get_supported_speakers() or ["ryan"])[0]
             gen = model.generate_custom_voice(text=WARMUP_TEXT, speaker=speaker, language="english", max_tokens=64)
         else:
@@ -528,6 +663,8 @@ class QwenEngine:
         if loaded is None:
             return
         del loaded
+        if kind == "chatterbox":
+            self._conds.clear()
         try:
             import gc
 
@@ -546,11 +683,9 @@ class QwenEngine:
         stream: bool = False,
         cancel_event: Any = None,
     ) -> RenderResult:
-        import numpy as np
-
         kind = req.voice.model
         if kind is None:
-            raise ValueError(f"{req.voice} is not a Qwen voice")
+            raise ValueError(f"{req.voice} is not a local model voice")
         model, load_s = self._ensure(kind)
 
         import mlx.core as mx
@@ -558,6 +693,63 @@ class QwenEngine:
         seed = req.seed if req.seed is not None else random.randrange(0, 2**31 - 1)
         mx.random.seed(seed)
         t = time.perf_counter()
+        if kind == "kokoro":
+            gen = self._kokoro_generate(model, req)
+        elif kind == "chatterbox":
+            gen = self._chatterbox_generate(model, req, stream)
+        else:
+            gen = self._qwen_generate(model, req, stream)
+        if req.voice.kind not in voices.SEEDED_KINDS:
+            seed = None  # deterministic: no seed to record or reuse
+        return self._collect(gen, model, kind, t, load_s, seed, on_chunk, cancel_event)
+
+    def _kokoro_generate(self, model, req: RenderRequest):
+        voice = req.voice.value
+        return model.generate(
+            text=req.text, voice=voice, speed=1.0, lang_code=voices.kokoro_lang(voice, req.lang),
+            split_pattern=SENTENCE_SPLIT, verbose=False,
+        )
+
+    def _chatterbox_conds(self, model, ref_audio: Path):
+        """The clip's conditioning, computed once per clip file (it is the
+        slow part of a short line)."""
+        st = Path(ref_audio).stat()
+        key = (str(ref_audio), st.st_mtime_ns, st.st_size)
+        conds = self._conds.get(key)
+        if conds is None:
+            conds = model.prepare_conditionals(str(ref_audio), int(model.sample_rate))
+            self._conds[key] = conds
+            while len(self._conds) > 8:
+                self._conds.popitem(last=False)
+        else:
+            self._conds.move_to_end(key)
+        return conds
+
+    def _chatterbox_generate(self, model, req: RenderRequest, stream: bool):
+        """One generator over the text's pieces (split_by_duration), each a
+        Chatterbox call with a token budget well inside its cap."""
+        if req.ref_audio is None:
+            raise voices.VoiceError(f"{req.voice} needs a reference clip")
+        lang = voices.chatterbox_lang(req.lang)
+        conds = self._chatterbox_conds(model, req.ref_audio)
+        pieces = split_by_duration(req.text, CHATTERBOX_PIECE_S) or [req.text]
+
+        def gen():
+            for piece in pieces:
+                budget = CHATTERBOX_TOKENS_PER_SECOND * (SECONDS_BASE + 2.0 * speech_seconds(piece))
+                kw: dict[str, Any] = dict(
+                    text=piece, lang_code=lang, conds=conds,
+                    max_new_tokens=int(min(CHATTERBOX_MAX_TOKENS, budget)), verbose=False,
+                )
+                if req.temperature is not None:
+                    kw["temperature"] = req.temperature
+                if stream:
+                    kw.update(stream=True, streaming_interval=STREAMING_INTERVAL)
+                yield from model.generate(**kw)
+
+        return gen()
+
+    def _qwen_generate(self, model, req: RenderRequest, stream: bool):
         max_tokens = max_tokens_for(req.text)
         common = dict(text=req.text, language=req.language, temperature=req.temperature, max_tokens=max_tokens)
         if stream:
@@ -584,6 +776,14 @@ class QwenEngine:
                 split_pattern="",
                 **({"stream": True, "streaming_interval": STREAMING_INTERVAL} if stream else {}),
             )
+        return gen
+
+    def _collect(self, gen, model, kind: str, t: float, load_s: float, seed: int,
+                 on_chunk: Callable[[Any, int], None] | None, cancel_event: Any) -> RenderResult:
+        """Run a model's generator: chunks to `on_chunk` as they come, the
+        cancel event checked at each, timings kept on failure."""
+        import numpy as np
+
         sample_rate = int(model.sample_rate)
         chunks = []
         first_chunk_s = None
@@ -616,7 +816,7 @@ class QwenEngine:
         audio = np.concatenate(chunks) if chunks else np.zeros(0, dtype=np.float32)
         synth_s = time.perf_counter() - t
         if audio.size == 0:
-            raise RuntimeError("Qwen3-TTS returned no audio")
+            raise RuntimeError(f"{label(kind)} returned no audio")
         return RenderResult(audio, sample_rate, synth_s, load_s, seed, kind, first_chunk_s)
 
 
@@ -633,8 +833,8 @@ def build_request(
     temperature: float | None,
 ) -> RenderRequest:
     """Turn profile-level settings into a render request. Style and mood
-    only apply to builtin and design voices (the Base model has no
-    instruction input)."""
+    only apply to builtin and design voices (the Base model, Kokoro and
+    Chatterbox have no instruction input)."""
     language = voices.language_name(lang)
     ref_audio = None
     instruct = None
@@ -645,6 +845,12 @@ def build_request(
     elif voice.kind == "clone":
         ref_audio, saved = clips.resolve(voice.value)
         ref_text = ref_text or saved or None
+    elif voice.kind == "chatterbox":
+        ref_audio, _ = clips.resolve(voice.value)
+        ref_text = None  # Chatterbox needs no transcript
+    elif voice.kind == "kokoro":
+        voices.kokoro_lang(voice.value, lang)  # an unsupported language fails now
+        ref_text = None
     return RenderRequest(
         text=text,
         voice=voice,
@@ -654,6 +860,7 @@ def build_request(
         ref_text=ref_text,
         seed=seed,
         temperature=temperature,
+        lang=voices.lang_iso(lang),
     )
 
 

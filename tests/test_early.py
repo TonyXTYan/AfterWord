@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from afterword.hooks import tags
-from conftest import HOOK, hook_log, run_hook, stop_payload, wait_for
+from conftest import TIME_SCALE, HOOK, hook_log, run_hook, stop_payload, wait_for
 from test_daemon import RunningDaemon
 from test_hook import SYSTEM_PYTHON, FakeDaemon, assert_clean_exit
 
@@ -613,4 +613,4 @@ def test_message_display_is_fast(aw_home, daemon):
     no_say = best(md_payload(0, "plain line\n" * 200, final=True))
     full = min(best(md_payload(0, "<say>Line %d.</say>\n" % i, final=True, message="F%d" % i), n=1) for i in range(5))
     print("MessageDisplay in-hook: voice off %.1f ms, no <say> %.1f ms, early say %.1f ms" % (off, no_say, full))
-    assert off < 15 and no_say < 20 and full < 60
+    assert off < 15 * TIME_SCALE and no_say < 20 * TIME_SCALE and full < 60 * TIME_SCALE

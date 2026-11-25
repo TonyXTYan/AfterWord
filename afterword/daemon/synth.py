@@ -5,9 +5,11 @@ afplay) or stream it (`stream`): 24 kHz mono float32 chunks handed to a sink
 as they are made, for the streaming player. Both are blocking and run in a
 worker thread by the server.
 
-- qwen: Qwen3-TTS through mlx-audio (see qwen.py). Pace is applied at
-  playback (`playback_rate` for afplay, the WSOLA stretch when streaming),
-  because the model has no speed control.
+- qwen: the local models through mlx-audio (see qwen.py): Qwen3-TTS,
+  Kokoro and Chatterbox, picked by each voice's prefix; `apple:` voices go
+  to apple.py and `say:` voices to `say`. Pace is applied at playback
+  (`playback_rate` for afplay, the WSOLA stretch when streaming), the same
+  for every model (Qwen3-TTS has no speed control).
 - say:  macOS `say`. Pace is applied while rendering for afplay; when
   streaming it renders at 1.0 (the stream's stretch applies pace), and the
   WAV is decoded with miniaudio and resampled to 24 kHz.
@@ -223,7 +225,8 @@ class NullSynth:
 
 
 class QwenSynth:
-    """Qwen3-TTS via the shared QwenEngine."""
+    """The local models via the shared QwenEngine (Qwen3-TTS, Kokoro,
+    Chatterbox); `apple:` and `say:` voices are handed to their backends."""
 
     name = "qwen"
 
@@ -254,6 +257,10 @@ class QwenSynth:
             from dataclasses import replace
 
             return SaySynth().synth(text, replace(profile, say_voice=spec.value), attrs, out)
+        if spec.kind == "apple":
+            from .apple import AppleSynth
+
+            return AppleSynth().synth(text, profile, attrs, out)
         req = self._request(text, profile, attrs, spec)
         # The playback queue is never refused, and runs before lab work.
         result = self.engine.render(req, limit=False, priority=qwen.LIVE)
@@ -261,7 +268,7 @@ class QwenSynth:
         pace = float(attrs.get("pace") or profile.pace or 1.0)
         return SynthResult(
             out, duration, result.synth_s, result.sample_rate,
-            playback_rate=pace, load_s=result.load_s, seed=result.seed, model=result.model, backend="qwen",
+            playback_rate=pace, load_s=result.load_s, seed=result.seed, model=result.model, backend=spec.backend,
         )
 
     def stream(self, text, profile, attrs, sink, cancel=None) -> StreamResult:
@@ -269,17 +276,27 @@ class QwenSynth:
         as the model yields them. Skip/stop sets `cancel`: a queued job is
         dropped, a running one stops at its next chunk."""
         from . import qwen, voices
-        from .stream import resample
+        from .stream import StreamResampler
 
         spec = voices.parse_voice(profile.voice)
         if spec.kind == "say":
             from dataclasses import replace
 
             return SaySynth().stream(text, replace(profile, say_voice=spec.value), attrs, sink, cancel)
+        if spec.kind == "apple":
+            from .apple import AppleSynth
+
+            return AppleSynth().stream(text, profile, attrs, sink, cancel)
         req = self._request(text, profile, attrs, spec)
+        resamplers: dict[int, StreamResampler] = {}
 
         def on_chunk(audio, rate):
-            sink(audio if rate == STREAM_RATE else resample(audio, rate))
+            if rate == STREAM_RATE:
+                sink(audio)
+                return
+            out = resamplers.setdefault(rate, StreamResampler(rate)).feed(audio)
+            if out.size:
+                sink(out)
 
         future = self.engine.submit_render(
             req, limit=False, priority=qwen.LIVE, cancel=cancel, on_chunk=on_chunk, stream=True
@@ -289,16 +306,16 @@ class QwenSynth:
         except Exception as exc:
             part = getattr(exc, "partial", None)
             if isinstance(part, qwen.RenderResult):  # cancelled or failed part-way
-                qwen.attach_partial(exc, self._stream_result(part))
+                qwen.attach_partial(exc, self._stream_result(part, spec.backend))
             raise
-        return self._stream_result(result)
+        return self._stream_result(result, spec.backend)
 
     @staticmethod
-    def _stream_result(result) -> StreamResult:
+    def _stream_result(result, backend: str = "qwen") -> StreamResult:
         return StreamResult(
             synth_s=result.synth_s, audio_s=result.audio.size / result.sample_rate,
             first_chunk_s=result.first_chunk_s, load_s=result.load_s, seed=result.seed,
-            model=result.model, backend="qwen",
+            model=result.model, backend=backend,
         )
 
 

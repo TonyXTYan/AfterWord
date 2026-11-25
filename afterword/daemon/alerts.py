@@ -392,9 +392,9 @@ Runner = Callable[[list, float], "subprocess.CompletedProcess"]
 
 
 def language_name(code: str) -> str:
-    from .voices import ISO_TO_QWEN
+    from .voices import LANGUAGE_NAMES
 
-    return ISO_TO_QWEN.get(code, "english").capitalize()
+    return LANGUAGE_NAMES.get(code, "English")
 
 
 def build_prompt(profile: Profile, lang: str, count: int, persona: str | None = None) -> str:

@@ -18,6 +18,7 @@ from afterword.daemon import lab as labmod
 from afterword.daemon import qwen, voices
 from afterword.daemon.config import ConfigStore, Profile, build_config
 from afterword.daemon.lab import Lab, LabError, delete_profile, write_profile
+from conftest import TIME_SCALE
 
 SR = 24000
 
@@ -300,7 +301,7 @@ def test_engine_shutdown_cancels_queue_and_never_blocks_exit(home):
     queued = eng._submit(lambda: "never")
     t = time.time()
     eng.shutdown()
-    assert time.time() - t < 0.5
+    assert time.time() - t < 0.5 * TIME_SCALE
     assert queued.cancelled()
     assert eng._thread.daemon  # a stuck render cannot keep the process alive
     with pytest.raises(qwen.EngineStopped):
@@ -358,7 +359,7 @@ def test_engine_refuses_when_too_many_pending(home):
 
 
 def test_real_engine_reports_missing_download(monkeypatch):
-    monkeypatch.setattr(qwen, "local_snapshot", lambda repo: None)
+    monkeypatch.setattr(qwen, "local_snapshot", lambda repo, *a: None)
     monkeypatch.setattr(qwen, "mlx_audio_available", lambda: (True, None))
     eng = qwen.QwenEngine()
     status = eng.status()

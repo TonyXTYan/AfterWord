@@ -1,6 +1,7 @@
 # AfterWord
 
-Spoken replies for Claude Code (and Codex), with local Qwen3-TTS on Apple Silicon.
+Spoken replies for Claude Code (and Codex), with local TTS on Apple Silicon:
+Qwen3-TTS, Kokoro, Chatterbox Multilingual, or Apple's own voices.
 Speech is **off by default**, **set per session**, and **triggered only by a tag**
 in Claude's reply. See [DESIGN.md](DESIGN.md) (v1) and
 [docs/design-v2.md](docs/design-v2.md) (pronunciations, a voice per language,
@@ -15,8 +16,10 @@ Qwen3-TTS through mlx-audio), the voice command, the Claude Code plugin, and the
 (log, sessions, queue, history, voice lab, config). The v2 features of
 [docs/design-v2.md](docs/design-v2.md) are built too: pronunciations, a voice
 per language with several `<say>` blocks per reply, streaming playback and
-early speaking, spoken alerts, and the seed explorer. Not built: the optional
-menu-bar icon.
+early speaking, spoken alerts, and the seed explorer. More engines (see
+[docs/research-v3.md](docs/research-v3.md)): Kokoro, Chatterbox Multilingual
+and Apple voices next to Qwen3-TTS, mixed freely per profile and language.
+Not built: the optional menu-bar icon.
 
 ## How it works
 
@@ -69,6 +72,23 @@ That downloads the three Qwen3-TTS 1.7B 8-bit models (about 3.1 GB each) into
 the Hugging Face cache. `uv run afterword models list` shows what is there;
 pull only `custom_voice` if you only want the built-in speakers.
 
+The other engines are optional:
+
+```bash
+uv sync --extra qwen --extra kokoro --extra chatterbox
+```
+
+```bash
+uv run afterword models pull kokoro chatterbox
+```
+
+Kokoro is about 0.4 GB. Its Japanese text handling needs the UniDic
+dictionary, one time (about 0.5 GB): `uv run python -m unidic download`.
+Chatterbox Multilingual is about 2.7 GB, plus its speech tokenizer. Apple
+voices need nothing extra: a small Swift helper is compiled on first use
+(Xcode command line tools). For better Apple voices, download Premium or
+Enhanced ones in System Settings → Accessibility → Spoken Content.
+
 ```bash
 uv run afterword serve
 ```
@@ -100,7 +120,28 @@ say_voice = "Samantha"       # macOS voice used if Qwen3-TTS is unavailable
 | `builtin:<Speaker>` | CustomVoice | Serena, Vivian, Uncle_Fu, Dylan, Eric, Ryan, Aiden, Ono_Anna, Sohee; follows `style` and `mood` |
 | `clone:<clip>` | Base | clones `~/.afterword/voices/<clip>.wav`; `clone:~/path.wav` also works |
 | `design:<description>` | VoiceDesign | a voice described in words; can drift between lines, so freeze one into a clip for a stable voice |
+| `kokoro:<voice>` | Kokoro-82M | 54 preset voices, e.g. `af_heart`, `bm_george`, `zf_xiaobei`, `jf_alpha`; the first letter is the language (a/b English, z Chinese, j Japanese, e/f/h/i/p Spanish, French, Hindi, Italian, Portuguese); `af_heart,af_bella` averages two. Small and fast (first audio well under a second), no seed, no Korean |
+| `chatterbox:<clip>` | Chatterbox Multilingual | clones a clip like `clone:` (same clips, no transcript needed) in 23 languages incl. Chinese, Japanese, Korean |
+| `apple:<voice>` | Apple speech | a voice name (`apple:Ava`, `apple:Ava (Premium)`) or identifier; `apple:` alone picks the best installed voice for the line's language. No model download |
 | `say:<MacVoice>` | macOS `say` | no model needed |
+
+Style and mood only apply to `builtin:` and `design:` voices. `pace` is
+applied at playback for every engine. Engines can be mixed, for example
+Kokoro for English and a Chatterbox clone for Chinese:
+
+```toml
+[profiles.mix]
+voice = "kokoro:af_heart"
+lang = "en"
+
+[profiles.mix.langs.zh]
+voice = "chatterbox:tutor-zh"
+```
+
+When a model voice fails (not downloaded, a language the engine cannot
+speak, …), the line is spoken with the best Apple voice for its language,
+then `say` (`[daemon] model_fallback = "apple" | "say" | "none"`); the event
+log records why.
 
 One voice speaks every language, so the accent stays the same, unless you
 give a language a voice of its own:
@@ -445,8 +486,17 @@ disables the `say` fallback; `AFTERWORD_DISABLE=1` makes the hook a no-op;
 ## Development
 
 ```bash
+uv sync --extra qwen
+```
+
+```bash
 uv run pytest -q
 ```
+
+The tests fake every model, so they need mlx-audio (the `qwen` extra) but no
+weights and none of the other extras. CI (`.github/workflows/tests.yml`) runs
+the same thing on an Apple Silicon macOS runner for every pull request and
+push to `main`.
 
 Tests that need the real models are skipped unless you opt in:
 

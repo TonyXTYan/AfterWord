@@ -21,12 +21,14 @@ from afterword import __version__
 from afterword.hooks import common, scriptsplit, tags
 
 from . import alerts as alerting
+from . import apple
 from .config import ConfigStore, Profile, lang_code
 from .log import EventLog, ingest_spool, setup_text_logging
 from .player import make_player
 from .queue import PlaybackQueue, QueueItem
 from .lab import Lab
 from .qwen import LIVE as QWEN_LIVE, EngineStopped, QwenEngine, RenderCancelled, mlx_audio_available
+from .qwen import label as model_label
 from .stream import SAMPLE_RATE, PlayerUnavailable, clamp_pace, make_stream_player
 from .synth import SaySynth, make_synth, partial_result
 from .voices import MODEL_FOR_KIND, ClipStore, VoiceError, parse_voice, write_wav
@@ -45,6 +47,14 @@ MAX_SAYS = 8  # <say> blocks accepted per hook message (the hook sends at most t
 MAX_ITEM_SEGMENTS = 16  # rendered segments per item; the rest joins the last one
 EARLY_TURNS_KEEP = 256  # turns whose early-spoken blocks are remembered
 EARLY_TURN_TTL_S = 3600.0
+
+
+def _voice_backend(voice: str | None) -> str | None:
+    """The engine family of a voice spec ("qwen", "kokoro", "apple", ...)."""
+    try:
+        return parse_voice(voice).backend
+    except VoiceError:
+        return None
 
 
 @dataclass
@@ -660,11 +670,13 @@ class Daemon:
         return self.synth.name == "qwen" and (self.queue.now_playing is not None or len(self.queue) > 0)
 
     def _make_synth(self, name: str):
+        # "qwen" stays the prefix-aware synth even without mlx-audio: apple:
+        # and say: voices still work, and a model voice fails its render (the
+        # engine reports why), so [daemon] model_fallback decides what speaks.
         if name == "qwen" and not os.environ.get("AFTERWORD_SYNTH"):
             ok, error = mlx_audio_available()
             if not ok:
-                log.warning("%s; using say", error)
-                name = "say"
+                log.warning("%s; model voices will use the fallback", error)
         try:
             return make_synth(name, engine=self.engine, clips=self.voice_clips)
         except ValueError as exc:
@@ -716,10 +728,44 @@ class Daemon:
             self._stream_logged.add(why)
             log.warning("streaming playback unavailable (%s); playing whole clips with afplay", why)
 
+    def _fallbacks(self, profile: Profile) -> list[tuple[str, Any]]:
+        """What speaks a line whose model voice failed ([daemon]
+        model_fallback): the best Apple voice for its language, then `say`."""
+        mode = self.store.get().daemon.model_fallback
+        if mode == "none":
+            return []
+        out: list[tuple[str, Any]] = []
+        if mode == "apple" and _voice_backend(profile.voice) != "apple" and apple.available()[0]:
+            out.append(("apple", apple.AppleSynth(auto_voice=True)))
+        out.append(("say", SaySynth()))
+        return out
+
+    def _with_fallback(self, exc: Exception, profile: Profile, run, can_retry):
+        """After a failed model render: try each fallback in turn (`run(synth)`),
+        while `can_retry()` (nothing heard yet, not cancelled). Returns
+        (result, note) or raises the first error."""
+        failed = _voice_backend(profile.voice) or "qwen"
+        reason = f"{type(exc).__name__}: {exc}"
+        for name, synth in self._fallbacks(profile):
+            if not can_retry():
+                break
+            try:
+                result = run(synth)
+            except Exception as exc2:
+                if not can_retry():
+                    raise  # it was heard, or cancelled: its own error (and partial timings) stand
+                log.warning("fallback %s failed too: %s", name, exc2)
+                continue
+            note = f"{failed} failed ({reason}); spoke with {name}"
+            log.warning("%s", note)
+            return result, note
+        raise exc
+
     def _synthesize(self, text, profile, attrs, out):
-        """Render with the configured backend. If Qwen3-TTS fails (model not
-        downloaded, bad voice spec, …) fall back to `say` so the line is
-        still heard; the reason is recorded on the event."""
+        """Render with the configured backend. If a model voice fails (model
+        not downloaded, bad voice spec, …) fall back ([daemon]
+        model_fallback: an Apple voice, then `say`) so the line is still
+        heard; the reason is recorded on the event."""
         try:
             return self.synth.synth(text, profile, attrs, out), None
         except Exception as exc:
@@ -727,9 +773,8 @@ class Daemon:
                 exc, (EngineStopped, concurrent.futures.CancelledError)
             ):
                 raise
-            note = f"qwen failed ({type(exc).__name__}: {exc}); spoke with say"
-            log.warning("%s", note)
-            return SaySynth().synth(text, profile, attrs, out), note
+            return self._with_fallback(exc, profile, lambda s: s.synth(text, profile, attrs, out),
+                                       lambda: not self._stopping)
 
     def _spoken_says(self, item: QueueItem, cfg, profile: Profile) -> list[tuple[str, dict[str, Any]]]:
         """The item's <say> blocks as they are spoken: the announce prefix
@@ -927,9 +972,10 @@ class Daemon:
                 or isinstance(exc, (EngineStopped, RenderCancelled, concurrent.futures.CancelledError))
             ):
                 raise
-            note = f"qwen failed ({type(exc).__name__}: {exc}); spoke with say"
-            log.warning("%s", note)
-            return SaySynth().stream(seg.text, seg.profile, dict(seg.attrs), feed, cancel), note
+            return self._with_fallback(
+                exc, seg.profile, lambda s: s.stream(seg.text, seg.profile, dict(seg.attrs), feed, cancel),
+                lambda: not (self._stopping or cancel.is_set() or feed.samples > 0),
+            )
 
     def _on_first_audio(self, item: QueueItem, playback) -> None:
         if playback.first_audio_at is None:
@@ -1116,21 +1162,29 @@ class Daemon:
                     kinds.append(kind)
         return kinds
 
+    def models_to_warm(self, keep_loaded: int) -> list[str]:
+        """The models in use to load at start-up: every light one (they do
+        not count against keep_loaded) plus the first keep_loaded others."""
+        from .qwen import LIGHT_KINDS
+
+        heavy = [k for k in self.models_in_use() if k not in LIGHT_KINDS][:keep_loaded]
+        return [k for k in self.models_in_use() if k in LIGHT_KINDS or k in heavy]
+
     async def warm_models(self) -> None:
         cfg = self.store.get()
-        if self.synth.name != "qwen" or not cfg.qwen.warm_on_start:
+        if self.synth.name != "qwen" or not cfg.qwen.warm_on_start or not mlx_audio_available()[0]:
             return
-        for kind in self.models_in_use()[: cfg.qwen.keep_loaded]:
+        for kind in self.models_to_warm(cfg.qwen.keep_loaded):
             if self.engine.snapshot_path(kind) is None:
                 log.warning("not warming %s: model not downloaded", kind)
                 continue
             try:
                 load_s = await self.engine.warm_async(kind, priority=QWEN_LIVE)
                 if load_s:
-                    self.events.insert(kind="system", status="info", reason=f"loaded Qwen3-TTS {kind} in {load_s:.1f} s")
+                    self.events.insert(kind="system", status="info", reason=f"loaded {model_label(kind)} in {load_s:.1f} s")
             except Exception as exc:
                 log.warning("warming %s failed: %s", kind, exc)
-                self.events.insert(kind="system", status="error", reason=f"could not load Qwen3-TTS {kind}", error=str(exc))
+                self.events.insert(kind="system", status="error", reason=f"could not load {model_label(kind)}", error=str(exc))
 
     def _prune_clips(self, keep: int) -> None:
         try:

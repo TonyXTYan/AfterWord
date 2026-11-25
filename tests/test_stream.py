@@ -19,6 +19,7 @@ from afterword.daemon.stream import SAMPLE_RATE, NullStreamPlayer, TimeStretch
 from afterword.daemon.synth import SaySynth, StreamResult
 
 from test_lab import FakeEngine, FakeModel
+from conftest import TIME_SCALE
 
 SR = SAMPLE_RATE
 
@@ -132,7 +133,7 @@ def test_abort_stops_at_once():
     assert _until(lambda: pb.started_at is not None)
     t = time.time()
     pb.abort()
-    assert pb.wait(1) and time.time() - t < 0.5
+    assert pb.wait(1) and time.time() - t < 0.5 * TIME_SCALE
     assert pb.aborted and not pb.completed and pb.played_s < 2
 
 

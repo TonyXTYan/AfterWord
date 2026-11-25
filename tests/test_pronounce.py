@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from afterword.daemon.config import DEFAULT_CONFIG_TOML, build_config
 from afterword.hooks import common, pronounce
-from conftest import ROOT, run_hook, stop_payload, wait_for
+from conftest import TIME_SCALE, ROOT, run_hook, stop_payload, wait_for
 from test_lab import FakeEngine, _daemon, make_lab, home  # noqa: F401  (fixtures)
 
 H = {"X-AfterWord": "1"}
@@ -119,7 +119,7 @@ def test_large_table_is_fast():
     text = " ".join("word%d" % (i * 7 % 600) for i in range(200))
     t = time.perf_counter()
     out = pronounce.apply(text, pairs)
-    assert time.perf_counter() - t < 0.5
+    assert time.perf_counter() - t < 0.5 * TIME_SCALE
     assert out.startswith("spoken 0 spoken 7")
 
 
@@ -170,12 +170,12 @@ def test_merged_tables_with_every_key_present_stay_fast():
     text = " ".join(k for k, _ in pairs)[:5000]
     t = time.perf_counter()
     out = pronounce.apply(text, pairs)
-    assert time.perf_counter() - t < 0.3
+    assert time.perf_counter() - t < 0.3 * TIME_SCALE
     assert out.startswith("p0 p1 ")
     short = tuple((("io", "id", "in", "on")[i % 4] + ("" if i < 4 else str(i)), "x") for i in range(500))
     t = time.perf_counter()
     pronounce.apply(("Pinion idiot station within dominion " * 140)[:5000], short)
-    assert time.perf_counter() - t < 0.3
+    assert time.perf_counter() - t < 0.3 * TIME_SCALE
 
 
 @pytest.mark.skipif(not os.path.exists(SYSTEM_PYTHON), reason="no system python3")

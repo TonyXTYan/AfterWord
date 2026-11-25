@@ -167,22 +167,31 @@ def _wait_for_event(event_id: int, timeout: float = 60.0) -> int:
 
 
 def cmd_models(args: argparse.Namespace) -> int:
+    from afterword.daemon import apple
     from afterword.daemon.config import ConfigStore
-    from afterword.daemon.qwen import MODEL_KINDS, local_snapshot, mlx_audio_available
+    from afterword.daemon.qwen import (
+        EXTRA_REPOS, MODEL_KINDS, QWEN_KINDS, label, local_snapshot, mlx_audio_available, required_files,
+    )
 
     repos = ConfigStore().get().qwen.repos()
-    kinds = args.kinds or list(MODEL_KINDS)
+    default = list(MODEL_KINDS) if args.action == "list" else list(QWEN_KINDS)
+    kinds = args.kinds or default
     unknown = [k for k in kinds if k not in MODEL_KINDS]
     if unknown:
         print(f"unknown model kind(s): {', '.join(unknown)} (choose from {', '.join(MODEL_KINDS)})")
         return 2
     ok, error = mlx_audio_available()
     if args.action == "list":
-        uses = {"custom_voice": "builtin:<Speaker>", "base": "clone:<clip>", "voice_design": "design:<description>"}
+        uses = {"custom_voice": "builtin:<Speaker>", "base": "clone:<clip>", "voice_design": "design:<description>",
+                "kokoro": "kokoro:<voice>", "chatterbox": "chatterbox:<clip>"}
         for kind in kinds:
-            path = local_snapshot(repos[kind])
-            state = "downloaded" if path else "not downloaded"
-            print(f"{kind:13} {state:15} {repos[kind]}   ({uses[kind]})")
+            path = local_snapshot(repos[kind], required_files(kind))
+            extras = [r for r in EXTRA_REPOS.get(kind, ()) if local_snapshot(r, required_files(r)) is None]
+            state = "downloaded" if path and not extras else "not downloaded"
+            print(f"{kind:13} {state:15} {repos[kind]}   ({uses[kind]}, {label(kind)})")
+        apple_ok, apple_error = apple.available()
+        print(f"{'apple':13} {'available' if apple_ok else 'unavailable':15} AVSpeechSynthesizer helper   "
+              f"(apple:<voice>{'' if apple_ok else ': ' + str(apple_error)})")
         if not ok:
             print(f"note: {error}")
         return 0
@@ -192,8 +201,9 @@ def cmd_models(args: argparse.Namespace) -> int:
         print("huggingface_hub is missing; run `uv sync --extra qwen` first")
         return 1
     for kind in kinds:
-        print(f"pulling {kind}: {repos[kind]}")
-        snapshot_download(repos[kind])
+        for repo in (repos[kind],) + tuple(EXTRA_REPOS.get(kind, ())):
+            print(f"pulling {kind}: {repo}")
+            snapshot_download(repo)
     print("done. The daemon picks the models up on next use.")
     return 0
 
@@ -407,9 +417,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--no-fallback", action="store_true", help="fail instead of using `say` if the daemon is down")
     s.set_defaults(func=cmd_test)
 
-    s = sub.add_parser("models", help="list or download the Qwen3-TTS models")
+    s = sub.add_parser("models", help="list or download the local TTS models")
     s.add_argument("action", choices=("list", "pull"), nargs="?", default="list")
-    s.add_argument("kinds", nargs="*", help="custom_voice, base, voice_design (default: all)")
+    s.add_argument("kinds", nargs="*", help="custom_voice, base, voice_design, kokoro, chatterbox "
+                   "(default: all for list, the three Qwen3-TTS models for pull)")
     s.set_defaults(func=cmd_models)
 
     s = sub.add_parser("alerts", help="spoken alert phrases: generate them with claude, or show them")
