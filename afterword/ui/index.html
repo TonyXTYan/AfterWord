@@ -2651,7 +2651,7 @@ const Sessions = (() => {
       h("div", null, h("b", null, "No sessions yet."), " Sessions appear here after their first Claude Code hook call. Voice is off by default; turn it on in any of three ways:"),
       h("ol", {class: "steps"},
         h("li", null, "Launch with a profile: ", h("code", null, "AFTERWORD_VOICE=nova claude")),
-        h("li", null, "Inside a running session: ", h("code", null, "/voice nova"), " (", h("code", null, "/voice off"), " to stop)"),
+        h("li", null, "Inside a running session: ", h("code", null, "/afterword:voice nova"), ", or ", h("code", null, "/afterword:voice pick"), " to let Claude choose (", h("code", null, "/afterword:voice off"), " to stop)"),
         h("li", null, "Here: pick a profile in a session’s voice chip once it shows up.")),
       h("div", {class: "hint", style: "margin-top:8px"}, profiles.length ? `Profiles in config: ${profiles.join(", ")}.` : "No profiles configured yet: make one in the Voice lab."));
   }
