@@ -22,9 +22,14 @@ QWEN_MODEL_KINDS = ("custom_voice", "base", "voice_design")
 OTHER_MODEL_KINDS = ("kokoro", "chatterbox")  # [models]
 MODEL_FALLBACKS = ("apple", "say", "none")
 # [profiles.x] color: one of these names (the GUI's speaker palette, in its
-# order; afterword/ui/index.html SPEAKER_PALETTE) or a hex "#RRGGBB".
-SPEAKER_COLORS = ("yellow", "cyan", "green", "magenta", "white", "orange", "blue", "red",
-                  "violet", "lime", "pink", "brown", "teal", "grey", "olive", "sky")
+# order; afterword/ui/index.html SPEAKER_PALETTE) or a hex "#RRGGBB". 64
+# colours: 16 hue families, each as itself and as "<family>-deep",
+# "<family>-light" and "<family>-pale"; automatic colours take them in this
+# order (every base colour first).
+SPEAKER_FAMILIES = ("yellow", "cyan", "green", "magenta", "white", "orange", "blue", "red",
+                    "violet", "lime", "pink", "brown", "teal", "grey", "olive", "sky")
+SPEAKER_SHADES = ("", "deep", "light", "pale")
+SPEAKER_COLORS = tuple(f + ("-" + s if s else "") for s in SPEAKER_SHADES for f in SPEAKER_FAMILIES)
 
 
 def parse_color(value: Any) -> str:
@@ -37,7 +42,8 @@ def parse_color(value: Any) -> str:
         return v
     if len(v) == 7 and v[0] == "#" and all(c in "0123456789abcdef" for c in v[1:]):
         return v
-    raise ValueError(f"{value!r} is not a colour: use one of {', '.join(SPEAKER_COLORS)} or \"#RRGGBB\"")
+    raise ValueError(f"{value!r} is not a colour: use one of {', '.join(SPEAKER_FAMILIES)}, optionally with "
+                     f"-deep, -light or -pale (\"teal-deep\"), or \"#RRGGBB\"")
 
 DEFAULT_CONFIG_TOML = """\
 # AfterWord config. Edits are picked up automatically (hot reload).

@@ -132,12 +132,16 @@ description = "calm narrator for long explanations"  # optional: for /afterword:
 color = "teal"               # optional: the GUI's colour for this voice
 ```
 
-`color` is one of the GUI's 16 speaker colours (`yellow`, `cyan`, `green`,
-`magenta`, `white`, `orange`, `blue`, `red`, `violet`, `lime`, `pink`,
-`brown`, `teal`, `grey`, `olive`, `sky`) or a hex `"#RRGGBB"`. Voices
-without one get the palette colours no other voice has chosen, in order.
-You can also pick it in the GUI: on Sessions, click a voice's name under
-Voices.
+`color` is one of the GUI's 64 speaker colours or a hex `"#RRGGBB"`. The
+64 are 16 families (`yellow`, `cyan`, `green`, `magenta`, `white`,
+`orange`, `blue`, `red`, `violet`, `lime`, `pink`, `brown`, `teal`, `grey`,
+`olive`, `sky`), each also as `<family>-deep`, `<family>-light` and
+`<family>-pale` (`"teal-deep"`, `"sky-pale"`). Voices without one get the
+palette colours no other voice has chosen, in order: every family first,
+then the deep, light and pale shades. You can also pick it in the GUI: on
+Sessions, click a voice's name under Voices for a chart of all 64 (the
+families across, the shades down), with the colours other voices use
+marked.
 
 | `voice` | Model | Notes |
 |---|---|---|

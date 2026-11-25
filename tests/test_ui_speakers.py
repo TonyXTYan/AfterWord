@@ -1,11 +1,13 @@
 """The speaker colour helpers (afterword/ui/index.html, between
 "// ---------- speakers" and "// ---------- end speakers"), run in node
 against a tiny fake DOM: slots follow the configured profile order, unknown
-names hash to a stable slot, a new profile list repaints what is already on
-the page, and the tag HTML escapes the name. Per-profile colours: an
-explicit palette name or hex wins, the other voices take the free palette
-colours in order, a custom hex gets a generated class with readable text
-tones. Skipped when node is not installed."""
+names hash to a stable base colour, a new profile list repaints what is
+already on the page, and the tag HTML escapes the name. Per-profile colours:
+an explicit palette name or hex wins, the other voices take the free palette
+colours in order (all sixteen base colours, then the deep, light and pale
+rows; more than 64 wrap), a custom hex gets a generated class with readable
+text tones, and swatches too close to the sheet get a ring. Skipped when node
+is not installed."""
 
 import json
 import re
@@ -45,7 +47,7 @@ const h = (tag, props, ...kids) => ({tag, props, kids});
 const lib = new Function("document", "CustomEvent", "h", src +
   "\nreturn {setSpeakerProfiles, paintSpeaker, speakerName, speakerSlot, speakerTag, speakerTagHTML," +
   " speakerAssign, speakerColorValue, speakerSwatch, speakerColorLabel, speakerInk, speakerContrast, speakerCssText," +
-  " SPEAKER_PALETTE, get colors() { return speakerColors; }};")(
+  " SPEAKER_PALETTE, SPEAKER_FAMILIES, SPEAKER_SHADES, get colors() { return speakerColors; }};")(
   document, CustomEvent, h);
 const out = {};
 
@@ -115,7 +117,14 @@ const many = Array.from({length: 20}, (_, i) => "v" + i);
 out.wrap = [...lib.speakerAssign(many, {v0: "sky", v1: "yellow"}).values()];
 const all16 = Object.fromEntries(lib.SPEAKER_PALETTE.map((p, i) => ["v" + i, p[0]]));
 out.wrap_full = [...lib.speakerAssign(many, all16).values()].slice(16);
-out.values = ["teal", " TEAL ", "#ABCDEF", "#abc", "teal2", 5, null, ""].map((v) => lib.speakerColorValue(v));
+// Automatic order: base, deep, light, pale; explicit choices (names of any
+// row, or a palette hex) are skipped; past 64 the automatic voices wrap.
+const seventy = Array.from({length: 70}, (_, i) => "w" + i);
+out.order = [...lib.speakerAssign(seventy, {w0: "teal-deep", w1: "yellow", w2: "#B99300", w3: "Sky-Pale"}).values()];
+out.order_none = [...lib.speakerAssign(seventy, {}).values()];
+out.names64 = lib.SPEAKER_PALETTE.map((p) => p[0]);
+out.shape = [lib.SPEAKER_FAMILIES, lib.SPEAKER_SHADES];
+out.values = ["teal", " TEAL ", "#ABCDEF", "#abc", "teal2", 5, null, "", "Teal-Deep", "white-pale", "teal-dark"].map((v) => lib.speakerColorValue(v));
 // Text tones for awkward custom colours, light and dark.
 const odd = ["#ffff00", "#000080", "#808080", "#ffffff", "#000000", "#12ab9f", "#ff00ff", "#00ff00"];
 out.inks = odd.map((hx) => [hx, lib.speakerInk(hx, false), lib.speakerInk(hx, true)]);
@@ -146,7 +155,7 @@ def r(tmp_path_factory):
 
 def test_unknown_names_hash_to_a_stable_slot(r):
     assert r["unknown_first"] == r["unknown_again"]
-    assert all(isinstance(s, int) and 0 <= s <= 15 for s in r["unknown_first"])
+    assert all(isinstance(s, int) and 0 <= s <= 15 for s in r["unknown_first"])  # a base colour
     assert len(set(r["unknown_first"])) > 1  # not everything in one colour
     # A profile list that does not name them leaves their slots alone.
     assert r["unknown_after"] == r["unknown_first"][4:6]
@@ -221,7 +230,7 @@ def test_explicit_colours_win_and_the_rest_take_free_ones(r):
 def test_custom_hex_gets_a_generated_class(r):
     css = r["colors"]["css"]
     assert ".spk-0 { --spk: #F5C400; --spk-ink: #6E5600; }" in css
-    assert ".spk-15 {" in css and ".spk-16" not in css
+    assert ".spk-63 {" in css and ".spk-64" not in css
     light = re.search(r"\.spk-x0 \{ --spk: #12ab9f; --spk-ink: (#[0-9a-f]{6}); \}", css)
     dark = re.search(r"@media \(prefers-color-scheme: dark\) \{.*\.spk-x0 \{ --spk-ink: (#[0-9a-f]{6}); \}", css, re.S)
     assert light and dark
@@ -240,16 +249,50 @@ def test_colour_changes_repaint_and_list_alone_keeps_them(r):
     assert cl["slots"] == [0, 1, 2, 3, 4] and cl["stored"] == {} and cl["t1"] == ["spk", "spk-1"]
 
 
-def test_more_voices_than_colours_wrap(r):
-    # v0 sky (15), v1 yellow (0); the others take 1..14 in order, then wrap over those 14
+def test_more_voices_than_base_colours_take_the_deep_row(r):
+    # v0 sky (15), v1 yellow (0); the others take 1..14 in order, then the deep row (16 …)
     assert r["wrap"][:2] == [15, 0]
     assert r["wrap"][2:16] == list(range(1, 15))
-    assert r["wrap"][16:] == [1, 2, 3, 4]
-    assert r["wrap_full"] == [0, 1, 2, 3]  # every colour chosen: wrap over all sixteen
+    assert r["wrap"][16:] == [16, 17, 18, 19]
+    assert r["wrap_full"] == [16, 17, 18, 19]  # every base colour chosen: deep next
+
+
+def test_automatic_order_is_base_deep_light_pale_then_wraps(r):
+    # nothing chosen: 0 … 63 in palette order (base, deep, light, pale), then again
+    assert r["order_none"] == list(range(64)) + list(range(6))
+    # w0 teal-deep (28), w1 yellow (0), w2 yellow-deep's hex (16), w3 sky-pale (63)
+    order = r["order"]
+    assert order[:4] == [28, 0, 16, 63]
+    free = [i for i in range(64) if i not in (0, 16, 28, 63)]
+    assert order[4:4 + len(free)] == free  # 1 … 15, then 17 … 27, 29 … 62
+    assert order[4 + len(free):] == free[:70 - 4 - len(free)]  # past 64: wrap over the free ones
+    assert len(set(order)) == 64
+
+
+def test_palette_shape(r):
+    families, shades = r["shape"]
+    assert families == 16 and shades == ["base", "deep", "light", "pale"]
+    names = r["names64"]
+    assert len(names) == 64 and names[28] == "teal-deep" and names[63] == "sky-pale"
+    for i, n in enumerate(names):
+        row = i // 16
+        assert n == names[i % 16] + ("", "-deep", "-light", "-pale")[row]
+
+
+def test_faint_swatches_get_a_ring_and_a_strong_line(r):
+    css = r["colors"]["css"]
+    light, dark = css.split("@media (prefers-color-scheme: dark)")
+    # white (4) and the palest shades are close to the light sheet: ring + text tone for lines
+    for i in (4, 48 + 4, 48 + 15):
+        assert re.search(rf"\.spk-{i} \{{ --spk: #[0-9A-F]{{6}}; --spk-ink: #[0-9A-F]{{6}}; "
+                         r"--spk-ring: var\(--rule\); --spk-strong: var\(--spk-ink\); \}", light), i
+        # not faint on the dark sheet: reset there
+        assert re.search(rf"\.spk-{i} \{{ --spk-ink: #[0-9A-F]{{6}}; --spk-ring: initial; --spk-strong: initial; \}}", dark), i
+    assert "--spk-ring" not in re.search(r"\.spk-12 \{[^}]*\}", light).group(0)  # teal: plain
 
 
 def test_colour_values_are_normalised(r):
-    assert r["values"] == ["teal", "teal", "#abcdef", "", "", "", "", ""]
+    assert r["values"] == ["teal", "teal", "#abcdef", "", "", "", "", "", "teal-deep", "white-pale", ""]
 
 
 def test_custom_text_tones_read_on_both_papers(r):

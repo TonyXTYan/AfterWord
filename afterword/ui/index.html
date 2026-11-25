@@ -43,37 +43,53 @@
       --on-accent: #10131f;
     }
   }
-  /* speakers: one colour per voice profile (slot from speakerSlot()). The .spk-0 … .spk-15
+  /* speakers: one colour per voice profile (slot from speakerSlot()). The .spk-0 … .spk-63
      palette and custom .spk-x<i> rules (--spk swatch, --spk-ink text tone) are written by
-     speakerCss() into <style id="spk-css"> from SPEAKER_PALETTE in the script. */
+     speakerCss() into <style id="spk-css"> from SPEAKER_PALETTE in the script. A swatch too
+     close to the sheet (white, the pale shades) also gets --spk-ring (a hairline round its dot
+     and rule) and --spk-strong (its text tone, for lines and highlights). */
+  [data-spk] { --spk-ring: initial; --spk-strong: initial; }
   .spk { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; font-weight: 600;
          color: var(--spk-ink, var(--slate)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: baseline; }
-  .spk > i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--spk, var(--slate)); }
-  .spk-4 > i { box-shadow: 0 0 0 1px var(--rule); }
+  .spk > i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--spk, var(--slate));
+             box-shadow: 0 0 0 1px var(--spk-ring, transparent); }
   /* a block of spoken text that belongs to a voice: a rule in the speaker colour (the element carries .spk-N) */
-  .spk-rule { border-left: 3px solid var(--spk, var(--rule)); padding-left: 12px; }
-  .spk-rule.spk-4 { box-shadow: -1px 0 0 var(--rule); }
-  /* speaker colour picker (Sessions → Voices): the voice's tag is a button; the popover has
-     the 16 palette colours (who uses each under it), Automatic, and a custom hex */
+  .spk-rule { border-left: 3px solid var(--spk, var(--rule)); padding-left: 12px; box-shadow: -1px 0 0 var(--spk-ring, transparent); }
+  /* speaker colour picker (Sessions → Voices): the voice's tag is a button; the popover has an
+     "In use" legend (every voice and its colour), the 64 palette colours as a chart (16 hue
+     columns × base, deep, light, pale rows; a check on this voice's, a dot on the ones other
+     voices use), Automatic, and a custom hex */
   .vx-color { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; margin: 0 -5px; padding: 1px 5px;
               background: none; border: 1px solid transparent; border-radius: 6px; }
   .vx-color:hover { background: color-mix(in srgb, var(--cue) 7%, transparent); border-color: transparent; }
   .vx-color[aria-expanded="true"] { border-color: var(--rule); }
   .vx-color > .spk > i { width: 10px; height: 10px; }
-  .cp { position: fixed; z-index: 15; width: min(344px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto;
+  .cp { --cp-sw: 22px; position: fixed; z-index: 15; width: min(456px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto;
         background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; padding: 8px 10px 10px;
         box-shadow: 0 6px 20px rgba(0, 0, 0, .22); display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-sm); }
   .cp-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; color: var(--slate); }
-  .cp-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; }
-  .cp-sw { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; padding: 5px 2px 4px;
-           background: none; border: 1px solid transparent; border-radius: 6px; color: var(--ink); }
-  .cp-sw:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); border-color: transparent; }
-  .cp-sw.on { border-color: var(--ink); }
-  .cp-sw:focus-visible { outline-offset: 0; }
-  .cp-dot { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; font: normal 700 12px/1 var(--sans);
-            box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 20%, transparent); }
-  .cp-nm { font-size: 11.5px; line-height: 1.2; }
-  .cp-sw.on .cp-nm { font-weight: 600; }
+  .cp-use { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 4px; min-width: 0; max-height: 5.4em; overflow: auto; }
+  .cp-use > .cp-lbl { margin-right: 2px; font-size: 11.5px; }
+  .cp-use button { display: inline-flex; align-items: center; min-width: 0; max-width: 12em; padding: 0 5px; min-height: 20px;
+                   background: none; border: 1px solid transparent; border-radius: 999px; font-size: 11.5px; }
+  .cp-use button:hover { border-color: var(--rule); }
+  .cp-use button.me { border-color: var(--rule); }
+  .cp-use .spk > i { width: 9px; height: 9px; }
+  .cp-chart { display: grid; grid-template-columns: auto repeat(16, var(--cp-sw)); gap: 2px; align-items: center;
+              overflow-x: auto; padding: 3px 3px 4px 0; }
+  .cp-shade { padding-right: 4px; font-size: 10.5px; line-height: 1; color: var(--slate); text-align: right; }
+  .cp-sw { position: relative; display: grid; place-items: center; width: var(--cp-sw); height: var(--cp-sw); min-height: 0; padding: 0;
+           border: 0; border-radius: 4px; background: var(--cp-c); color: var(--cp-k);
+           box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 16%, transparent); font: normal 700 13px/1 var(--sans); }
+  .cp-sw:hover { box-shadow: inset 0 0 0 1px var(--cp-k); }
+  .cp-sw.on { box-shadow: inset 0 0 0 2px var(--cp-k); }
+  .cp-sw:focus-visible { z-index: 1; outline-offset: 1px; }
+  /* used by another voice: a small dot in the corner, ringed in the swatch colour */
+  .cp-sw.used::after { content: ""; position: absolute; right: 2px; bottom: 2px; width: 6px; height: 6px; border-radius: 50%;
+                       background: var(--cp-k); box-shadow: 0 0 0 1px var(--cp-c); }
+  .cp-sw.on.used::after { right: 1px; bottom: 1px; width: 5px; height: 5px; }
+  .cp-info { min-height: 1.3em; font-size: 11.5px; color: var(--slate); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cp-info b { color: var(--ink); font-weight: 600; }
   .cp-who { max-width: 100%; min-width: 0; font-size: 11px; line-height: 1.2; color: var(--slate); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
   .cp-auto { display: inline-flex; align-items: center; gap: 5px; }
@@ -83,7 +99,12 @@
   .cp input[type="color"] { width: 34px; height: var(--ctl-h); padding: 1px 2px; }
   .cp input.cp-hex { width: 10ch; font-family: var(--mono); }
   .cp .msg { flex: 1 1 100%; }
-  @media (max-width: 640px) { .vx-color, .cp-auto, .cp .cp-row button, .cp input { min-height: 32px; } }
+  /* narrow screens: bigger swatches, as big as fit (22–28px); below about 440px the chart scrolls sideways */
+  @media (max-width: 640px) {
+    .cp { --cp-sw: clamp(22px, calc((100vw - 104px) / 16), 28px); width: min(540px, calc(100vw - 16px)); }
+    .vx-color, .cp-auto, .cp .cp-row button, .cp input { min-height: 32px; }
+    .cp-use button { min-height: 28px; }
+  }
 
   /* ---- base ---- */
   * { box-sizing: border-box; }
@@ -130,8 +151,7 @@
   .now.idle .tally, .now.idle .now-acts { display: none; }
   .now-idle { display: flex; align-items: center; gap: 8px; min-width: 0; font: var(--bar-idle-fs)/1.4 var(--sans); color: var(--slate); }
   .now-idle .said { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .now.playing { padding: var(--bar-py) var(--pad-x); box-shadow: inset 3px 0 0 var(--spk, var(--rule)); }
-  .now.playing.spk-4 { box-shadow: inset 3px 0 0 var(--spk), inset 4px 0 0 var(--rule); }
+  .now.playing { padding: var(--bar-py) var(--pad-x); box-shadow: inset 3px 0 0 var(--spk, var(--rule)), inset 4px 0 0 var(--spk-ring, transparent); }
   .now-acts { flex: none; display: flex; align-items: center; gap: 2px; margin-left: auto; }
   .now-acts button, .q-drawer button { background: none; border-color: transparent; color: var(--slate); font-size: var(--ctl-fs); padding: 2px 8px; }
   .now-acts button:hover:not(:disabled), .q-drawer button:hover:not(:disabled) {
@@ -360,8 +380,7 @@
   .sx-chip:hover { border-color: var(--slate); }
   .sx-chip:focus-within { outline: 2px solid var(--cue); outline-offset: 2px; }
   .sx-chip > i { position: absolute; left: 10px; top: 50%; width: 10px; height: 10px; margin-top: -5px; border-radius: 50%; background: var(--spk, transparent);
-                 pointer-events: none; }
-  .sx-chip.spk-4 > i { box-shadow: 0 0 0 1px var(--rule); }
+                 pointer-events: none; box-shadow: 0 0 0 1px var(--spk-ring, transparent); }
   .sx-chip.none > i { background: transparent; box-shadow: inset 0 0 0 1.5px var(--slate); }
   .sx-chip.hollow > i { background: transparent; box-shadow: inset 0 0 0 2px var(--spk, var(--slate)); }
   .sx-chip::after { content: ""; position: absolute; right: 11px; top: 50%; width: 5px; height: 5px; border: solid var(--slate);
@@ -606,12 +625,10 @@
   /* results */
   .results { display: flex; flex-direction: column; }
   /* a card (or A/B slot) from a profile carries .spk-N; --spk-bar is the speaker colour for the playing highlight, else --cue */
-  .card, .ab .slot { --spk-bar: var(--spk, var(--cue)); }
-  .card.spk-4, .ab .slot.spk-4 { --spk-bar: var(--spk-ink); }
+  .card, .ab .slot { --spk-bar: var(--spk-strong, var(--spk, var(--cue))); }
   /* a result reads like a transcript row: who, the line on its speaker rule, the player, one quiet meta line, actions */
   .card { --spk-line: var(--rule); padding: calc(var(--row-y) + 3px) 0; border-top: 1px solid var(--rule); display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-  .card[class*="spk-"] { --spk-line: var(--spk); }
-  .card.spk-4 { --spk-line: var(--spk-ink); }
+  .card[class*="spk-"] { --spk-line: var(--spk-strong, var(--spk)); }
   .results > .card:first-child, .results > .group:first-child { border-top: 0; padding-top: 0; }
   .card-top { display: flex; gap: 8px; align-items: center; min-width: 0; flex-wrap: wrap; }
   .card-top .spk { flex: none; max-width: 60%; font-size: 13px; }
@@ -1160,18 +1177,27 @@ function h(tag, props, ...kids) {
 // ---------- speakers ----------
 // Each voice profile is a "speaker" with a subtitle colour: --spk, the swatch,
 // and --spk-ink, the text tone (at least 4.5:1 on --paper and --sheet, light
-// and dark). SPEAKER_PALETTE holds 16 named colours (CSS .spk-0 … .spk-15,
-// rules written by speakerCss); the first six are the original six slots.
+// and dark). SPEAKER_PALETTE holds 64 named colours (CSS .spk-0 … .spk-63,
+// rules written by speakerCss): 16 hue families in four shade rows. Row one
+// (0 … 15) is the original sixteen; then "<family>-deep", "<family>-light"
+// and "<family>-pale" (16 … 63), derived from each base swatch in OKLCH
+// (deep: darker at about the same chroma; light: lighter, less chroma; pale:
+// near white, low chroma; white and grey step through near-neutral greys),
+// no two closer than CIEDE2000 9 (tests/test_colours.py). The new rows' text
+// tones keep the swatch's OKLCH hue and chroma and move its lightness until
+// they read at 4.5:1.
 // A profile's `color` in config.toml (config.profile_colors from /api/status:
 // a palette name or "#rrggbb") picks its colour. The others take the palette
-// colours no explicit choice uses, in the configured profile order
-// (config.profiles), wrapping when there are more voices than free colours;
-// so they stay put while the config does. A name not in the list hashes to a
-// palette colour. A custom hex gets a generated class .spk-x<i> whose text
-// tones speakerInk computes. When the list or the colours change, the page is
-// repainted and document gets an "aw:speakers" event so a page can redraw.
+// colours no explicit choice uses, in palette order (every base colour, then
+// deep, light, pale) and the configured profile order (config.profiles),
+// wrapping when there are more voices than free colours; so they stay put
+// while the config does. A name not in the list hashes to a base colour. A
+// custom hex gets a generated class .spk-x<i> whose text tones speakerInk
+// computes. When the list or the colours change, the page is repainted and
+// document gets an "aw:speakers" event so a page can redraw.
 const SPEAKER_PALETTE = [
   // name, swatch (--spk), light text tone, dark text tone (--spk-ink)
+  // base: the original sixteen, unchanged
   ["yellow", "#F5C400", "#6E5600", "#FFD43B"],
   ["cyan", "#00B8D9", "#00687A", "#4FD6EE"],
   ["green", "#2FBF71", "#1B6B40", "#63D99A"],
@@ -1188,7 +1214,60 @@ const SPEAKER_PALETTE = [
   ["grey", "#868E96", "#5C636B", "#ADB5BD"],
   ["olive", "#8F9A1F", "#5C6312", "#C3CF48"],
   ["sky", "#74C0FC", "#0B5FA5", "#8ACBFF"],
+  // deep: darker, as saturated
+  ["yellow-deep", "#B99300", "#826700", "#B99300"],
+  ["cyan-deep", "#00839B", "#00748A", "#1F90A8"],
+  ["green-deep", "#00894B", "#007A42", "#219758"],
+  ["magenta-deep", "#980079", "#980079", "#D64FB1"],
+  ["white-deep", "#C5C6B8", "#6B6B5F", "#C5C6B8"],
+  ["orange-deep", "#AD6300", "#9D5900", "#BD721F"],
+  ["blue-deep", "#1F31B0", "#1F31B0", "#557AFD"],
+  ["red-deep", "#9A0010", "#9A0010", "#E1554E"],
+  ["violet-deep", "#6729C8", "#6729C8", "#9566FF"],
+  ["lime-deep", "#72AD00", "#4C7600", "#72AD00"],
+  ["pink-deep", "#C85E7A", "#AE4764", "#CC627E"],
+  ["brown-deep", "#6C3800", "#6C3800", "#B17749"],
+  ["teal-deep", "#005750", "#005750", "#499087"],
+  ["grey-deep", "#4D575F", "#4D575F", "#7B858E"],
+  ["olive-deep", "#616900", "#616900", "#808A31"],
+  ["sky-deep", "#418DC6", "#1F6FA6", "#418DC6"],
+  // light: lighter, a little less saturated
+  ["yellow-light", "#FFDD7C", "#826700", "#FFDD7C"],
+  ["cyan-light", "#65DBF8", "#00748A", "#65DBF8"],
+  ["green-light", "#87E0A5", "#177945", "#87E0A5"],
+  ["magenta-light", "#FB8DD9", "#AA438D", "#FB8DD9"],
+  ["white-light", "#F1E4D4", "#74685A", "#F1E4D4"],
+  ["orange-light", "#FFBA7B", "#995B16", "#FFBA7B"],
+  ["blue-light", "#86A6FF", "#4A66B9", "#86A6FF"],
+  ["red-light", "#FF9186", "#AF4A42", "#FF9186"],
+  ["violet-light", "#BCAAFF", "#715EAC", "#BCAAFF"],
+  ["lime-light", "#B4DE88", "#50741E", "#B4DE88"],
+  ["pink-light", "#FFB7C7", "#975767", "#FFB7C7"],
+  ["brown-light", "#C99C7B", "#8B6142", "#C99C7B"],
+  ["teal-light", "#7CC0B8", "#30756E", "#7CC0B8"],
+  ["grey-light", "#97ABB9", "#5A6C79", "#97ABB9"],
+  ["olive-light", "#B4BF67", "#67700C", "#B4BF67"],
+  ["sky-light", "#B0DAFE", "#486E8E", "#B0DAFE"],
+  // pale: near white, low chroma
+  ["yellow-pale", "#F7E6B7", "#78693E", "#F7E6B7"],
+  ["cyan-pale", "#BAF0FF", "#3F717F", "#BAF0FF"],
+  ["green-pale", "#BAE2C5", "#4E7259", "#BAE2C5"],
+  ["magenta-pale", "#FFD3EF", "#845E77", "#FFD3EF"],
+  ["white-pale", "#F7F9E0", "#6A6C56", "#F7F9E0"],
+  ["orange-pale", "#FFD6B3", "#876344", "#FFD6B3"],
+  ["blue-pale", "#B4C4EE", "#5C698F", "#B4C4EE"],
+  ["red-pale", "#FFCBC4", "#8C5F5A", "#FFCBC4"],
+  ["violet-pale", "#DCD4FF", "#6D658B", "#DCD4FF"],
+  ["lime-pale", "#E1FEC5", "#59713E", "#E1FEC5"],
+  ["pink-pale", "#FFE6EA", "#7A6568", "#FFE6EA"],
+  ["brown-pale", "#D4BEAF", "#7A6659", "#D4BEAF"],
+  ["teal-pale", "#C0DBD7", "#576F6C", "#C0DBD7"],
+  ["grey-pale", "#C3CAD0", "#656B71", "#C3CAD0"],
+  ["olive-pale", "#CFD6AA", "#686D45", "#CFD6AA"],
+  ["sky-pale", "#DDF0FF", "#5C6C79", "#DDF0FF"],
 ];
+const SPEAKER_FAMILIES = 16;   // columns of the picker; a palette index is shade * 16 + family
+const SPEAKER_SHADES = ["base", "deep", "light", "pale"];
 const SPEAKER_SLOTS = SPEAKER_PALETTE.length;
 // --paper and --sheet of each scheme: the text tones must read on both.
 const SPEAKER_PAPERS = {light: ["#E8EBEE", "#F7F8F9"], dark: ["#121417", "#1A1D21"]};
@@ -1253,13 +1332,14 @@ function paintSpeaker(el, profile) {
   return el;
 }
 function speakerName(profile) { return profile == null || profile === "" ? "default" : String(profile); }
-// A palette index (0 … 15), or "x<i>" for a custom hex colour.
+// A palette index (0 … 63), or "x<i>" for a custom hex colour. A name not
+// in the list hashes to one of the 16 base colours.
 function speakerSlot(profile) {
   const name = speakerName(profile);
   if (speakerSlots.has(name)) return speakerSlots.get(name);
   let x = 0;
   for (const c of name) x = (Math.imul(x, 31) + c.codePointAt(0)) >>> 0;
-  return x % SPEAKER_SLOTS;
+  return x % SPEAKER_FAMILIES;
 }
 // The swatch colour of a profile (hex) and a short label: "teal", "#12ab9f", "teal (automatic)".
 function speakerSwatch(profile) {
@@ -1303,21 +1383,22 @@ function speakerInk(hex, dark) {
   }
   return dark ? "#ffffff" : "#000000";
 }
-// The CSS for the palette and the custom colours; a swatch too close to the
-// sheet gets a hairline ring (as .spk-4, white, has).
+// The CSS for the palette and the custom colours. A swatch too close to the
+// sheet (white, the pale shades) gets --spk-ring, a hairline round its dot
+// and rule, and --spk-strong, its text tone for lines and highlights; the
+// page's [data-spk] rule resets both, so they never leak to a nested voice.
+const speakerFaint = (hex, dark) => speakerContrast(hex, SPEAKER_PAPERS[dark ? "dark" : "light"][1]) < 1.35;
+const SPEAKER_FAINT = " --spk-ring: var(--rule); --spk-strong: var(--spk-ink);";
+const SPEAKER_UNFAINT = " --spk-ring: initial; --spk-strong: initial;";
 function speakerCssText() {
   const light = [], dark = [];
-  SPEAKER_PALETTE.forEach(([, sw, ink, inkDark], i) => {
-    light.push(`.spk-${i} { --spk: ${sw}; --spk-ink: ${ink}; }`);
-    dark.push(`.spk-${i} { --spk-ink: ${inkDark}; }`);
-  });
-  speakerCustom.forEach((hex, i) => {
-    const c = `.spk-x${i}`, ring = `${c} > i, .sx-chip${c} > i { box-shadow: 0 0 0 1px var(--rule); }`;
-    light.push(`${c} { --spk: ${hex}; --spk-ink: ${speakerInk(hex, false)}; }`);
-    dark.push(`${c} { --spk-ink: ${speakerInk(hex, true)}; }`);
-    if (speakerContrast(hex, SPEAKER_PAPERS.light[1]) < 1.35) light.push(ring);
-    if (speakerContrast(hex, SPEAKER_PAPERS.dark[1]) < 1.35) dark.push(ring);
-  });
+  const add = (c, sw, ink, inkDark) => {
+    const fl = speakerFaint(sw, false), fd = speakerFaint(sw, true);
+    light.push(`${c} { --spk: ${sw}; --spk-ink: ${ink};${fl ? SPEAKER_FAINT : ""} }`);
+    dark.push(`${c} { --spk-ink: ${inkDark};${fd ? SPEAKER_FAINT : fl ? SPEAKER_UNFAINT : ""} }`);
+  };
+  SPEAKER_PALETTE.forEach(([, sw, ink, inkDark], i) => add(`.spk-${i}`, sw, ink, inkDark));
+  speakerCustom.forEach((hex, i) => add(`.spk-x${i}`, hex, speakerInk(hex, false), speakerInk(hex, true)));
   return light.join("\n") + "\n@media (prefers-color-scheme: dark) {\n" + dark.join("\n") + "\n}";
 }
 function speakerCss() {
@@ -1340,12 +1421,16 @@ function speakerTagHTML(profile) {
 }
 // ---------- end speakers ----------
 // ---------- speaker colour picker
-// Sessions → Voices: a voice's colour button opens a popover with the 16
-// palette colours (a check on this voice's, the other voices using each one
-// under it), Auto, and a custom hex. A pick saves through PATCH
-// /api/lab/profiles/{name} {"color"} and repaints every page at once.
+// Sessions → Voices: a voice's colour button opens a popover: an "In use"
+// legend (every voice with its colour; a click moves focus to that colour),
+// the 64 palette colours as a chart (16 hue columns × base, deep, light and
+// pale rows; a check on this voice's colour, a corner dot on the ones other
+// voices use; each swatch's name and voices in its title and label, and in
+// the line under the chart), Automatic, and a custom hex. Arrow keys move
+// across hues (left, right) and shades (up, down); Home/End go to the ends
+// of a row, with Ctrl or Cmd to the ends of the chart. A pick saves through
+// PATCH /api/lab/profiles/{name} {"color"} and repaints every page at once.
 const cp = {el: null, name: null, busy: false};
-const CP_COLS = 4;
 function cpAnchor() {
   if (!cp.name) return null;
   for (const li of document.querySelectorAll(".vx-row")) if (li.dataset.name === cp.name) return li.querySelector(".vx-color");
@@ -1391,20 +1476,59 @@ function cpRender(focusKey, status, kind = "ok") {
   const others = (s) => (users.get(String(s)) || []).filter((n) => n !== name);
   const msg = h("span", {class: "msg", role: "status"});
   if (status) note(msg, status, kind);
-  const grid = h("div", {class: "cp-grid", role: "radiogroup", "aria-label": `Palette colours for ${name}`});
-  const anyOn = SPEAKER_PALETTE.some((_, i) => String(i) === slot);
-  SPEAKER_PALETTE.forEach(([cname, sw], i) => {
-    const on = String(i) === slot, who = others(i);
-    const label = cname + (on ? (cur ? ", this voice" : ", this voice (automatic)") : "") + (who.length ? `, used by ${who.join(", ")}` : "");
-    const b = h("button", {type: "button", class: "cp-sw" + (on ? " on" : ""), role: "radio", "aria-checked": String(on),
-      tabindex: on || (!anyOn && i === 0) ? "0" : "-1", "data-k": "p" + i, title: label, "aria-label": label},
-      h("i", {class: "cp-dot", style: `background:${sw};color:${cpCheckInk(sw)}`, "aria-hidden": "true"}, on ? "✓" : ""),
-      h("span", {class: "cp-nm"}, cname),
-      h("span", {class: "cp-who", "aria-hidden": "true"}, who.length ? who.join(", ") : " "));
-    b.addEventListener("click", () => cpSave(cname, "p" + i));
-    grid.append(b);
+  const thisVoice = cur ? "this voice" : "this voice (automatic)";
+  // The line under the chart: the hovered or focused swatch, else this voice's colour.
+  const info = h("div", {class: "cp-info", "aria-hidden": "true"});
+  const describe = (i) => {
+    const who = others(i);
+    info.replaceChildren(h("b", null, SPEAKER_PALETTE[i][0]), String(i) === slot ? ` · ${thisVoice}` : "",
+      who.length ? ` · ${String(i) === slot ? "also " : ""}${who.join(", ")}` : (String(i) === slot ? "" : " · free"));
+  };
+  const idle = () => {
+    const a = document.activeElement, k = a && a.dataset ? a.dataset.k || "" : "";
+    if (cp.el && cp.el.contains(a) && /^p\d+$/.test(k)) return describe(Number(k.slice(1)));
+    if (/^\d+$/.test(slot)) return describe(Number(slot));
+    const who = others(slot);
+    info.replaceChildren(h("b", null, speakerSwatch(name)), ` · ${thisVoice}, custom`, who.length ? ` · also ${who.join(", ")}` : "");
+  };
+  const chart = h("div", {class: "cp-chart", role: "radiogroup", "aria-label": `Palette colours for ${name}`});
+  const anyOn = /^\d+$/.test(slot);
+  SPEAKER_SHADES.forEach((shade, r) => {
+    chart.append(h("span", {class: "cp-shade", "aria-hidden": "true"}, shade));
+    for (let f = 0; f < SPEAKER_FAMILIES; f++) {
+      const i = r * SPEAKER_FAMILIES + f, [cname, sw] = SPEAKER_PALETTE[i];
+      const on = String(i) === slot, who = others(i);
+      const label = cname + (on ? ", " + thisVoice : "") + (who.length ? `, used by ${who.join(", ")}` : "");
+      const b = h("button", {type: "button", class: "cp-sw" + (on ? " on" : "") + (who.length ? " used" : ""), role: "radio",
+        "aria-checked": String(on), tabindex: on || (!anyOn && i === 0) ? "0" : "-1", "data-k": "p" + i, title: label,
+        "aria-label": label, style: `--cp-c:${sw};--cp-k:${cpCheckInk(sw)}`}, on ? "✓" : "");
+      b.addEventListener("click", () => cpSave(cname, "p" + i));
+      b.addEventListener("focus", () => describe(i));
+      b.addEventListener("pointerenter", () => describe(i));
+      chart.append(b);
+    }
   });
-  grid.addEventListener("keydown", cpGridKey);
+  chart.addEventListener("keydown", cpGridKey);
+  chart.addEventListener("pointerleave", idle);
+  chart.addEventListener("focusout", () => setTimeout(idle));
+  const isCustom = cur.startsWith("#") && !anyOn;
+  const hexNow = speakerSwatch(name) || "#888888";
+  const picker = h("input", {type: "color", "data-k": "pick", value: hexNow.toLowerCase(), "aria-label": "Custom colour"});
+  const hex = h("input", {type: "text", class: "cp-hex", "data-k": "hex", maxlength: 7, spellcheck: "false", autocomplete: "off",
+    placeholder: "#RRGGBB", value: isCustom ? cur : "", "aria-label": "Custom colour as hex"});
+  // "In use": every voice and its colour; a click moves focus to that swatch
+  // (a custom colour: into the hex box, filled in, to share it with Use).
+  const legend = h("div", {class: "cp-use", role: "group", "aria-label": "Colours in use"}, h("span", {class: "cp-lbl"}, "In use"));
+  speakerProfiles.forEach((n, k) => {
+    const s = String(speakerSlot(n)), what = speakerColorLabel(n);
+    const b = h("button", {type: "button", class: n === name ? "me" : null, "data-k": "u" + k, title: `${n}: ${what}`,
+      "aria-label": `${n}${n === name ? " (this voice)" : ""}: ${what}. Show in the chart`}, speakerTag(n));
+    b.addEventListener("click", () => {
+      if (/^\d+$/.test(s)) return cpFocusSwatch(chart, Number(s));
+      hex.value = speakerSwatch(n); picker.value = speakerSwatch(n).toLowerCase(); hex.focus(); hex.select();
+    });
+    legend.append(b);
+  });
   const autoSlot = speakerAssign(speakerProfiles, {...speakerColors, [name]: ""}).get(name);
   const autoSw = typeof autoSlot === "number" ? SPEAKER_PALETTE[autoSlot] : null;
   const auto = h("button", {type: "button", class: "small cp-auto", "data-k": "auto", "aria-pressed": String(!cur),
@@ -1412,11 +1536,6 @@ function cpRender(focusKey, status, kind = "ok") {
     autoSw ? h("i", {class: "cp-mini", style: `background:${autoSw[1]}`, "aria-hidden": "true"}) : null,
     autoSw ? `Automatic (${autoSw[0]})` : "Automatic", !cur ? " ✓" : "");
   auto.addEventListener("click", () => cpSave("", "auto"));
-  const isCustom = cur.startsWith("#") && !/^\d+$/.test(slot);
-  const hexNow = speakerSwatch(name) || "#888888";
-  const picker = h("input", {type: "color", "data-k": "pick", value: hexNow.toLowerCase(), "aria-label": "Custom colour"});
-  const hex = h("input", {type: "text", class: "cp-hex", "data-k": "hex", maxlength: 7, spellcheck: "false", autocomplete: "off",
-    placeholder: "#RRGGBB", value: isCustom ? cur : "", "aria-label": "Custom colour as hex"});
   const use = h("button", {type: "button", class: "small", "data-k": "use"}, "Use");
   const useHex = () => {
     let v = hex.value.trim();
@@ -1431,12 +1550,14 @@ function cpRender(focusKey, status, kind = "ok") {
   const customWho = isCustom ? others(slot) : [];
   const body = [
     h("div", {class: "cp-head"}, h("span", null, "Colour of"), speakerTag(name)),
-    grid,
+    speakerProfiles.length ? legend : null,
+    chart,
+    info,
     h("div", {class: "cp-row"}, auto),
     h("div", {class: "cp-row"}, h("span", {class: "cp-lbl"}, "Custom" + (isCustom ? " ✓" : "")), picker, hex, use,
       customWho.length ? h("span", {class: "cp-who"}, "also " + customWho.join(", ")) : null),
     msg,
-  ];
+  ].filter(Boolean);
   if (!cp.el) {
     cp.el = h("div", {class: "cp", role: "dialog", "aria-label": `Colour of ${name}`});
     cp.el.addEventListener("keydown", (ev) => {
@@ -1446,24 +1567,37 @@ function cpRender(focusKey, status, kind = "ok") {
   }
   cp.el.replaceChildren(...body);
   cpPlace();
-  const f = (focusKey && cp.el.querySelector(`[data-k="${focusKey}"]`)) || grid.querySelector('[tabindex="0"]');
+  const f = (focusKey && cp.el.querySelector(`[data-k="${focusKey}"]`)) || chart.querySelector('[tabindex="0"]');
   if (f) f.focus();
+  idle();
 }
-// Arrow keys move within the 4-column grid; Home/End jump to the ends.
+// Make swatch i the chart's one tab stop and focus it.
+function cpFocusSwatch(chart, i) {
+  const btns = [...chart.querySelectorAll(".cp-sw")];
+  if (!btns[i]) return;
+  for (const b of btns) b.tabIndex = -1;
+  btns[i].tabIndex = 0;
+  btns[i].focus();
+}
+// Arrow keys move in two dimensions: left/right across the hue families,
+// up/down across the shades (base, deep, light, pale). Home/End go to the
+// ends of the row; with Ctrl or Cmd, to the first and last swatch.
 function cpGridKey(ev) {
-  const btns = [...ev.currentTarget.querySelectorAll(".cp-sw")];
+  const chart = ev.currentTarget, btns = [...chart.querySelectorAll(".cp-sw")];
   const i = btns.indexOf(document.activeElement);
   if (i < 0) return;
-  const step = {ArrowLeft: -1, ArrowRight: 1, ArrowUp: -CP_COLS, ArrowDown: CP_COLS}[ev.key];
-  let j = null;
-  if (step) j = Math.min(btns.length - 1, Math.max(0, i + step));
-  else if (ev.key === "Home") j = 0;
-  else if (ev.key === "End") j = btns.length - 1;
+  const F = SPEAKER_FAMILIES, n = btns.length, r = Math.floor(i / F), c = i % F;
+  const j = {
+    ArrowLeft: c > 0 ? i - 1 : i,
+    ArrowRight: c < F - 1 && i + 1 < n ? i + 1 : i,
+    ArrowUp: r > 0 ? i - F : i,
+    ArrowDown: i + F < n ? i + F : i,
+    Home: ev.ctrlKey || ev.metaKey ? 0 : r * F,
+    End: ev.ctrlKey || ev.metaKey ? n - 1 : Math.min(n - 1, r * F + F - 1),
+  }[ev.key];
   if (j == null) return;
   ev.preventDefault();
-  for (const b of btns) b.tabIndex = -1;
-  btns[j].tabIndex = 0;
-  btns[j].focus();
+  cpFocusSwatch(chart, j);
 }
 async function cpSave(value, focusKey) {
   const name = cp.name;

@@ -276,12 +276,15 @@ events DB: `lines_7d` (count), `audio_s_7d` (summed `audio_s`) and
 used that week reports `0`, `0.0`, `null`. Only `GET /api/voices` carries it.
 Each profile also carries the other lab fields (`ref_text`, `max_chars`,
 `say_voice`, `seed`, `temperature`).
-`color` is the profile's GUI colour: one of the 16 palette names (`yellow`,
-`cyan`, `green`, `magenta`, `white`, `orange`, `blue`, `red`, `violet`,
-`lime`, `pink`, `brown`, `teal`, `grey`, `olive`, `sky`) or `"#rrggbb"`,
-both lower case, or null when none is set. The GUI gives a voice without one
-the first palette colours no explicit choice uses, in `config.profiles`
-order, wrapping when there are more such voices than free colours. A bad
+`color` is the profile's GUI colour: one of the 64 palette names or
+`"#rrggbb"`, both lower case, or null when none is set. The palette names
+are 16 families (`yellow`, `cyan`, `green`, `magenta`, `white`, `orange`,
+`blue`, `red`, `violet`, `lime`, `pink`, `brown`, `teal`, `grey`, `olive`,
+`sky`) and each family with `-deep`, `-light` or `-pale` (`teal-deep`), in
+that order (`config.SPEAKER_COLORS`). The GUI gives a voice without one the
+first palette colours no explicit choice uses (every family, then the deep,
+light and pale rows), in `config.profiles` order, wrapping when there are
+more such voices than free colours. A bad
 value in config.toml is a config warning and counts as unset.
 
 `PATCH /api/lab/profiles/<name>` with `{"description": "text"}` and/or
