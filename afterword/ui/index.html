@@ -278,23 +278,28 @@
   table.mini td:first-child, table.mini th:first-child { padding-left: 0; }
 
   /* config */
-  .cfg-meta { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 5px 12px; font-size: 13px; align-items: baseline; }
-  .cfg-meta > .lbl { font-size: 12px; color: var(--muted); }
+  .cfg-meta { display: grid; grid-template-columns: minmax(70px, 110px) minmax(0, 1fr); gap: 6px 16px; font-size: 13px; align-items: baseline; margin: 0; }
+  .cfg-meta > .lbl { font-size: 12px; color: var(--slate); margin: 0; }
+  .cfg-meta > dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  .cfg-note { margin-top: 10px; max-width: 80ch; }
   ul.warnings { margin: 0; padding-left: 18px; font-size: 12px; color: var(--queued); }
   ul.warnings li { word-break: break-word; }
-  .toml { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: auto; max-height: 70vh; background: var(--panel); }
+  .toml { display: flex; border: 1px solid var(--rule); border-radius: 6px; overflow: auto; max-height: 70vh; background: var(--panel); }
   .toml pre { border: 0; border-radius: 0; max-height: none; overflow: visible; white-space: pre; word-break: normal;
               padding: 8px 10px; background: none; line-height: 1.5; tab-size: 4; }
-  .toml pre.gut { color: var(--muted); text-align: right; user-select: none; -webkit-user-select: none; position: sticky; left: 0;
-                  background: color-mix(in srgb, var(--bg) 70%, var(--panel)); border-right: 1px solid var(--line); min-width: 44px; }
+  .toml pre.gut { color: var(--slate); text-align: right; user-select: none; -webkit-user-select: none; position: sticky; left: 0;
+                  background: color-mix(in srgb, var(--paper) 70%, var(--sheet)); border-right: 1px solid var(--rule); min-width: 44px; }
   .toml pre.src { flex: 1; min-width: 0; }
+  .toml pre, .toml pre.gut { font-family: var(--mono); font-size: 12px; }
   table.pn td { padding: 4px 6px; }
   table.pn td:first-child { width: 34%; } table.pn td:last-child { width: 1%; white-space: nowrap; }
+  table.pn th { font-size: 12px; font-weight: 400; color: var(--slate); text-transform: none; letter-spacing: 0; }
   table.pn input[type=text] { width: 100%; min-width: 0; font-family: var(--mono); font-size: 12px; }
+  table.pn td:nth-child(2) input[type=text] { font-family: var(--serif); font-size: 15px; }
   table.pn tr.bad input.k { border-color: var(--error); }
   table.pn tr.changed td:first-child { box-shadow: inset 3px 0 0 var(--queued); }
   .pl-row { display: grid; grid-template-columns: minmax(7em, auto) 1fr auto; gap: 5px 6px; align-items: center;
-            border-top: 1px solid var(--line); padding: 7px 0; min-width: 0; }
+            border-top: 1px solid var(--rule); padding: 7px 0; min-width: 0; }
   .pl-row input[type=text] { width: 100%; min-width: 0; font-family: var(--mono); font-size: 12px; }
   .pl-row .pl-more { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
   #view-lab .pl-row .pl-more select { width: auto; max-width: 15em; flex: 0 1 auto; }
@@ -359,20 +364,25 @@
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
   .al-set { display: flex; gap: 8px 10px; align-items: center; flex-wrap: wrap; }
   .al-pools { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
-  .al-pools textarea { width: 100%; min-height: 120px; resize: vertical; font-size: 12.5px; }
+  .al-pools textarea { width: 100%; min-height: 120px; resize: vertical; font-family: var(--serif); font-size: 15px; line-height: 1.55; }
   .al-pools .ev { display: flex; gap: 6px; align-items: center; font-size: 12px; margin-bottom: 4px; }
-  .al-pools .ev b { font-size: 12px; } .al-pools textarea.bad { border-color: var(--error); }
+  .al-pools .ev b { font-size: 13px; font-weight: 600; color: var(--ink); }
+  .al-pools .msg.info { font-family: var(--serif); font-size: 13px; }
+  .hint.pv { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; } .al-pools textarea.bad { border-color: var(--error); }
 
   /* engine strip */
-  .engine { display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; }
-  .engine .sum { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 150px; font-size: 12px; }
-  .model { flex: 1; min-width: 210px; border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; display: flex;
+  .engine { display: flex; gap: 0 24px; align-items: stretch; flex-wrap: wrap; }
+  .engine .sum { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 150px; font-size: 12px; color: var(--slate); padding: 6px 0; }
+  .model { flex: 1; min-width: 210px; border: 0; border-top: 1px solid var(--rule); border-radius: 0; padding: 8px 0; display: flex;
            flex-direction: column; gap: 3px; font-size: 12px; }
-  .model .nm { font-weight: 600; font-size: 13px; display: flex; gap: 6px; align-items: center; }
-  .model .st { color: var(--muted); }
+  .model .nm { font-weight: 600; font-size: 13px; color: var(--ink); display: flex; gap: 8px; align-items: center; min-width: 0; }
+  .model .nm .use { font-weight: 400; font-size: 12px; color: var(--slate); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .model .nm .badge, .model .nm button { flex: none; }
+  .model .st { color: var(--slate); font-family: var(--mono); font-size: 12px; }
+  .model .st:empty { display: none; }
   .badge.ok { color: var(--spoken); } .badge.no { color: var(--error); } .badge.idle { color: var(--skipped); }
   .badge.busy { color: var(--queued); }
-  .banner { border: 1px solid color-mix(in srgb, var(--error) 40%, var(--line)); background: color-mix(in srgb, var(--error) 7%, var(--panel));
+  .banner { border: 1px solid color-mix(in srgb, var(--error) 40%, var(--rule)); background: color-mix(in srgb, var(--error) 7%, var(--sheet));
             border-radius: 7px; padding: 8px 12px; font-size: 13px; width: 100%; }
 
   /* results */
@@ -727,8 +737,8 @@
   <div class="banner" id="c-err" hidden></div>
   <section class="panel" aria-label="config file">
     <h2>Config <span class="grow"></span><span class="msg" id="c-msg"></span><button id="c-reload" title="Re-read config.toml now">Reload</button></h2>
-    <div class="cfg-meta" id="c-meta"><span class="hint">Loading…</span></div>
-    <div class="hint" style="margin-top:8px">Edit the file in your editor; the daemon picks up changes automatically (Reload forces it). The voice lab’s profile editor writes to the same file. If the file has a parse error, the daemon keeps using the last good config.</div>
+    <dl class="cfg-meta" id="c-meta"><dd class="hint">Loading…</dd></dl>
+    <div class="hint cfg-note">Edit the file in your editor; the daemon picks up changes automatically (Reload forces it). The voice lab’s profile editor writes to the same file. If the file has a parse error, the daemon keeps using the last good config.</div>
   </section>
   <section class="panel" aria-label="engine status">
     <h2>Engine</h2>
@@ -736,8 +746,8 @@
   </section>
   <section class="panel" aria-label="pronunciations">
     <h2>Pronunciations <span class="grow"></span><span class="msg" id="pn-msg"></span>
-      <label class="hint" for="pn-table" style="text-transform:none;letter-spacing:0;font-weight:400">table</label><select id="pn-table" title="Which [pronounce] table to edit"></select></h2>
-    <div class="hint" style="margin-bottom:8px">Words rewritten before they are spoken, in every line, the voice lab and the <code>say</code> fallback. The longest match wins; a word that begins or ends with a letter or digit only matches whole words (<code>uv</code> leaves <code>uvicorn</code> alone); an all-lowercase word ignores case, one with capitals matches exactly. Profile tables override the global one.</div>
+      <label class="hint" for="pn-table">table</label><select id="pn-table" title="Which [pronounce] table to edit"></select></h2>
+    <div class="hint" style="margin-bottom:8px;max-width:80ch">Words rewritten before they are spoken, in every line, the voice lab and the <code>say</code> fallback. The longest match wins; a word that begins or ends with a letter or digit only matches whole words (<code>uv</code> leaves <code>uvicorn</code> alone); an all-lowercase word ignores case, one with capitals matches exactly. Profile tables override the global one.</div>
     <table class="pn"><thead><tr><th>Word</th><th>Spoken as</th><th></th></tr></thead><tbody id="pn-rows"><tr><td colspan="3" class="hint">Loading…</td></tr></tbody></table>
     <div class="bar">
       <button id="pn-add" title="Add a row">Add word</button>
@@ -745,12 +755,12 @@
       <button id="pn-revert" disabled>Revert</button>
       <span class="hint" id="pn-state"></span>
     </div>
-    <div class="hint" id="pn-hearhint" style="margin-top:6px"></div>
+    <div class="hint pv" id="pn-hearhint" style="margin-top:6px"></div>
     <div class="msg err" id="pn-warn" hidden style="display:block;margin-top:6px"></div>
   </section>
   <section class="panel" aria-label="spoken alerts">
     <h2>Spoken alerts <span class="grow"></span><span class="msg" id="al-msg"></span></h2>
-    <div class="hint" style="margin-bottom:8px">A short line when Claude needs you (a permission prompt, a question), sits idle, or finished a long turn with nothing spoken. Alerts speak even when a session’s voice is off, but not when it (or everything) is muted. Changes here are written to <code>[alerts]</code> in config.toml.</div>
+    <div class="hint" style="margin-bottom:8px;max-width:80ch">A short line when Claude needs you (a permission prompt, a question), sits idle, or finished a long turn with nothing spoken. Alerts speak even when a session’s voice is off, but not when it (or everything) is muted. Changes here are written to <code>[alerts]</code> in config.toml.</div>
     <div class="al-set">
       <label class="chk"><input type="checkbox" id="al-on"> <b>alerts on</b></label>
       <span class="row" id="al-events"></span>
@@ -759,8 +769,8 @@
         <option value="away">when away (after ~6 s)</option><option value="now">at once</option></select>
       <label class="hint" for="al-after">done after</label><input type="number" id="al-after" min="0" max="86400" step="5" style="width:80px" title="[alerts] done_after_s"><span class="hint">s</span>
     </div>
-    <h2 style="margin-top:14px">Phrases <span class="grow"></span>
-      <label class="hint" for="al-lang" style="text-transform:none;letter-spacing:0;font-weight:400">language</label><select id="al-lang"></select></h2>
+    <h2 style="margin-top:16px">Phrases <span class="grow"></span>
+      <label class="hint" for="al-lang">language</label><select id="al-lang"></select></h2>
     <div class="hint" id="al-src" style="margin-bottom:6px"></div>
     <div class="al-pools" id="al-pools"><span class="hint">Loading…</span></div>
     <div class="bar">
@@ -778,7 +788,7 @@
     <div class="msg err" id="al-warn" hidden style="display:block;margin-top:6px"></div>
   </section>
   <section class="panel" aria-label="config.toml">
-    <h2>config.toml <span class="hint" id="c-lines" style="text-transform:none;letter-spacing:0;font-weight:400"></span><span class="grow"></span><span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">read-only</span></h2>
+    <h2>config.toml <span class="hint" id="c-lines"></span><span class="grow"></span><span class="hint">read-only</span></h2>
     <div class="toml" id="c-toml"><pre class="gut"></pre><pre class="src"></pre></div>
   </section>
 </main>
@@ -3057,7 +3067,7 @@ const Lab = (() => {
     kids.push(h("div", {class: "sum"},
       h("div", null, h("span", {class: "badge " + (eng.busy ? "busy" : (eng.available === false ? "no" : "ok"))}, eng.busy ? "rendering" : (eng.available === false ? "unavailable" : "idle")),
         " ", h("span", {class: "muted"}, `${eng.pending || 0} pending`)),
-      h("div", {class: "muted mono"}, mem ? `mem ${num(mem.active_gb, 1)} GB · peak ${num(mem.peak_gb, 1)} GB` : "mem —")));
+      h("div", {class: "muted mono"}, mem ? `mem ${num(mem.active_gb, 1)} GB, peak ${num(mem.peak_gb, 1)} GB` : "mem —")));
     const models = eng.models || {};
     const missing = [];
     for (const key of Object.keys(MODEL_INFO).concat(Object.keys(models).filter(k => !(k in MODEL_INFO)))) {
@@ -3074,9 +3084,9 @@ const Lab = (() => {
         title: m.loaded ? "Already in memory" : "Load it now so the next render is fast"}, m.loaded ? "Loaded" : "Warm");
       btn.addEventListener("click", () => warm(key, btn, msg, afterWarm));
       kids.push(h("div", {class: "model", title: m.repo || ""},
-        h("div", {class: "nm"}, info.label, h("span", {class: "muted", style: "font-weight:400"}, info.use), h("span", {class: "grow"}), btn),
-        h("div", {class: "st"}, state, m.load_ms != null ? `  load ${(m.load_ms / 1000).toFixed(1)} s` : "",
-          !m.downloaded ? h("span", null, " · run ", h("code", null, pull)) : null),
+        h("div", {class: "nm"}, state, info.label, h("span", {class: "use"}, info.use), h("span", {class: "grow"}), btn),
+        h("div", {class: "st"}, m.load_ms != null ? `load ${(m.load_ms / 1000).toFixed(1)} s` : "",
+          !m.downloaded ? h("span", null, "run ", h("code", null, pull)) : null),
         m.error ? h("div", {class: "msg err", style: "word-break:break-word", title: String(m.error)}, "Last load failed: " + String(m.error)) : null,
         msg));
     }
@@ -3259,7 +3269,7 @@ const Pronounce = (() => {
     $("pn-revert").disabled = saving || !isDirty;
     const n = rows.filter(r => keyOf(r).trim()).length;
     $("pn-state").textContent = bad.size ? [...bad.values()][0]
-      : `${n} word${n === 1 ? "" : "s"}${isDirty ? " · unsaved changes" : ""}`;
+      : `${n} word${n === 1 ? "" : "s"}${isDirty ? ", unsaved changes" : ""}`;
     $("pn-state").className = bad.size ? "msg err" : "hint";
     $("pn-rows").querySelectorAll("tr[data-i]").forEach(tr => {
       const i = Number(tr.dataset.i), r = rows[i];
@@ -3279,8 +3289,9 @@ const Pronounce = (() => {
     if (!want.includes(table)) table = "";
     sel.value = table;
     const p = hearProfile();
-    $("pn-hearhint").textContent = p ? `▶ plays the “spoken as” text with profile ${p}${table ? "" : " (the default profile)"}.`
-      : "Add a profile in the Voice lab to hear entries.";
+    $("pn-hearhint").replaceChildren(...(p
+      ? ["▶ plays the “spoken as” text with ", speakerTag(p), table ? "." : " (the default profile)."]
+      : ["Add a profile in the Voice lab to hear entries."]));
   }
   function paintRows(focusLast) {
     const tbody = $("pn-rows");
@@ -3541,7 +3552,8 @@ const Alerts = (() => {
     const r = await api("POST", "/api/alerts/hear", {event: ev, phrase, lang, profile: prof ? prof.name : undefined});
     btn.disabled = false;
     if (!r.ok || !r.data || typeof r.data.url !== "string" || !r.data.url.startsWith("/api/lab/")) return note(msg, r.error || "render failed", "err");
-    note(msg, `“${r.data.alert_text}” (${r.data.alert_profile})`, "info");
+    note(msg, "", "info");
+    msg.replaceChildren(`“${r.data.alert_text}” by `, speakerTag(r.data.alert_profile));
     const rate = Math.min(2, Math.max(0.5, Number(r.data.pace) || 1));
     player.src = r.data.url;
     player.defaultPlaybackRate = rate; player.playbackRate = rate;
@@ -3615,14 +3627,14 @@ const Config = (() => {
       metaSig = mSig;
       const differ = d.synth != null && d.configured_synth != null && d.synth !== d.configured_synth;
       $("c-meta").replaceChildren(
-        h("span", {class: "lbl"}, "path"), h("span", null, h("code", null, d.path || "—")),
-        h("span", {class: "lbl"}, "loaded"), h("span", null, fmtDateTime(d.loaded_at), " (", relSpan(d.loaded_at), ")"),
-        h("span", {class: "lbl"}, "synth"), h("span", null,
+        h("dt", {class: "lbl"}, "path"), h("dd", null, h("code", null, d.path || "—")),
+        h("dt", {class: "lbl"}, "loaded"), h("dd", null, fmtDateTime(d.loaded_at), " (", relSpan(d.loaded_at), ")"),
+        h("dt", {class: "lbl"}, "synth"), h("dd", null,
           h("b", null, d.synth || "—"), " in use",
-          differ ? h("span", {class: "warn"}, ` · config asks for “${d.configured_synth}” (not available, so falling back)`)
-                 : h("span", {class: "muted"}, ` · configured: ${d.configured_synth || "—"}`)),
-        h("span", {class: "lbl"}, "warnings"),
-        warnings.length ? h("ul", {class: "warnings"}, warnings.map(w => h("li", null, w))) : h("span", {class: "muted"}, "none"));
+          differ ? h("span", {class: "warn"}, `, config asks for “${d.configured_synth}” (not available, so falling back)`)
+                 : h("span", {class: "muted"}, `, configured: ${d.configured_synth || "—"}`)),
+        h("dt", {class: "lbl"}, "warnings"),
+        h("dd", null, warnings.length ? h("ul", {class: "warnings"}, warnings.map(w => h("li", null, w))) : h("span", {class: "muted"}, "none")));
     }
     const eSig = JSON.stringify(d.engine ?? null);
     if (eSig !== engSig) {
