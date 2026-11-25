@@ -398,6 +398,9 @@
           <label><input type="radio" name="b-src" value="builtin" checked>Built-in speaker</label>
           <label><input type="radio" name="b-src" value="clone">Clone from clip</label>
           <label><input type="radio" name="b-src" value="design">Design from text</label>
+          <label><input type="radio" name="b-src" value="kokoro" title="Kokoro-82M: small and fast, preset voices">Kokoro</label>
+          <label><input type="radio" name="b-src" value="chatterbox" title="Chatterbox Multilingual: clones a clip, 23 languages">Chatterbox</label>
+          <label><input type="radio" name="b-src" value="apple" title="Apple's speech synthesizer (Premium voices when installed)">Apple</label>
           <label><input type="radio" name="b-src" value="say">macOS say</label>
         </div>
         <div class="msg err" id="b-srcwarn"></div>
@@ -416,6 +419,20 @@
           <div class="field top"><label class="lbl" for="b-desc">Description</label>
             <textarea id="b-desc" rows="3" maxlength="1000" placeholder="e.g. A warm, low female voice in her forties, unhurried, faint smile, close-mic radio narrator."></textarea></div>
           <div class="hint" style="margin:-2px 0 8px 90px">Designed voices can drift between renders. Lock the seed, and “Freeze as clip” a render you like.</div>
+        </div>
+        <div data-src="kokoro" hidden>
+          <div class="field"><label class="lbl" for="b-kokoro">Voice</label><select id="b-kokoro"></select></div>
+          <div class="hint" style="margin:-2px 0 8px 90px">The first letter is the voice's language (a/b English, z Chinese, j Japanese, …). Kokoro is deterministic: no seed.</div>
+        </div>
+        <div data-src="chatterbox" hidden>
+          <div class="field"><label class="lbl" for="b-cbclip">Clip</label><select id="b-cbclip"></select></div>
+          <div class="field" id="b-cbpathrow" hidden><label class="lbl" for="b-cbpath">Path</label>
+            <input type="text" id="b-cbpath" placeholder="/absolute/or/~/path/to/voice.wav" spellcheck="false"></div>
+          <div class="hint" style="margin:-2px 0 8px 90px">Clones the clip in any of 23 languages; no transcript needed.</div>
+        </div>
+        <div data-src="apple" hidden>
+          <div class="field"><label class="lbl" for="b-apple">Voice</label><select id="b-apple"></select></div>
+          <div class="hint" style="margin:-2px 0 8px 90px">Download Premium or Enhanced voices in System Settings → Accessibility → Spoken Content. No seed.</div>
         </div>
         <div data-src="say" hidden>
           <div class="field"><label class="lbl" for="b-say">Voice</label><select id="b-say"></select></div>
@@ -1421,8 +1438,13 @@ const Lab = (() => {
     custom_voice: {label: "CustomVoice", use: "built-in speakers"},
     base: {label: "Base", use: "cloning"},
     voice_design: {label: "VoiceDesign", use: "designed voices"},
+    kokoro: {label: "Kokoro", use: "kokoro: voices"},
+    chatterbox: {label: "Chatterbox", use: "chatterbox: clones"},
   };
-  const SRC_MODEL = {builtin: "custom_voice", clone: "base", design: "voice_design", say: null};
+  const SRC_MODEL = {builtin: "custom_voice", clone: "base", design: "voice_design", kokoro: "kokoro", chatterbox: "chatterbox", apple: null, say: null};
+  const SRC_LABEL = {builtin: "built-in", clone: "clone", design: "designed", kokoro: "Kokoro", chatterbox: "Chatterbox", apple: "Apple", say: "macOS say"};
+  const SRC_KINDS = Object.keys(SRC_LABEL);
+  const CLIP_SRC = {clone: ["b-clip", "b-path", "b-pathrow"], chatterbox: ["b-cbclip", "b-cbpath", "b-cbpathrow"]};
   const READ_ALOUD = [
     "The quick brown fox jumps over the lazy dog, then naps in the warm afternoon sun.",
     "I usually start the morning with coffee, a short walk, and a look at what broke overnight.",
@@ -1496,6 +1518,7 @@ const Lab = (() => {
     const src = srcValue();
     for (const el of document.querySelectorAll("[data-src]")) el.hidden = el.dataset.src !== src;
     $("b-pathrow").hidden = !(src === "clone" && $("b-clip").value === "__path__");
+    $("b-cbpathrow").hidden = !(src === "chatterbox" && $("b-cbclip").value === "__path__");
     const clip = cat && (cat.clips || []).find(c => c.name === $("b-clip").value);
     $("b-ref").placeholder = clip && clip.ref_text ? `saved: ${clip.ref_text}` : "exact words spoken in the clip";
     let warn = "";
@@ -1503,9 +1526,13 @@ const Lab = (() => {
     if (cat && m) {
       const eng = cat.engine || {};
       const mi = (eng.models || {})[m];
-      if (eng.available === false) warn = `Qwen3-TTS unavailable${eng.error ? ": " + eng.error : ""}. Run: ${eng.pull_command || "afterword models pull"}`;
-      else if (mi && !mi.downloaded) warn = `${MODEL_INFO[m].label} model not downloaded. Run: ${eng.pull_command || "afterword models pull"}`;
+      if (eng.available === false) warn = `Local models unavailable${eng.error ? ": " + eng.error : ""}. Run: ${eng.pull_command || "afterword models pull"}`;
+      else if (mi && !mi.downloaded) warn = `${MODEL_INFO[m].label} model not downloaded. Run: ${eng.pull_command || "afterword models pull"} ${m}`;
     }
+    if (!warn && src === "apple" && cat && cat.apple && cat.apple.available === false)
+      warn = `Apple voices unavailable: ${cat.apple.error || "unknown reason"}`;
+    if (!warn && src === "kokoro" && cat && mi0(m) && mi0(m).downloaded && !(cat.kokoro_voices || []).length)
+      warn = "No Kokoro voices found in the model download.";
     if (!warn && src === "builtin" && cat && !(cat.speakers || []).length) warn = "No built-in speakers listed (CustomVoice not downloaded?).";
     if (!warn && m && cat && (((cat.engine || {}).models || {})[m] || {}).error)
       warn = `${MODEL_INFO[m].label} failed to load last time: ${cat.engine.models[m].error}`;
@@ -1517,9 +1544,10 @@ const Lab = (() => {
       $(id).title = noStyle ? "Not used by this voice source" : "";
     }
     $("b-stylehint").hidden = !noStyle;
-    $("b-stylehint").textContent = noStyle ? `Style and mood are not used by ${src === "say" ? "macOS say" : "clone"} voices.` : "";
+    $("b-stylehint").textContent = noStyle ? `Style and mood are not used by ${SRC_LABEL[src] || src} voices.` : "";
     syncSpec();
   }
+  function mi0(m) { return m && cat && ((cat.engine || {}).models || {})[m]; }
   function usesStyle(src) { return src === "builtin" || src === "design"; }
   function syncSpec() {
     const s = readBuilder();
@@ -1545,6 +1573,9 @@ const Lab = (() => {
       voice = "clone:" + ($("b-clip").value === "__path__" ? $("b-path").value.trim() : $("b-clip").value);
       ref_text = $("b-ref").value.trim() || null;
     } else if (src === "design") voice = "design:" + $("b-desc").value.trim();
+    else if (src === "kokoro") voice = "kokoro:" + $("b-kokoro").value;
+    else if (src === "chatterbox") voice = "chatterbox:" + ($("b-cbclip").value === "__path__" ? $("b-cbpath").value.trim() : $("b-cbclip").value);
+    else if (src === "apple") voice = "apple:" + $("b-apple").value;
     else voice = "say:" + $("b-say").value;
     const seedTxt = $("b-seed").value.trim();
     const styled = usesStyle(src);
@@ -1561,7 +1592,8 @@ const Lab = (() => {
   function builderProblem(s) {
     const [kind, ...rest] = s.voice.split(":");
     const arg = rest.join(":");
-    if (!arg) return {builtin: "Pick a speaker.", clone: "Pick a clip (or enter a path).", design: "Write a voice description.", say: "Pick a say voice."}[kind] || "Incomplete voice.";
+    if (!arg && kind !== "apple") return {builtin: "Pick a speaker.", clone: "Pick a clip (or enter a path).", design: "Write a voice description.",
+      kokoro: "Pick a Kokoro voice.", chatterbox: "Pick a clip (or enter a path).", say: "Pick a say voice."}[kind] || "Incomplete voice.";
     if (s.seed != null && (!Number.isFinite(s.seed) || s.seed < 0)) return "Seed must be a non-negative integer.";
     return null;
   }
@@ -1570,14 +1602,17 @@ const Lab = (() => {
     const spec = String(s.voice || "");
     const i = spec.indexOf(":");
     const kind = i > 0 ? spec.slice(0, i) : "", arg = i > 0 ? spec.slice(i + 1) : spec;
-    let src = ["builtin", "clone", "design", "say"].includes(kind) ? kind : "builtin";
+    let src = SRC_KINDS.includes(kind) ? kind : "builtin";
     for (const r of radios()) r.checked = r.value === src;
     if (src === "builtin") setSelect($("b-speaker"), arg);
-    else if (src === "clone") {
-      if (arg.startsWith("/") || arg.startsWith("~")) { $("b-clip").value = "__path__"; $("b-path").value = arg; }
-      else setSelect($("b-clip"), arg);
-      $("b-ref").value = s.ref_text || "";
+    else if (CLIP_SRC[src]) {
+      const [clipId, pathId] = CLIP_SRC[src];
+      if (arg.startsWith("/") || arg.startsWith("~")) { $(clipId).value = "__path__"; $(pathId).value = arg; }
+      else setSelect($(clipId), arg);
+      if (src === "clone") $("b-ref").value = s.ref_text || "";
     } else if (src === "design") $("b-desc").value = arg;
+    else if (src === "kokoro") setSelect($("b-kokoro"), arg);
+    else if (src === "apple") setSelect($("b-apple"), arg);
     else setSelect($("b-say"), arg);
     setSelect($("b-lang"), normLang(s.lang));
     $("b-pace").value = clampPace(s.pace ?? 1);
@@ -1625,8 +1660,15 @@ const Lab = (() => {
     if (typeof url === "string" && url.startsWith("/api/lab/")) a.src = url;
     return a;
   }
-  function isSay(res) { return !!res && (res.backend === "say" || String((res.settings || {}).voice || "").startsWith("say:")); }
-  function seedText(res) { return res && res.seed != null ? `seed ${res.seed}` : (isSay(res) ? "seed n/a (macOS say)" : "seed n/a"); }
+  // Voices without a seed: macOS say, Apple, Kokoro (deterministic).
+  const UNSEEDED = {say: "macOS say", apple: "Apple", kokoro: "Kokoro"};
+  function unseeded(res) {
+    if (!res) return null;
+    const kind = String((res.settings || {}).voice || "").split(":")[0];
+    return UNSEEDED[res.backend] || UNSEEDED[kind] || null;
+  }
+  function isSay(res) { return !!unseeded(res); }
+  function seedText(res) { return res && res.seed != null ? `seed ${res.seed}` : (isSay(res) ? `seed n/a (${unseeded(res)})` : "seed n/a"); }
   function play(a) { try { a.currentTime = 0; const p = a.play(); if (p) p.catch(() => {}); } catch { /* ignore */ } }
 
   function resultCard(res, opt = {}) {
@@ -1637,7 +1679,7 @@ const Lab = (() => {
     const kv = (k, v, title) => (v == null || v === "") ? null : h("span", {title: title || `${k}: ${v}`}, k + " ", h("b", null, String(v)));
     // style/mood come back null when the voice kind ignores them (clone, say): kv() then hides them.
     set.push(kv("voice", s.voice), kv("lang", s.lang), kv("style", s.style), kv("mood", s.mood),
-             (res.seed ?? s.seed) != null ? kv("seed", res.seed ?? s.seed) : kv("seed", isSay(res) ? "n/a (macOS say)" : null, "macOS say has no seed"),
+             (res.seed ?? s.seed) != null ? kv("seed", res.seed ?? s.seed) : kv("seed", isSay(res) ? `n/a (${unseeded(res)})` : null, `${unseeded(res) || "this voice"} has no seed`),
              kv("temp", s.temperature), kv("pace", s.pace != null ? clampPace(s.pace).toFixed(2) + "×" : null));
     if (s.ref_text) set.push(kv("ref", s.ref_text));
     const tim = [kv("synth", num(res.synth_ms) != null ? num(res.synth_ms) + " ms" : null)];
@@ -1752,7 +1794,7 @@ const Lab = (() => {
       }
     });
     $("ml-cancel").hidden = true;
-    const seedNote = seed != null ? `seed ${seed}` : (String(base.voice).startsWith("say:") ? "seed n/a (macOS say)" : "no seed");
+    const seedNote = seed != null ? `seed ${seed}` : (UNSEEDED[String(base.voice).split(":")[0]] ? `seed n/a (${UNSEEDED[String(base.voice).split(":")[0]]})` : "no seed");
     note("ml-msg", errors.length ? errors.join(" · ") : `${cards.length} languages rendered with ${seedNote}.`, errors.length ? "err" : "ok");
     refreshSoon();
   }
@@ -2014,7 +2056,8 @@ const Lab = (() => {
     const s = readBuilder();
     const bad = builderProblem(s);
     if (bad) return note("ex-msg", "Builder: " + bad, "err");
-    if (s.voice.startsWith("say:")) return note("ex-msg", "macOS say voices have no seeds; pick a Qwen voice in the builder.", "err");
+    const kind0 = s.voice.split(":")[0];
+    if (UNSEEDED[kind0]) return note("ex-msg", `${UNSEEDED[kind0]} voices have no seeds; pick a Qwen3-TTS or Chatterbox voice in the builder.`, "err");
     const settings = previewBody(text, s);
     delete settings.seed;
     const start = parseInt($("ex-seed").value, 10);
@@ -2248,7 +2291,7 @@ const Lab = (() => {
       const lang = h("select", {"aria-label": "language", onchange: (ev) => { r.lang = ev.target.value; langsEdited(); paintLangs(); }});
       fillSelect(lang, langOptions(), r.lang);
       const voice = h("input", {type: "text", value: r.voice || "", placeholder: "voice: profile’s", spellcheck: "false",
-        "aria-label": "voice", title: "builtin:<Speaker>, clone:<clip>, design:<text> or say:<Voice>",
+        "aria-label": "voice", title: "builtin:<Speaker>, clone:<clip>, design:<text>, kokoro:<voice>, chatterbox:<clip>, apple:<voice> or say:<Voice>",
         oninput: (ev) => { r.voice = ev.target.value; langsEdited(); }});
       const fromBuilder = h("button", {class: "small", title: "Use the builder’s current voice for this language", onclick: () => {
         const s = readBuilder();
@@ -2343,7 +2386,7 @@ const Lab = (() => {
     const items = [{value: "", label: clips.length ? "— pick a clip —" : "— no clips yet —"},
       ...clips.map(c => ({value: c.name, label: `${c.name}${c.duration_s != null ? " · " + Number(c.duration_s).toFixed(1) + " s" : ""}`})),
       {value: "__path__", label: "Other file path…"}];
-    if (!sameJSON("clipopts", items)) fillSelect($("b-clip"), items);
+    if (!sameJSON("clipopts", items)) { fillSelect($("b-clip"), items); fillSelect($("b-cbclip"), items); }
     if (sameJSON("clips", clips)) return;
     if (!clips.length) { $("cl-list").replaceChildren(h("span", {class: "hint"}, "No clips yet. Upload or record one below.")); return; }
     $("cl-list").replaceChildren(...clips.map(c => {
@@ -2544,8 +2587,8 @@ const Lab = (() => {
     eng = eng || {};
     const kids = [];
     const pull = eng.pull_command || "afterword models pull";
-    if (eng.available === false) kids.push(h("div", {class: "banner"}, h("b", null, "Qwen3-TTS engine unavailable"),
-      eng.error ? `: ${eng.error}` : ".", " Install / download with ", h("code", null, pull), ". macOS say voices still work."));
+    if (eng.available === false) kids.push(h("div", {class: "banner"}, h("b", null, "Local model engine unavailable"),
+      eng.error ? `: ${eng.error}` : ".", " Install / download with ", h("code", null, pull), ". Apple and macOS say voices still work."));
     const mem = eng.memory;
     kids.push(h("div", {class: "sum"},
       h("div", null, h("span", {class: "badge " + (eng.busy ? "busy" : (eng.available === false ? "no" : "ok"))}, eng.busy ? "rendering" : (eng.available === false ? "unavailable" : "idle")),
@@ -2621,6 +2664,14 @@ const Lab = (() => {
       fillSelect($("b-say"), sv.length ? sv : [{value: "", label: "— none —"}]);
       fillSelect($("pr-sayv"), [{value: "", label: "— daemon default —"}, ...sv]);
     }
+    // Kokoro and Apple voices
+    const kv = (cat.kokoro_voices || []).map(v => ({value: v.name, label: `${v.name} — ${v.lang}, ${v.gender}`}));
+    if (!sameJSON("kokoro", kv)) fillSelect($("b-kokoro"), kv.length ? kv : [{value: "", label: "— none (Kokoro not downloaded) —"}]);
+    const av = [{value: "", label: "Best installed voice for the language"},
+      ...(cat.apple_voices || []).filter(v => !v.novelty).map(v => ({
+        value: v.quality === "default" ? v.name : `${v.name} (${cap(v.quality)})`,
+        label: `${v.name}${v.quality !== "default" ? " (" + cap(v.quality) + ")" : ""} — ${v.lang}`}))];
+    if (!sameJSON("apple", av)) fillSelect($("b-apple"), av);
     // languages
     const rev = revCodes();
     const langs = ["auto", ...(cat.languages || []).filter(n => String(n).toLowerCase() !== "auto")];
@@ -2653,7 +2704,8 @@ const Lab = (() => {
   function init() {
     for (const r of radios()) r.addEventListener("change", syncSource);
     $("b-clip").addEventListener("change", syncSource);
-    for (const id of ["b-speaker", "b-say", "b-path", "b-desc", "b-ref", "b-lang", "b-pace", "b-style", "b-mood", "b-seedlock", "b-tempon", "b-temp"]) {
+    $("b-cbclip").addEventListener("change", syncSource);
+    for (const id of ["b-speaker", "b-say", "b-kokoro", "b-apple", "b-cbpath", "b-path", "b-desc", "b-ref", "b-lang", "b-pace", "b-style", "b-mood", "b-seedlock", "b-tempon", "b-temp"]) {
       $(id).addEventListener("input", syncSpec); $(id).addEventListener("change", syncSpec);
     }
     $("b-seed").addEventListener("input", () => { if ($("b-seed").value !== "") $("b-seedlock").checked = true; syncSpec(); });

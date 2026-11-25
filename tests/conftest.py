@@ -22,6 +22,9 @@ def aw_home(tmp_path, monkeypatch):
     monkeypatch.setenv("AFTERWORD_HOME", str(d))
     monkeypatch.delenv("AFTERWORD_FALLBACK", raising=False)
     monkeypatch.delenv("AFTERWORD_DISABLE", raising=False)
+    # Apple voices: tests that want them install a stub helper; never compile
+    # the real one into a test home.
+    monkeypatch.setenv("AFTERWORD_APPLE_HELPER", "none")
     yield d
     import shutil
 

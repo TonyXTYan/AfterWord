@@ -35,7 +35,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from . import qwen
+from . import qwen, voices
 
 if TYPE_CHECKING:
     from .lab import Lab
@@ -149,8 +149,9 @@ class Explorer:
         if settings.get("seed") not in (None, ""):
             raise LabError(400, "settings.seed is not used here: give start_seed")
         prep = self.lab._prepare(settings)
-        if prep["spec"].kind == "say":
-            raise LabError(400, "macOS say voices have no seed to explore; pick a Qwen voice")
+        if prep["spec"].kind not in voices.SEEDED_KINDS:
+            raise LabError(400, f"{prep['spec'].kind} voices have no seed to explore; "
+                                "pick a Qwen3-TTS or Chatterbox voice")
         start_seed = _opt_num(body, "start_seed", int, 0, SEED_MAX)
         ahead = _opt_num(body, "ahead", int, 1, AHEAD_MAX)
         start_seed = 1 if start_seed is None else start_seed

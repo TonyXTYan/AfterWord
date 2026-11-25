@@ -19,6 +19,8 @@ log = logging.getLogger("afterword.config")
 SYNTHS = ("qwen", "say", "null")
 PLAYERS = ("afplay", "null")
 QWEN_MODEL_KINDS = ("custom_voice", "base", "voice_design")
+OTHER_MODEL_KINDS = ("kokoro", "chatterbox")  # [models]
+MODEL_FALLBACKS = ("apple", "say", "none")
 
 DEFAULT_CONFIG_TOML = """\
 # AfterWord config. Edits are picked up automatically (hot reload).
@@ -29,7 +31,10 @@ DEFAULT_CONFIG_TOML = """\
 port = 47800
 fallback = "say"          # what the hook does when the daemon is down: "say" or "none"
 announce_session = false  # speak the session label (cwd folder name) before each message
-synth = "qwen"            # "qwen" (Qwen3-TTS via mlx-audio), "say" (macOS) or "null"
+synth = "qwen"            # "qwen" (the local models: Qwen3-TTS, Kokoro, Chatterbox, plus
+                          # apple: and say: voices), "say" (macOS say only) or "null"
+model_fallback = "apple"  # when a model voice fails: "apple" (the best Apple voice for the
+                          # line's language, then say), "say", or "none" (the line fails)
 player = "afplay"         # "afplay" (the speakers) or "null"
 stream = true             # start speaking while the line is still rendering (PortAudio;
                           # if the audio device cannot be opened, afplay plays the whole line)
@@ -55,8 +60,17 @@ permission_when = "away"  # "away" = after Claude Code's ~6 s prompt timer; "now
 custom_voice = "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit"   # builtin:<Speaker>
 base = "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit"                  # clone:<clip>
 voice_design = "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit"   # design:<description>
-keep_loaded = 2           # models kept in memory at once (about 3 GB each)
+keep_loaded = 2           # models kept in memory at once (Qwen3-TTS about 3 GB each,
+                          # Chatterbox about 3 GB; Kokoro is small and not counted)
 warm_on_start = true      # load the models your profiles use when the daemon starts
+
+[models]
+# Hugging Face repos for the other local models (keep_loaded and
+# warm_on_start above apply to them too). Download with
+#   uv sync --extra kokoro --extra chatterbox
+#   uv run afterword models pull kokoro chatterbox
+kokoro = "mlx-community/Kokoro-82M-bf16"                  # kokoro:<voice>, e.g. kokoro:zf_xiaobei
+chatterbox = "mlx-community/chatterbox-multilingual-v3"   # chatterbox:<clip>
 
 # voice: builtin:<Speaker> | clone:<clip name or path> | design:<description> | say:<MacVoice>
 # Speakers: Serena, Vivian, Uncle_Fu, Dylan, Eric, Ryan, Aiden, Ono_Anna, Sohee.
@@ -166,6 +180,7 @@ class DaemonSettings:
     player: str = "afplay"
     stream: bool = True  # stream to the device as the engine renders (v1: whole WAV, then afplay)
     early_say: bool = True  # MessageDisplay: speak <say> blocks while Claude is still writing
+    model_fallback: str = "apple"  # a failed model voice: "apple" (then say), "say" or "none"
     max_queue: int = 16
     history: int = 50
 
@@ -177,9 +192,12 @@ class QwenSettings:
     voice_design: str = "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit"
     keep_loaded: int = 2
     warm_on_start: bool = True
+    # [models]: the other local models (the engine hosts them with Qwen3-TTS)
+    kokoro: str = "mlx-community/Kokoro-82M-bf16"
+    chatterbox: str = "mlx-community/chatterbox-multilingual-v3"
 
     def repos(self) -> dict[str, str]:
-        return {k: getattr(self, k) for k in QWEN_MODEL_KINDS}
+        return {k: getattr(self, k) for k in QWEN_MODEL_KINDS + OTHER_MODEL_KINDS}
 
 
 ALERT_EVENTS = ("permission", "input", "idle", "done")
@@ -325,6 +343,10 @@ def build_config(raw: dict[str, Any]) -> tuple[Config, list[str]]:
     if not isinstance(early_say, bool):
         errors.append("daemon.early_say: expected true/false")
         early_say = defaults.early_say
+    model_fallback = _str(d.get("model_fallback"), defaults.model_fallback, "daemon.model_fallback", errors)
+    if model_fallback not in MODEL_FALLBACKS:
+        errors.append(f"daemon.model_fallback: {model_fallback!r} is not one of {', '.join(MODEL_FALLBACKS)}")
+        model_fallback = defaults.model_fallback
     daemon = DaemonSettings(
         port=_num(d.get("port"), int, defaults.port, 1, 65535, "daemon.port", errors),
         fallback=fallback,
@@ -333,6 +355,7 @@ def build_config(raw: dict[str, Any]) -> tuple[Config, list[str]]:
         player=player,
         stream=stream,
         early_say=early_say,
+        model_fallback=model_fallback,
         max_queue=_num(d.get("max_queue"), int, defaults.max_queue, 1, 1000, "daemon.max_queue", errors),
         history=_num(d.get("history"), int, defaults.history, 0, 10000, "daemon.history", errors),
     )
@@ -366,6 +389,7 @@ def build_config(raw: dict[str, Any]) -> tuple[Config, list[str]]:
         _check_voice(profiles[name].voice, f"{where}.voice", errors)
 
     q = raw.get("qwen") if isinstance(raw.get("qwen"), dict) else {}
+    m = raw.get("models") if isinstance(raw.get("models"), dict) else {}
     qd = QwenSettings()
     warm = q.get("warm_on_start", qd.warm_on_start)
     if not isinstance(warm, bool):
@@ -377,6 +401,8 @@ def build_config(raw: dict[str, Any]) -> tuple[Config, list[str]]:
         voice_design=_str(q.get("voice_design"), qd.voice_design, "qwen.voice_design", errors),
         keep_loaded=_num(q.get("keep_loaded"), int, qd.keep_loaded, 1, 3, "qwen.keep_loaded", errors),
         warm_on_start=warm,
+        kokoro=_str(m.get("kokoro"), qd.kokoro, "models.kokoro", errors),
+        chatterbox=_str(m.get("chatterbox"), qd.chatterbox, "models.chatterbox", errors),
     )
     glob = _pron.clean_table(raw.get("pronounce"), errors, "pronounce")
     alerts = _alerts(raw.get("alerts"), profiles, errors)

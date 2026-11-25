@@ -223,6 +223,35 @@ def resample(audio, rate: int):
     return np.interp(x_out, np.arange(audio.size), audio).astype(np.float32)
 
 
+class StreamResampler:
+    """`resample` for a stream of chunks: linear interpolation that carries
+    its position across chunks, so chunk boundaries leave no seams."""
+
+    def __init__(self, rate: int):
+        self.step = float(rate) / SAMPLE_RATE
+        self.pos = 0.0  # next output position, in input samples from `prev`
+        self.prev = None  # last input sample of the previous chunk
+
+    def feed(self, audio):
+        import numpy as np
+
+        x = np.asarray(audio, dtype=np.float32).reshape(-1)
+        if self.step == 1.0 or x.size == 0:
+            return x
+        buf = x if self.prev is None else np.concatenate([np.array([self.prev], np.float32), x])
+        last = buf.size - 1
+        if self.pos > last:
+            self.pos -= last
+            self.prev = float(buf[last])
+            return np.zeros(0, np.float32)
+        k = int((last - self.pos) // self.step) + 1
+        xs = self.pos + np.arange(k, dtype=np.float64) * self.step
+        out = np.interp(xs, np.arange(buf.size), buf).astype(np.float32)
+        self.pos = xs[-1] + self.step - last
+        self.prev = float(buf[last])
+        return out
+
+
 # --------------------------------------------------------------------------- #
 # One item's stream                                                             #
 # --------------------------------------------------------------------------- #

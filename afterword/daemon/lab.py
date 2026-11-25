@@ -20,7 +20,7 @@ from typing import Any
 from afterword.hooks import pronounce
 from afterword.hooks.tags import PROFILE_NAME_RE, clean_text
 
-from . import pitch, qwen, voices
+from . import apple, pitch, qwen, voices
 from .config import LANG_FIELDS, ConfigStore, Profile, build_config, lang_code
 from .explore import Explorer, StarStore, semitones, stability_plan
 from .synth import SaySynth
@@ -158,12 +158,23 @@ class Lab:
             "languages": ["auto"] + voices.languages_from_config(any_model / "config.json" if any_model else None),
             "lang_codes": dict(voices.ISO_TO_QWEN),
             "say_voices": voices.say_voices(),
+            "kokoro_voices": voices.kokoro_voices(self.engine.snapshot_path("kokoro")),
+            "kokoro_langs": sorted({k.split("-")[0] for k in voices.KOKORO_LANGS}),
+            "chatterbox_langs": list(voices.CHATTERBOX_LANGS),
+            "apple": self.apple_status(),
+            "apple_voices": [v for v in apple.list_voices() if not v.get("personal")]
+            if apple.available()[0] else [],
             "clips": self.clips.list(),
             "profiles": {name: profile_dict(p) for name, p in cfg.profiles.items()},
             "daemon_synth": self.active_synth(),
             "configured_synth": cfg.daemon.synth,
             "samples": dict(voices.SAMPLES),
         }
+
+    @staticmethod
+    def apple_status() -> dict[str, Any]:
+        ok, error = apple.available()
+        return {"available": ok, "error": error}
 
     # ------------------------------------------------------------------ #
     # Preview                                                            #
@@ -244,6 +255,11 @@ class Lab:
         spec, settings = prep["spec"], prep["settings"]
         if spec.kind == "say":
             return
+        if spec.kind == "apple":
+            ok, error = apple.available()
+            if not ok:
+                raise LabError(503, error or "Apple voices are not available")
+            return
         try:
             qwen.build_request(prep["spoken"], spec, self.clips, lang=settings.get("lang"), style=None, mood=None,
                                ref_text=settings.get("ref_text"), seed=None, temperature=None)
@@ -251,7 +267,7 @@ class Lab:
             missing = "no reference clip" in str(exc) or "not found" in str(exc)
             raise LabError(404 if missing else 400, str(exc)) from None
         if spec.model is None:
-            raise LabError(400, f"{spec} is not a Qwen voice")
+            raise LabError(400, f"{spec} is not a local model voice")
         try:
             self.engine.check_ready(spec.model)
         except (qwen.EngineUnavailable, qwen.ModelNotDownloaded) as exc:
@@ -302,12 +318,22 @@ class Lab:
         """Render to `out`; the metadata of a preview, with its pitch.
         `preemptible` (the seed explorer): streamed, so live speech queued
         meanwhile stops it at its next chunk (qwen.RenderPreempted)."""
-        if spec.kind == "say":
+        if spec.kind in ("say", "apple"):
             async with self._say_lock:
-                profile = Profile(name="lab", say_voice=spec.value, pace=1.0)
-                result = await asyncio.to_thread(SaySynth().synth, text, profile, {}, out)
+                if spec.kind == "say":
+                    profile = Profile(name="lab", say_voice=spec.value, pace=1.0)
+                    run = SaySynth().synth
+                else:
+                    profile = Profile(name="lab", voice=str(spec), lang=settings.get("lang") or "", pace=1.0)
+                    run = apple.AppleSynth().synth
+                try:
+                    result = await asyncio.to_thread(run, text, profile, {}, out)
+                except voices.VoiceError as exc:
+                    raise LabError(400, str(exc)) from None
+                except apple.AppleUnavailable as exc:
+                    raise LabError(503, str(exc)) from None
             f0 = await asyncio.to_thread(pitch.f0_of_wav, out)
-            return {"backend": "say", "model": None, "synth_ms": round(result.synth_s * 1000, 1),
+            return {"backend": spec.backend, "model": None, "synth_ms": round(result.synth_s * 1000, 1),
                     "load_ms": 0.0, "audio_s": round(result.duration_s, 3), "seed": None,
                     "f0_hz": f0["f0_hz"], "f0_spread_hz": f0["f0_spread_hz"]}
         try:
@@ -337,13 +363,13 @@ class Lab:
         except voices.VoiceError as exc:
             raise LabError(400, str(exc)) from None
         except Exception as exc:
-            if spec.kind == "clone" and isinstance(exc, (RuntimeError, ValueError, OSError)) and "audio" in str(exc).lower():
+            if spec.kind in voices.CLIP_KINDS and isinstance(exc, (RuntimeError, ValueError, OSError)) and "audio" in str(exc).lower():
                 raise LabError(400, f"could not read the reference clip: {exc}") from None
             raise
         duration = await asyncio.to_thread(voices.write_wav, out, result.audio, result.sample_rate)
         f0 = await asyncio.to_thread(pitch.f0_stats, result.audio, result.sample_rate)
-        settings["seed"] = result.seed
-        return {"backend": "qwen", "model": result.model, "synth_ms": round(result.synth_s * 1000, 1),
+        settings["seed"] = result.seed  # None for voices without a seed (Kokoro)
+        return {"backend": spec.backend, "model": result.model, "synth_ms": round(result.synth_s * 1000, 1),
                 "load_ms": round(result.load_s * 1000, 1), "audio_s": round(duration, 3), "seed": result.seed,
                 "f0_hz": f0["f0_hz"], "f0_spread_hz": f0["f0_spread_hz"]}
 

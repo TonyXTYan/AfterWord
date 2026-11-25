@@ -6,7 +6,16 @@ A profile's `voice` string picks where the voice comes from:
     clone:<clip-name>      Qwen3-TTS Base, cloned from ~/.afterword/voices/<clip-name>.wav
     clone:<path>           Qwen3-TTS Base, cloned from that file (absolute or ~)
     design:<description>   Qwen3-TTS VoiceDesign, voice described in words
+    kokoro:<voice>         Kokoro-82M preset voice (af_heart, zf_xiaobei, jf_alpha, ...;
+                           "a,b" averages two voices)
+    chatterbox:<clip>      Chatterbox Multilingual, cloned from a clip (name or path, like clone:)
+    apple:<voice>          Apple's speech synthesizer (AVSpeechSynthesizer): a voice name
+                           ("Ava", "Ava (Premium)") or identifier; `apple:` alone picks the
+                           best installed voice for the line's language
     say:<MacVoice>         macOS `say` (no model)
+
+Kinds with a model run on the shared engine thread (qwen.py); `apple` and
+`say` run as subprocesses.
 """
 
 from __future__ import annotations
@@ -26,8 +35,41 @@ from typing import Any
 
 from afterword.hooks.tags import PROFILE_NAME_RE
 
-KINDS = ("builtin", "clone", "design", "say")
-MODEL_FOR_KIND = {"builtin": "custom_voice", "clone": "base", "design": "voice_design"}
+KINDS = ("builtin", "clone", "design", "kokoro", "chatterbox", "apple", "say")
+MODEL_FOR_KIND = {
+    "builtin": "custom_voice",
+    "clone": "base",
+    "design": "voice_design",
+    "kokoro": "kokoro",
+    "chatterbox": "chatterbox",
+}
+# The engine family of each kind: the `backend` recorded on events and previews.
+BACKEND_FOR_KIND = {
+    "builtin": "qwen", "clone": "qwen", "design": "qwen",
+    "kokoro": "kokoro", "chatterbox": "chatterbox", "apple": "apple", "say": "say",
+}
+# Kinds whose voice comes from a reference clip (ClipStore.resolve).
+CLIP_KINDS = ("clone", "chatterbox")
+# Kinds where a fixed seed picks one take (sampling models); the others are
+# deterministic or have no seed, so the seed explorer does not apply.
+SEEDED_KINDS = ("builtin", "clone", "design", "chatterbox")
+
+# ISO 639-1 (or en-gb) -> Kokoro pipeline code. es/fr/hi/it/pt go through
+# espeak-ng (bundled with misaki); ja and zh need misaki[ja] / misaki[zh].
+KOKORO_LANGS = {
+    "en": "a", "en-us": "a", "en-gb": "b", "es": "e", "fr": "f", "hi": "h",
+    "it": "i", "pt": "p", "ja": "j", "zh": "z",
+}
+KOKORO_LANG_NAMES = {
+    "a": "American English", "b": "British English", "e": "Spanish", "f": "French", "h": "Hindi",
+    "i": "Italian", "p": "Brazilian Portuguese", "j": "Japanese", "z": "Mandarin Chinese",
+}
+KOKORO_VOICE_RE = re.compile(r"[abefhijpz][fm]_[a-z0-9]+(,[abefhijpz][fm]_[a-z0-9]+)*")
+# The languages of Chatterbox Multilingual (v2/v3), ISO 639-1.
+CHATTERBOX_LANGS = (
+    "ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "hi", "it", "ja", "ko", "ms",
+    "nl", "no", "pl", "pt", "ru", "sv", "sw", "tr", "zh",
+)
 
 # ISO 639-1 -> Qwen3-TTS language name.
 ISO_TO_QWEN = {
@@ -82,12 +124,16 @@ class VoiceError(ValueError):
 
 @dataclass(frozen=True)
 class VoiceSpec:
-    kind: str  # builtin | clone | design | say
-    value: str  # speaker, clip name/path, description, or mac voice
+    kind: str  # one of KINDS
+    value: str  # speaker, clip name/path, description, Kokoro or Apple voice, or mac voice
 
     @property
     def model(self) -> str | None:
         return MODEL_FOR_KIND.get(self.kind)
+
+    @property
+    def backend(self) -> str:
+        return BACKEND_FOR_KIND.get(self.kind, self.kind)
 
     def __str__(self) -> str:
         return f"{self.kind}:{self.value}"
@@ -97,15 +143,24 @@ def parse_voice(spec: str | None) -> VoiceSpec:
     if not spec or not isinstance(spec, str) or ":" not in spec:
         raise VoiceError(
             f"voice {spec!r} is not a voice spec; use builtin:<Speaker>, clone:<clip>, "
-            "design:<description> or say:<MacVoice>"
+            "design:<description>, kokoro:<voice>, chatterbox:<clip>, apple:<voice> or say:<MacVoice>"
         )
     kind, _, value = spec.partition(":")
     kind = kind.strip().lower()
     value = value.strip()
     if kind not in KINDS:
         raise VoiceError(f"unknown voice kind {kind!r} in {spec!r} (use {', '.join(KINDS)})")
-    if kind in ("builtin", "clone", "design") and not value:
+    if kind in ("builtin", "clone", "design", "kokoro", "chatterbox") and not value:
         raise VoiceError(f"voice {spec!r} needs a value after '{kind}:'")
+    if kind == "kokoro":
+        value = value.lower()
+        if not KOKORO_VOICE_RE.fullmatch(value):
+            raise VoiceError(
+                f"{spec!r} is not a Kokoro voice (like af_heart, zf_xiaobei or jf_alpha; "
+                "'af_heart,af_bella' averages two)"
+            )
+    if kind == "apple" and len(value) > 200:
+        raise VoiceError("Apple voice name is too long")
     if kind == "design" and len(value) > 1000:
         raise VoiceError("voice description is too long (max 1000 characters)")
     return VoiceSpec(kind, value)
@@ -122,6 +177,69 @@ def language_name(lang: str | None) -> str:
         return value
     base = value.split("-", 1)[0]
     return ISO_TO_QWEN.get(base, "auto")
+
+
+def lang_iso(lang: str | None) -> str | None:
+    """An ISO 639-1 code (or en-gb) for a lang value, or None for auto/unknown."""
+    if not lang:
+        return None
+    value = lang.strip().lower().replace("_", "-")
+    if value in ("", "auto"):
+        return None
+    if value == "en-gb":
+        return value
+    for iso, name in ISO_TO_QWEN.items():
+        if value == name:
+            return iso
+    base = value.split("-", 1)[0]
+    return base if re.fullmatch(r"[a-z]{2,3}", base) else None
+
+
+def kokoro_lang(voice: str, lang: str | None) -> str:
+    """The Kokoro pipeline code for a line: the line's language when Kokoro
+    has it, else the language of the (first) voice. A language Kokoro cannot
+    speak is a VoiceError (the line then falls back like any failed render)."""
+    iso = lang_iso(lang)
+    if iso is None:
+        return voice[0]
+    code = KOKORO_LANGS.get(iso) or KOKORO_LANGS.get(iso.split("-", 1)[0])
+    if code is None:
+        raise VoiceError(
+            f"Kokoro has no {iso} voices (it speaks "
+            + ", ".join(sorted({k.split("-")[0] for k in KOKORO_LANGS})) + ")"
+        )
+    if code == "a" and voice[0] == "b":
+        return "b"  # a British voice reading English keeps its accent
+    return code
+
+
+def chatterbox_lang(lang: str | None) -> str:
+    iso = lang_iso(lang)
+    if iso is None:
+        return "en"
+    base = iso.split("-", 1)[0]
+    if base not in CHATTERBOX_LANGS:
+        raise VoiceError(f"Chatterbox has no {iso} (it speaks {', '.join(CHATTERBOX_LANGS)})")
+    return base
+
+
+def kokoro_voices(snapshot: Path | None) -> list[dict[str, Any]]:
+    """The preset voices in a Kokoro snapshot (voices/<name>.safetensors)."""
+    if snapshot is None or not (Path(snapshot) / "voices").is_dir():
+        return []
+    out = []
+    for p in sorted((Path(snapshot) / "voices").glob("*.safetensors")):
+        name = p.stem
+        if not KOKORO_VOICE_RE.fullmatch(name):
+            continue
+        out.append({
+            "name": name,
+            "lang": KOKORO_LANG_NAMES.get(name[0], name[0]),
+            "lang_code": next((iso for iso, c in KOKORO_LANGS.items() if c == name[0] and "-" not in iso),
+                              "en-gb" if name[0] == "b" else None),
+            "gender": "female" if name[1] == "f" else "male",
+        })
+    return out
 
 
 def compose_instruct(*parts: str | None) -> str | None:

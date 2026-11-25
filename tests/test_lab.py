@@ -358,7 +358,7 @@ def test_engine_refuses_when_too_many_pending(home):
 
 
 def test_real_engine_reports_missing_download(monkeypatch):
-    monkeypatch.setattr(qwen, "local_snapshot", lambda repo: None)
+    monkeypatch.setattr(qwen, "local_snapshot", lambda repo, *a: None)
     monkeypatch.setattr(qwen, "mlx_audio_available", lambda: (True, None))
     eng = qwen.QwenEngine()
     status = eng.status()
