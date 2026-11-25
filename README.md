@@ -94,7 +94,9 @@ uv run afterword serve
 ```
 
 Open http://127.0.0.1:47800 for the live log, and http://127.0.0.1:47800/#lab
-for the voice lab. Then, in another shell:
+for the voice lab. Clips in the GUI play through Web Audio, not `<audio>`, so
+the browser never becomes the macOS Now Playing app: the keyboard's media keys
+keep controlling your music. Then, in another shell:
 
 ```bash
 uv run afterword test "Hello from AfterWord" --profile nova --wait

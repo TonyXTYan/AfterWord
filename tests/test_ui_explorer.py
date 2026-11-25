@@ -33,7 +33,7 @@ const env = {
   api: async (method, path, body) => { calls.push({path, body}); return {ok: true, data: {state: S.state}}; },
   CSS: {escape: (s) => s},
   document: {querySelectorAll: () => []},
-  Audio: class { constructor() { this.dataset = {}; this.paused = true; } pause() { this.paused = true; } },
+  AwAudio: class { constructor() { this.dataset = {}; this.paused = true; } pause() { this.paused = true; } },
   setTimeout: (fn) => { fn(); return 0; },
   clearTimeout() {},
 };

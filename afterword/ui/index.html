@@ -124,7 +124,7 @@
            border-top: 1px solid var(--line); padding: 9px 0; min-width: 0; }
   .hitem:first-child { border-top: 0; padding-top: 0; }
   @media (max-width: 760px) { .hitem { grid-template-columns: minmax(0, 1fr); } }
-  .hitem audio { width: 100%; height: 30px; }
+  .hitem aw-audio { width: 100%; height: 30px; }
   .hitem .txt { font-size: 13px; white-space: pre-wrap; word-break: break-word; }
   .hitem.playing { box-shadow: inset 3px 0 0 var(--accent); padding-left: 8px; }
   .hitem .ctl { display: flex; gap: 6px; align-items: center; min-width: 0; }
@@ -244,7 +244,7 @@
   .card { padding: 10px 0 10px 8px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
   .results > .card:first-child, .results > .group:first-child { border-top: 0; padding-top: 0; }
   .card-top { display: flex; gap: 8px; align-items: center; min-width: 0; flex-wrap: wrap; }
-  .card audio { height: 30px; flex: 1; min-width: 200px; max-width: 420px; }
+  .card aw-audio { height: 30px; flex: 1; min-width: 200px; max-width: 420px; }
   .card .txt { font-size: 13px; white-space: pre-wrap; word-break: break-word; }
   .kv { display: flex; flex-wrap: wrap; gap: 2px 12px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); min-width: 0; }
   .kv span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -264,7 +264,7 @@
   @media (max-width: 700px) { .ab { grid-template-columns: 1fr; } }
   .ab .slot { border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; min-width: 0; }
   .ab .slot .card { border-top: 0; padding: 4px 0 0 6px; }
-  .ab .slot .card audio { min-width: 140px; max-width: none; }
+  .ab .slot .card aw-audio { min-width: 140px; max-width: none; }
   .ab .slot.playing { border-color: var(--accent); }
   .langs { display: inline-flex; gap: 8px; flex-wrap: wrap; }
   .samples { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
@@ -276,7 +276,7 @@
   .item-h { display: flex; gap: 8px; align-items: center; min-width: 0; }
   .item-h .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .item-h .grow { min-width: 0; }
-  .item audio { height: 28px; width: 100%; }
+  .item aw-audio { height: 28px; width: 100%; }
   .item .tr { font-size: 12px; color: var(--muted); font-style: italic; word-break: break-word; }
   .rec { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .rec .clock { font-family: var(--mono); font-size: 13px; }
@@ -309,7 +309,7 @@
   .f0bar b { position: absolute; top: -2px; width: 2px; height: 10px; background: var(--accent); }
   .ex-star .res { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; padding-left: 10px; border-left: 2px solid var(--line); }
   .ex-star .res .r { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; min-width: 0; }
-  .ex-star .res audio { height: 26px; flex: 1; min-width: 160px; max-width: 320px; }
+  .ex-star .res aw-audio { height: 26px; flex: 1; min-width: 160px; max-width: 320px; }
   .ex-star .res .txt { font-size: 12px; color: var(--muted); flex-basis: 100%; overflow-wrap: anywhere; }
   .drift-ok { color: var(--spoken); } .drift-warn { color: var(--queued); } .drift-bad { color: var(--error); }
   kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
@@ -496,7 +496,7 @@
           <button id="rec-upload" disabled>Upload recording</button>
           <span class="msg" id="rec-msg"></span>
         </div>
-        <audio id="rec-audio" controls hidden style="width:100%;height:30px;margin-top:6px"></audio>
+        <aw-audio id="rec-audio" hidden style="width:100%;height:30px;margin-top:6px"></aw-audio>
       </section>
     </div>
 
@@ -663,9 +663,7 @@ function replayRate(t) {
   return Number.isFinite(r) && r >= 0.25 && r <= 4 && Math.abs(r - 1) > 0.005 ? r : null;
 }
 function applyRate(a, rate) {
-  a.preservesPitch = true; a.webkitPreservesPitch = true; a.mozPreservesPitch = true;
-  a.defaultPlaybackRate = rate; a.playbackRate = rate;
-  a.addEventListener("loadedmetadata", () => { a.playbackRate = rate; });
+  a.defaultPlaybackRate = rate; a.playbackRate = rate;   // <aw-audio> keeps the pitch
 }
 
 // ---------- shared helpers (all pages) ----------
@@ -683,6 +681,262 @@ function h(tag, props, ...kids) {
   for (const c of kids.flat(Infinity)) if (c != null && c !== false) el.append(c instanceof Node ? c : String(c));
   return el;
 }
+// ---------- player ----------
+// Every clip on this page plays through Web Audio, never an <audio> element:
+// a playing media element makes the browser the macOS "Now Playing" app, and
+// the keyboard's media keys (play/pause, next, previous) then drive these
+// clips instead of the user's music. An AudioContext is not a media session,
+// so the keys keep going to whatever else is playing.
+//
+// <aw-audio> has the parts of the HTMLMediaElement surface this page uses:
+// src, preload, play() (a Promise), pause(), paused, ended, currentTime,
+// duration, playbackRate, and the play / pause / ended / loadedmetadata
+// events. It draws its own play button, position slider and time. Only one
+// clip plays at a time: play() pauses every other one.
+let awCtx = null;
+function awContext() {
+  if (!awCtx) awCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return awCtx;
+}
+// WSOLA time-stretch: rate > 1 is faster, the pitch is kept (what
+// preservesPitch does for a media element). Takes and returns an array of
+// Float32Array channels. 40 ms Hann frames overlap by half; each next frame is
+// taken within ±10 ms of its nominal place, where it best continues the one
+// before (cross-correlation on a ~8 kHz decimation of the first channel), so
+// voiced speech does not warble. The output is round(length / rate) long.
+function stretchChannels(chans, sr, rate) {
+  const len = chans[0] ? chans[0].length : 0;
+  if (!(rate > 0) || Math.abs(rate - 1) < 0.005 || len === 0) return chans.map((c) => Float32Array.from(c));
+  const N = 2 * Math.max(16, Math.round(sr * 0.02));  // frame length (even)
+  const Hs = N / 2, Ha = Hs * rate;                    // output and input hop
+  const tol = Math.round(sr * 0.01);
+  const dec = Math.max(1, Math.round(sr / 8000));
+  const outLen = Math.max(1, Math.round(len / rate));
+  const out = chans.map(() => new Float32Array(outLen + N));
+  const norm = new Float32Array(outLen + N);
+  const win = new Float32Array(N);
+  for (let i = 0; i < N; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / N);
+  const ref = chans[0];
+  let prev = 0;
+  for (let k = 0; k * Hs < outLen; k++) {
+    const nominal = Math.round(k * Ha);
+    let pos = nominal;
+    if (k > 0) {
+      const nat = prev + Hs;  // where the previous frame naturally continues
+      const lo = Math.max(0, nominal - tol), hi = Math.min(len - 1, nominal + tol);
+      let best = -Infinity;
+      for (let p = lo; p <= hi; p += dec) {
+        let c = 0;
+        for (let j = 0; j < N; j += dec) {
+          const a = p + j, b = nat + j;
+          if (a >= len || b >= len) break;
+          c += ref[a] * ref[b];
+        }
+        if (c > best) { best = c; pos = p; }
+      }
+    }
+    const o = k * Hs;
+    for (let ch = 0; ch < chans.length; ch++) {
+      const src = chans[ch], dst = out[ch];
+      for (let j = 0; j < N && pos + j < len; j++) dst[o + j] += src[pos + j] * win[j];
+    }
+    for (let j = 0; j < N; j++) norm[o + j] += win[j];
+    prev = pos;
+  }
+  return out.map((d) => {
+    for (let i = 0; i < outLen; i++) if (norm[i] > 1e-3) d[i] /= norm[i];
+    return d.slice(0, outLen);
+  });
+}
+// ---------- end stretch ----------
+const fmtClock = (s) => !Number.isFinite(s) ? "–:––" : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+class AwAudio extends HTMLElement {
+  static active = new Set();  // elements that are playing or about to
+  static get observedAttributes() { return ["src"]; }
+  constructor() {
+    super();
+    this._src = ""; this._rate = 1; this.defaultPlaybackRate = 1;
+    this._buf = null; this._load = null; this._stretched = null;
+    this._node = null; this._pos = 0; this._pos0 = 0; this._t0 = 0; this._nodeRate = 1;
+    this._paused = true; this._ended = false; this._dur = NaN; this._gen = 0; this._raf = 0;
+    const root = this.attachShadow({mode: "open"});
+    root.innerHTML = `<style>
+      :host { display: inline-flex; align-items: center; gap: 6px; height: 30px; min-width: 0; box-sizing: border-box;
+              font: 11.5px var(--mono, ui-monospace, monospace); color: var(--muted, #777); vertical-align: middle; }
+      :host([hidden]) { display: none !important; }
+      button { flex: none; width: 24px; height: 24px; padding: 0; border-radius: 50%; border: 1px solid var(--line, #ccc);
+               background: var(--panel, transparent); color: var(--ink, inherit); cursor: pointer; font-size: 10px; line-height: 1; }
+      button:hover { border-color: var(--accent, #3b5bdb); color: var(--accent, #3b5bdb); }
+      button:focus-visible { outline: 2px solid var(--accent, #3b5bdb); outline-offset: 1px; }
+      input { flex: 1; min-width: 40px; margin: 0; accent-color: var(--accent, #3b5bdb); }
+      .t { flex: none; white-space: nowrap; }
+      .t.err { color: var(--error, #c92a2a); }
+    </style><button type="button" aria-label="Play">▶</button><input type="range" min="0" max="1000" step="1" value="0" aria-label="Position"><span class="t">0:00</span>`;
+    this._btn = root.querySelector("button");
+    this._bar = root.querySelector("input");
+    this._time = root.querySelector(".t");
+    this._btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (this._paused) this.play().catch(() => {}); else this.pause();
+    });
+    this._bar.addEventListener("input", () => {
+      if (Number.isFinite(this._dur)) this.currentTime = this._bar.value / 1000 * this._dur;
+    });
+    this._bar.addEventListener("click", (e) => e.stopPropagation());
+  }
+  attributeChangedCallback(name, old, v) { if (name === "src") this.src = v || ""; }
+  disconnectedCallback() {
+    // Like a media element: taken out of the page, it stops (a move, which
+    // disconnects and reconnects at once, does not).
+    queueMicrotask(() => { if (!this.isConnected) this.pause(); });
+  }
+  get preload() { return this.getAttribute("preload") || "metadata"; }
+  set preload(v) { this.setAttribute("preload", String(v)); }
+  get src() { return this._src; }
+  set src(v) {
+    v = v == null ? "" : String(v);
+    if (v === this._src) return;
+    this.pause();
+    this._src = v; this._buf = null; this._load = null; this._stretched = null;
+    this._pos = 0; this._ended = false; this._dur = NaN; this._time.classList.remove("err"); this._time.title = "";
+    this._paint();
+    if (v && this.preload !== "none") this._fetch().catch(() => {});
+  }
+  get paused() { return this._paused; }
+  get ended() { return this._ended; }
+  get duration() { return this._dur; }
+  get playbackRate() { return this._rate; }
+  set playbackRate(v) {
+    v = Number(v);
+    if (!(v > 0) || v === this._rate) return;
+    const playing = !!this._node;
+    this._halt();
+    this._rate = v;
+    if (playing) this._start();
+  }
+  get currentTime() {
+    if (this._node) return Math.min(this._dur, this._pos0 + (awCtx.currentTime - this._t0) * this._nodeRate);
+    return this._pos;
+  }
+  set currentTime(t) {
+    t = Math.max(0, Number(t) || 0);
+    if (Number.isFinite(this._dur)) t = Math.min(t, this._dur);
+    const playing = !!this._node;
+    this._halt();
+    this._pos = t; this._ended = false;
+    if (playing) this._start();
+    this._paint();
+  }
+  play() {
+    if (!this._src) return Promise.reject(new DOMException("no source", "NotSupportedError"));
+    for (const a of [...AwAudio.active]) if (a !== this) a.pause();
+    if (!this._paused) return this._load || Promise.resolve();
+    const gen = ++this._gen;
+    if (this._ended) { this._pos = 0; this._ended = false; }
+    const ctx = awContext();
+    const resumed = ctx.state === "suspended" ? ctx.resume() : Promise.resolve();  // in the click's call stack
+    this._paused = false; AwAudio.active.add(this);
+    this._paint();
+    this.dispatchEvent(new Event("play"));
+    return Promise.all([this._fetch(), resumed]).then(() => {
+      if (gen === this._gen && !this._paused && !this._node) this._start();
+    }, (e) => {
+      if (gen === this._gen && !this._paused) {
+        this._paused = true; AwAudio.active.delete(this);
+        this._paint(); this.dispatchEvent(new Event("pause"));
+      }
+      throw e;
+    });
+  }
+  pause() {
+    this._gen++;
+    const was = !this._paused;
+    this._halt();
+    this._paused = true; AwAudio.active.delete(this);
+    this._paint();
+    if (was) this.dispatchEvent(new Event("pause"));
+  }
+  _fetch() {
+    if (this._buf) return Promise.resolve(this._buf);
+    if (!this._load) {
+      const src = this._src;
+      const load = fetch(src)
+        .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.arrayBuffer(); })
+        .then((ab) => awContext().decodeAudioData(ab))
+        .then((buf) => {
+          if (this._src !== src) throw new Error("source changed");
+          this._buf = buf; this._dur = buf.duration;
+          this._time.classList.remove("err"); this._time.title = "";
+          this._paint();
+          this.dispatchEvent(new Event("loadedmetadata"));
+          return buf;
+        });
+      load.catch((e) => {
+        if (this._src !== src || this._load !== load) return;
+        this._load = null;   // a later play() tries again
+        this._time.textContent = "can't play"; this._time.classList.add("err");
+        this._time.title = String((e && e.message) || e);
+      });
+      this._load = load;
+    }
+    return this._load;
+  }
+  _effRate() { const r = Math.min(4, Math.max(0.25, this._rate)); return Math.abs(r - 1) < 0.005 ? 1 : r; }
+  _playBuf(r) {
+    if (r === 1) return this._buf;
+    if (this._stretched && this._stretched.rate === r) return this._stretched.buf;
+    const b = this._buf, chans = [];
+    for (let c = 0; c < b.numberOfChannels; c++) chans.push(b.getChannelData(c));
+    const out = stretchChannels(chans, b.sampleRate, r);
+    const sb = awContext().createBuffer(out.length, out[0].length, b.sampleRate);
+    out.forEach((d, c) => sb.copyToChannel(d, c));
+    this._stretched = {rate: r, buf: sb};
+    return sb;
+  }
+  _start() {
+    const ctx = awContext(), r = this._effRate(), buf = this._playBuf(r);
+    if (this._pos >= this._dur - 0.01) this._pos = 0;
+    const node = ctx.createBufferSource();
+    node.buffer = buf;
+    node.connect(ctx.destination);
+    node.onended = () => {
+      if (this._node !== node) return;
+      this._node = null; node.disconnect();
+      this._pos = this._dur; this._ended = true;
+      this._paused = true; AwAudio.active.delete(this);
+      this._paint();
+      this.dispatchEvent(new Event("pause"));
+      this.dispatchEvent(new Event("ended"));
+    };
+    node.start(0, Math.min(buf.duration, this._pos / r));
+    this._node = node; this._t0 = ctx.currentTime; this._pos0 = this._pos; this._nodeRate = r;
+    this._tick();
+  }
+  _halt() {  // stop the sound, keep the position
+    const node = this._node;
+    if (!node) return;
+    this._pos = this.currentTime;
+    this._node = null;
+    node.onended = null;
+    try { node.stop(); } catch { /* not started */ }
+    node.disconnect();
+  }
+  _tick() {
+    cancelAnimationFrame(this._raf);
+    const step = () => { this._paint(); if (this._node) this._raf = requestAnimationFrame(step); };
+    this._raf = requestAnimationFrame(step);
+  }
+  _paint() {
+    const playing = !this._paused;
+    this._btn.textContent = playing ? "❚❚" : "▶";
+    this._btn.setAttribute("aria-label", playing ? "Pause" : "Play");
+    if (this._time.classList.contains("err")) return;
+    const t = this.currentTime, d = this._dur;
+    this._bar.value = Number.isFinite(d) && d > 0 ? String(Math.round(1000 * t / d)) : "0";
+    this._time.textContent = Number.isFinite(d) ? `${fmtClock(t)} / ${fmtClock(d)}` : fmtClock(t);
+  }
+}
+customElements.define("aw-audio", AwAudio);
 async function api(method, path, body, opt = {}) {
   const init = {method, headers: {}};
   if (method !== "GET" && method !== "HEAD") init.headers["X-AfterWord"] = "1";
@@ -732,17 +986,12 @@ setInterval(() => {
   for (const el of document.querySelectorAll("[data-ts]")) el.textContent = relTime(Number(el.dataset.ts));
 }, 10000);
 const fmtDur = (s) => !isNum(s) ? "—" : s < 60 ? `${s.toFixed(1)} s` : `${Math.floor(s / 60)}m ${String(Math.floor(s % 60)).padStart(2, "0")}s`;
-// Only same-origin clip URLs are used for <audio>/<a href>; anything else falls back to the id.
+// Only same-origin clip URLs are used for <aw-audio>/<a href>; anything else falls back to the id.
 function clipUrl(url, id, download) {
   if (typeof url === "string" && /^\/api\/clips\/\d+(\?download=1)?$/.test(url)) return url;
   return Number.isInteger(Number(id)) ? `/api/clips/${Number(id)}${download ? "?download=1" : ""}` : null;
 }
 const audioInUse = (a) => !!a && (!a.paused || (a.currentTime > 0 && !a.ended));
-// One clip at a time across the whole page: starting one pauses the others.
-document.addEventListener("play", (ev) => {
-  if (!(ev.target instanceof HTMLMediaElement)) return;
-  for (const a of document.querySelectorAll("audio")) if (a !== ev.target && !a.paused) a.pause();
-}, true);
 
 function matches(e) {
   const f = $("filter").value, q = $("q").value.trim().toLowerCase();
@@ -782,7 +1031,7 @@ function detailHtml(d) {
   const dl = Object.entries(t).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("") || "<dt>—</dt><dd></dd>";
   const rate = replayRate(t);
   const src = d.clip ? clipUrl(null, d.id) : null;
-  const clip = src ? `<p><audio controls preload="none" src="${esc(src)}"${rate != null ? ` data-rate="${esc(rate)}"` : ""}></audio>${rate != null ? ` <span class="via">plays at ${esc(rate)}× (the pace it was heard at)</span>` : ""}</p>` : "";
+  const clip = src ? `<p><aw-audio preload="none" src="${esc(src)}"${rate != null ? ` data-rate="${esc(rate)}"` : ""}></aw-audio>${rate != null ? ` <span class="via">plays at ${esc(rate)}× (the pace it was heard at)</span>` : ""}</p>` : "";
   return `<tr class="detail" data-for="${esc(d.id)}"><td colspan="7"><div class="detail-grid">
     <div><h3>decision</h3><pre>${esc(JSON.stringify({kind: d.kind, decision: d.decision, status: d.status,
        reason: d.reason, profile: d.profile, delivery: d.delivery, error: d.error, attrs: d.attrs}, null, 2))}</pre>
@@ -799,7 +1048,7 @@ function trFrom(html) {
 
 // The log table is reconciled by event id rather than rebuilt: a row is only
 // replaced when its summary changed, and an expanded row's detail (with its
-// <audio>) is left alone while that audio is playing or paused mid-way, so a
+// <aw-audio>) is left alone while that audio is playing or paused mid-way, so a
 // live SSE update never cuts off a clip being listened to.
 const rowNodes = new Map();   // id -> {tr, sig, det, detSig}
 let emptyRow = null;
@@ -827,11 +1076,11 @@ function render() {
       if (open.has(e.id) && detailCache.has(e.id)) {
         const d = detailCache.get(e.id);
         const dsig = JSON.stringify(d);
-        if (!n.det || (n.detSig !== dsig && !audioInUse(n.det.querySelector("audio")))) {
+        if (!n.det || (n.detSig !== dsig && !audioInUse(n.det.querySelector("aw-audio")))) {
           const det = trFrom(detailHtml(d));
-          for (const a of det.querySelectorAll("audio[data-rate]")) applyRate(a, Number(a.dataset.rate));
+          for (const a of det.querySelectorAll("aw-audio[data-rate]")) applyRate(a, Number(a.dataset.rate));
           // When a held-back clip finishes, re-render so the detail catches up.
-          for (const a of det.querySelectorAll("audio")) a.addEventListener("ended", render);
+          for (const a of det.querySelectorAll("aw-audio")) a.addEventListener("ended", render);
           if (n.det && n.det.parentNode) n.det.replaceWith(det);
           n.det = det; n.detSig = dsig;
         }
@@ -870,7 +1119,7 @@ async function toggle(id) {
 
 $("rows").addEventListener("click", (ev) => {
   const tr = ev.target.closest("tr.ev");
-  if (tr && !ev.target.closest("audio")) toggle(Number(tr.dataset.id));
+  if (tr && !ev.target.closest("aw-audio")) toggle(Number(tr.dataset.id));
 });
 for (const id of ["filter", "q", "hideSystem", "showHooks"]) $(id).addEventListener("input", render);
 
@@ -1328,7 +1577,7 @@ const History = (() => {
   function itemNode(d) {
     const id = Number(d.id);
     const src = clipUrl(d.url, id, false), dl = clipUrl(d.download_url, id, true);
-    const audio = h("audio", {controls: true, preload: "none"});
+    const audio = h("aw-audio", {preload: "none"});
     const r = Number(d.playback_rate);
     applyRate(audio, Number.isFinite(r) && r >= 0.25 && r <= 4 ? r : 1);
     if (src) audio.src = src;
@@ -1652,11 +1901,9 @@ const Lab = (() => {
     return r;
   }
   function makeAudio(url, pace) {
-    const a = h("audio", {controls: true, preload: "auto"});
+    const a = h("aw-audio", {preload: "auto"});
     const rate = clampPace(pace);
-    a.preservesPitch = true; a.webkitPreservesPitch = true; a.mozPreservesPitch = true;
     a.defaultPlaybackRate = rate; a.playbackRate = rate;
-    a.addEventListener("loadedmetadata", () => { a.playbackRate = rate; });
     if (typeof url === "string" && url.startsWith("/api/lab/")) a.src = url;
     return a;
   }
@@ -1801,7 +2048,7 @@ const Lab = (() => {
   let chainId = 0;
   function playChain(audios) {
     audios = audios.filter(Boolean);
-    for (const a of document.querySelectorAll("#view-lab audio")) a.pause();
+    for (const a of document.querySelectorAll("#view-lab aw-audio")) a.pause();
     const id = ++chainId;   // a newer chain (or pressing play again) cancels this one
     let i = 0;
     const next = () => {
@@ -1895,8 +2142,7 @@ const Lab = (() => {
     starOf: new Map(),    // preview id -> star id
     checks: new Map(),    // star id -> stability result (or {busy})
   };
-  const exPlayer = new Audio();
-  exPlayer.preservesPitch = true; exPlayer.webkitPreservesPitch = true;
+  const exPlayer = new AwAudio();
   const EX_ACTIVE = new Set(["running", "waiting", "paused"]);
   const f0Text = (t) => isNum(t.f0_hz) ? `${Math.round(t.f0_hz)} Hz` : "— Hz";
   const spreadText = (t) => isNum(t.f0_spread_hz) ? `±${Math.round(t.f0_spread_hz / 2)}` : "";
@@ -1989,7 +2235,7 @@ const Lab = (() => {
   function exPlay() {
     const t = ex.takes.get(ex.sel);
     if (!t) return;
-    for (const a of document.querySelectorAll("#view-lab audio")) a.pause();
+    for (const a of document.querySelectorAll("#view-lab aw-audio")) a.pause();
     if (exPlayer.dataset.id !== t.id) { exPlayer.src = t.url; exPlayer.dataset.id = t.id; }
     exPlayer.defaultPlaybackRate = exPlayer.playbackRate = clampPace(t.pace ?? (t.settings || {}).pace);
     play(exPlayer);
@@ -2096,7 +2342,7 @@ const Lab = (() => {
     if (tg && (tg.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName))) return;
     const k = e.key;
     if (k === " " || k === "Spacebar") {
-      if (tg && /^(BUTTON|AUDIO|A|SUMMARY)$/.test(tg.tagName)) return;  // space activates those
+      if (tg && /^(BUTTON|AW-AUDIO|A|SUMMARY)$/.test(tg.tagName)) return;  // space activates those
       e.preventDefault();
       if (!ex.sel) exNext(1);
       if (exPlayer.dataset.id === ex.sel && !exPlayer.paused) exPlayer.pause(); else exPlay();
@@ -2391,7 +2637,7 @@ const Lab = (() => {
     if (!clips.length) { $("cl-list").replaceChildren(h("span", {class: "hint"}, "No clips yet. Upload or record one below.")); return; }
     $("cl-list").replaceChildren(...clips.map(c => {
       const msg = h("span", {class: "msg"});
-      const audio = h("audio", {controls: true, preload: "none"});
+      const audio = h("aw-audio", {preload: "none"});
       if (typeof c.url === "string" && c.url.startsWith("/api/lab/")) audio.src = c.url;
       const when = c.created ? new Date(c.created * 1000).toLocaleDateString() : "";
       return h("div", {class: "item"},
@@ -2718,7 +2964,7 @@ const Lab = (() => {
     $("ab-go").addEventListener("click", doAB);
     $("ab-play").addEventListener("click", abPlay);
     $("r-clear").addEventListener("click", () => {
-      for (const a of $("r-list").querySelectorAll("audio")) a.pause();
+      for (const a of $("r-list").querySelectorAll("aw-audio")) a.pause();
       $("r-list").replaceChildren($("r-empty")); $("r-empty").hidden = false;
     });
     $("pr-save").addEventListener("click", saveProfile);
@@ -2766,7 +3012,7 @@ const Pronounce = (() => {
   let rows = [];            // [{key, value, orig}] being edited (orig: saved key or null)
   let savedSig = null, dataSig = null, saving = false;
   let limits = {entries: 500, key: 100, value: 300};
-  const player = new Audio();
+  const player = new AwAudio();
 
   const saved = () => !data ? {} : (table ? (data.profiles || {})[table] || {} : data.global || {});
   const entriesSig = (pairs) => JSON.stringify(pairs);
@@ -2903,7 +3149,7 @@ const Pronounce = (() => {
     note(msg, "");
     const rate = clampRate(res.data.pace);
     player.src = res.data.url;
-    player.preservesPitch = true; player.defaultPlaybackRate = rate; player.playbackRate = rate;
+    player.defaultPlaybackRate = rate; player.playbackRate = rate;
     player.play().catch(() => note(msg, "the browser blocked playback; click again", "err"));
   }
   const clampRate = (p) => Math.min(2, Math.max(0.5, Number(p) || 1));
@@ -2928,7 +3174,7 @@ const Pronounce = (() => {
 const Alerts = (() => {
   let data = null, dataSig = null, lang = null, saving = false, busy = false;
   let edits = {};            // event -> textarea text (current language)
-  const player = new Audio();
+  const player = new AwAudio();
   const EV_HELP = {permission: "Claude needs your OK for a tool", input: "a question or a form",
                    idle: "~60 s after a reply, you haven't typed", done: "a long turn finished with nothing spoken"};
 
@@ -3080,7 +3326,7 @@ const Alerts = (() => {
     note(msg, `“${r.data.alert_text}” (${r.data.alert_profile})`, "info");
     const rate = Math.min(2, Math.max(0.5, Number(r.data.pace) || 1));
     player.src = r.data.url;
-    player.preservesPitch = true; player.defaultPlaybackRate = rate; player.playbackRate = rate;
+    player.defaultPlaybackRate = rate; player.playbackRate = rate;
     player.play().catch(() => note(msg, "the browser blocked playback; click again", "err"));
   }
   async function generate() {
