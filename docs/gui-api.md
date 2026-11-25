@@ -199,6 +199,36 @@ counting the `info` rows that UserPromptSubmit and SessionStart log)
 ```
 `POST /api/config/reload` forces a reload and returns the same shape.
 
+## Voices
+
+`GET /api/voices` → every voice profile with its usage, in config order (the
+same order as `/api/status` `config.profiles`):
+```json
+{"profiles": [{"name": "nova", "description": "calm narrator", "voice": "say:Samantha",
+  "lang": "en", "style": "…", "persona": "", "pace": 1.0, "langs": {},
+  "last_used": 1795597634.0, "last_session": "abc", "last_cwd": "/path",
+  "in_use": [{"session_id": "abc", "cwd": "/path", "ts": 1795597634.0}]}]}
+```
+The usage fields come from `~/.afterword/voices.json` (written by the hooks
+and the daemon): `last_used`, `last_session` and `last_cwd` are null for a
+voice nobody has used. `in_use` lists the sessions that chose or spoke with
+the voice within the last 2 hours (`common.VOICE_IN_USE_S`), newest first.
+Each profile also carries the other lab fields (`ref_text`, `max_chars`,
+`say_voice`, `seed`, `temperature`).
+
+`PATCH /api/lab/profiles/<name>` with `{"description": "text"}` sets the
+profile's one-line description (trimmed, at most 300 characters; `""` removes
+it) and returns `{"ok": true, "profile": {…one item of GET /api/voices…}}`.
+Only that key of `[profiles.<name>]` is written, so comments and the rest of
+the table stay as they are; the daemon then reloads the config. 404 for an
+unknown profile, 400 for a missing, non-string or too long description,
+403 without the `X-AfterWord: 1` header.
+
+`POST /api/lab/profiles` (save from the lab) takes the same optional
+`description` (at most 300 characters). When it is present it is written
+(`""` removes it); when it is left out, a description already in the file is
+kept, so a save from the lab never deletes it.
+
 ## Pronunciations
 
 `GET /api/pronounce`

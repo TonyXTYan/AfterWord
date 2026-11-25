@@ -644,6 +644,7 @@ def update_state(session_id: object, change) -> Dict[str, Any]:
 # `/afterword:voice pick` menu reads it to offer the voices nobody else uses.
 
 VOICES_MAX_BYTES = 256 * 1024
+VOICE_IN_USE_S = 2 * 3600        # a session that chose or spoke with a voice this recently is using it
 VOICE_SESSION_KEEP_S = 3 * 86400  # a session not heard from for this long is dropped
 VOICE_SESSIONS_MAX = 16           # per profile, the most recent ones
 VOICE_PROFILES_MAX = 200

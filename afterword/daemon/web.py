@@ -329,6 +329,14 @@ def build_app(daemon: "Daemon", port: int) -> FastAPI:
     async def lab_save_profile(request: Request):
         return daemon.lab.save_profile(await json_body(request))
 
+    @app.get("/api/voices")
+    async def voices_view():
+        return await asyncio.to_thread(daemon.lab.voices)
+
+    @app.patch("/api/lab/profiles/{name}")
+    async def lab_describe_profile(name: str, request: Request):
+        return await asyncio.to_thread(daemon.lab.set_description, name, await json_body(request))
+
     @app.delete("/api/lab/profiles/{name}")
     async def lab_delete_profile(name: str):
         return daemon.lab.delete_profile(name)

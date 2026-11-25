@@ -13,11 +13,12 @@ import os
 import secrets
 import tempfile
 import threading
+import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
-from afterword.hooks import pronounce
+from afterword.hooks import common, pronounce
 from afterword.hooks.tags import PROFILE_NAME_RE, clean_text
 
 from . import apple, pitch, qwen, voices
@@ -29,6 +30,7 @@ PREVIEW_KEEP = 100
 TEXT_MAX = 1000
 PREVIEW_ID_PREFIX = "p"
 
+DESCRIPTION_MAX = 300
 PROFILE_FIELDS = ("voice", "ref_text", "lang", "pace", "style", "max_chars", "say_voice", "seed", "temperature")
 MAX_LANGS = 12  # [profiles.x.langs.*] tables per profile accepted from the lab
 
@@ -76,6 +78,25 @@ def _opt_num(body: dict, key: str, kind: type, lo: float, hi: float) -> Any:
 def profile_dict(p: Profile) -> dict[str, Any]:
     out: dict[str, Any] = {k: getattr(p, k) for k in PROFILE_FIELDS}
     out["langs"] = {code: lv.as_dict() for code, lv in p.langs.items()}
+    out["description"] = p.description
+    return out
+
+
+def voice_item(p: Profile, usage: dict[str, dict[str, Any]], now: float) -> dict[str, Any]:
+    """One entry of GET /api/voices: the profile plus when and by whom it was
+    last used (voices.json) and the sessions using it now (within VOICE_IN_USE_S)."""
+    u = usage.get(p.name) or {}
+    in_use = sorted(
+        ({"session_id": sid, "cwd": s.get("cwd"), "ts": s["ts"]}
+         for sid, s in (u.get("sessions") or {}).items() if now - s["ts"] < common.VOICE_IN_USE_S),
+        key=lambda r: r["ts"], reverse=True)
+    out = {"name": p.name, **profile_dict(p)}
+    out["persona"] = p.persona
+    out["last_used"] = u.get("last_used")
+    out["last_session"] = u.get("last_session")
+    last = u.get("last_session")
+    out["last_cwd"] = (u.get("sessions") or {}).get(last, {}).get("cwd") if last else None
+    out["in_use"] = in_use
     return out
 
 
@@ -539,6 +560,8 @@ class Lab:
             "seed": _opt_num(body, "seed", int, 0, 2**31 - 1),
             "temperature": _opt_num(body, "temperature", float, 0.05, 2.0),
         }
+        if "description" in body:  # absent: an existing description is kept
+            fields["description"] = _opt_str(body, "description", DESCRIPTION_MAX) or ""
         langs = _langs_body(body.get("langs"))
         if not fields["voice"]:
             raise LabError(400, "voice is required")
@@ -556,6 +579,32 @@ class Lab:
             raise LabError(400, str(exc)) from None
         self.store.reload(force=True)
         return {"ok": True, "profile": profile_dict(self.store.get().profiles[name])}
+
+    def voices(self) -> dict[str, Any]:
+        """GET /api/voices: every profile (config order) with its usage."""
+        usage = common.load_voice_usage()
+        now = time.time()
+        return {"profiles": [voice_item(p, usage, now) for p in self.store.get().profiles.values()]}
+
+    def set_description(self, name: str, body: Any) -> dict[str, Any]:
+        if not isinstance(body, dict) or "description" not in body:
+            raise LabError(400, "send {\"description\": \"text\"}")
+        text = _opt_str(body, "description", DESCRIPTION_MAX)
+        if text is None:
+            raise LabError(400, "description must be a string")
+        if name not in self.store.get().profiles:
+            raise LabError(404, f"no profile named {name!r}")
+        try:
+            found = write_description(self.store.path, name, text)
+        except ValueError as exc:
+            raise LabError(400, f"config.toml could not be updated: {exc}") from None
+        if not found:
+            raise LabError(404, f"no profile named {name!r}")
+        self.store.reload(force=True)
+        profile = self.store.get().profiles.get(name)
+        if profile is None:
+            raise LabError(404, f"no profile named {name!r}")
+        return {"ok": True, "profile": voice_item(profile, common.load_voice_usage(), time.time())}
 
     def delete_profile(self, name: str) -> dict[str, Any]:
         try:
@@ -763,6 +812,11 @@ def _write_profile(path: Path, name: str, fields: dict[str, Any], overwrite: boo
                 del table[key]
         else:
             table[key] = value
+    if "description" in fields:  # left out of `fields`: keep what the file has
+        if fields["description"]:
+            table["description"] = fields["description"]
+        elif "description" in table:
+            del table["description"]
     if langs is not None:
         _write_langs(table, langs)
     # Read back: every field (and language) must land in this profile's table.
@@ -771,6 +825,8 @@ def _write_profile(path: Path, name: str, fields: dict[str, Any], overwrite: boo
         value = fields.get(key)
         if not (value is None or (value == "" and key != "voice")) and got.get(key) != value:
             raise ValueError(f"profiles.{name}.{key} did not read back the same")
+    if fields.get("description") and got.get("description") != fields["description"]:
+        raise ValueError(f"profiles.{name}.description did not read back the same")
     if langs is not None:
         # Only the fields we write count: a key outside LANG_FIELDS (a typo
         # that build_config warns about) is left in place, not compared.
@@ -783,6 +839,23 @@ def _write_profile(path: Path, name: str, fields: dict[str, Any], overwrite: boo
         if back != want:
             raise ValueError(f"profiles.{name}.langs did not read back the same")
     _write_doc(path, doc)
+
+
+def write_description(path: Path, name: str, text: str) -> bool:
+    """Set (or, for "", remove) only `description` in [profiles.<name>],
+    keeping comments and the rest of the table. False if there is no such profile."""
+    with CONFIG_WRITE_LOCK:
+        doc = _load_doc(path)
+        profiles = doc.get("profiles")
+        if profiles is None or name not in profiles:
+            return False
+        table = profiles[name]
+        if text:
+            table["description"] = text
+        elif "description" in table:
+            del table["description"]
+        _write_doc(path, doc)
+        return True
 
 
 def delete_profile(path: Path, name: str) -> bool:
