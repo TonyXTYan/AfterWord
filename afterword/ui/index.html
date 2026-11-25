@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AfterWord · log</title>
+<title>AfterWord · transcript</title>
 <style>
   /* ---- tokens ("transcript desk") ---- */
   :root {
@@ -27,7 +27,7 @@
     }
   }
   /* speakers: one colour per voice profile (slot from speakerSlot()) */
-  .spk-0 { --spk: #F5C400; --spk-ink: #7A5C00; }
+  .spk-0 { --spk: #F5C400; --spk-ink: #6E5600; }
   .spk-1 { --spk: #00B8D9; --spk-ink: #00687A; }
   .spk-2 { --spk: #2FBF71; --spk-ink: #1B6B40; }
   .spk-3 { --spk: #D63AAF; --spk-ink: #8A1F70; }
@@ -41,6 +41,9 @@
          color: var(--spk-ink, var(--slate)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: baseline; }
   .spk > i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--spk, var(--slate)); }
   .spk-4 > i { box-shadow: 0 0 0 1px var(--rule); }
+  /* a block of spoken text that belongs to a voice: a rule in the speaker colour (the element carries .spk-N) */
+  .spk-rule { border-left: 3px solid var(--spk, var(--rule)); padding-left: 12px; }
+  .spk-rule.spk-4 { box-shadow: -1px 0 0 var(--rule); }
 
   /* ---- base ---- */
   * { box-sizing: border-box; }
@@ -49,6 +52,7 @@
   a { color: var(--cue); }
 
   /* ---- header ---- */
+  /* one row: wordmark, tabs, grow, live dot, Mute all; then the subtitle bar and the Up next drawer */
   header { position: sticky; top: 0; z-index: 2; background: var(--paper); border-bottom: 1px solid var(--rule); }
   .hd { display: flex; gap: 6px 16px; align-items: center; flex-wrap: wrap; padding: 0 24px; min-height: 48px; }
   h1 { font: 700 18px/1 var(--serif); color: var(--ink); margin: 0; }
@@ -56,8 +60,6 @@
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--skipped); }
   .dot.live { background: var(--spoken); }
   .dot.down { background: var(--error); }
-  #meta { font-size: 12px; color: var(--slate); max-width: 30ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .hd .acts { display: flex; gap: 6px; align-items: center; }
   #hdr-msg { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* tabs: text tabs, the selected one underlined */
@@ -67,23 +69,49 @@
   .tabs a:hover { color: var(--ink); }
   .tabs a.on { color: var(--ink); font-weight: 600; border-bottom-color: var(--cue); }
   .tabs a:focus-visible { outline-offset: -2px; }
-  .tabs a .cnt { display: inline-block; min-width: 16px; margin-left: 5px; padding: 0 4px; border-radius: 999px; font-size: 11px; line-height: 16px;
-                 text-align: center; background: color-mix(in srgb, var(--cue) 16%, transparent); color: var(--cue); font-weight: 600; }
-  .tabs a .cnt:empty { display: none; }
 
-  /* subtitle bar: the line being spoken right now */
-  .now { display: flex; align-items: center; gap: 12px; padding: 10px 24px; min-width: 0; background: var(--sheet);
-         border-top: 1px solid var(--rule); white-space: nowrap; overflow: hidden; }
+  /* subtitle bar (#now). Idle: one slim "Last" strip. Playing: tally, speaker, the line
+     in the serif, a 3px edge in the speaker colour, and the transport at the right. */
+  .now { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; min-width: 0; min-height: 32px; padding: 5px 24px;
+         background: var(--sheet); border-top: 1px solid var(--rule); }
+  .now-body { display: flex; align-items: center; gap: 10px; flex: 1 1 240px; min-width: 0; white-space: nowrap; overflow: hidden; }
   .now .tally { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--rule); }
   .now .tally.on { background: var(--tally); animation: tally 1.6s ease-in-out infinite; }
+  .now .tally.prep { background: color-mix(in srgb, var(--tally) 40%, var(--sheet)); }
   @keyframes tally { 50% { opacity: .4; } }
   .now .spk { flex: none; max-width: 30%; font-size: 13px; }
   .now .line { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
                font: 22px/1.35 var(--serif); color: var(--ink); }
-  .now .line.idle { flex: none; color: var(--slate); }
-  .now .last { display: flex; align-items: center; gap: 8px; min-width: 0; opacity: .6; }
-  .now .last .line { font-size: 16px; }
-  .now .q { flex: none; margin-left: auto; padding-left: 8px; font-size: 12px; color: var(--slate); }
+  .now.idle { padding: 5px 24px; }
+  .now.idle .tally, .now.idle .now-acts { display: none; }
+  .now-idle { display: flex; align-items: center; gap: 8px; min-width: 0; font: 13px/1.4 var(--sans); color: var(--slate); }
+  .now-idle .said { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .now.playing { padding: 9px 24px; box-shadow: inset 3px 0 0 var(--spk, var(--rule)); }
+  .now.playing.spk-4 { box-shadow: inset 3px 0 0 var(--spk), inset 4px 0 0 var(--rule); }
+  .now-acts { flex: none; display: flex; align-items: center; gap: 2px; margin-left: auto; }
+  .now-acts button, .q-drawer button { background: none; border-color: transparent; color: var(--slate); font-size: 13px; padding: 3px 8px; }
+  .now-acts button:hover:not(:disabled), .q-drawer button:hover:not(:disabled) {
+    color: var(--ink); border-color: transparent; background: color-mix(in srgb, var(--ink) 6%, transparent); }
+  .now-acts #stop:hover:not(:disabled), .q-drawer button.danger:hover:not(:disabled) { color: var(--error); }
+  .now-acts #q-toggle[aria-expanded="true"] { color: var(--ink); font-weight: 600; }
+  .now-acts #q-n { font-family: var(--mono); font-size: 12px; }
+
+  /* Up next: the pending lines, in a drawer right under the bar */
+  .q-drawer { padding: 8px 24px 12px; background: var(--sheet); border-top: 1px solid var(--rule);
+              max-height: min(50vh, 420px); overflow-y: auto; overscroll-behavior: contain; }
+  .q-head { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--slate); margin-bottom: 4px; }
+  .q-head button { font-size: 12px; }
+  .q-empty { margin: 0 0 4px; color: var(--slate); font-size: 13px; max-width: 80ch; }
+  .q-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .q-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: start;
+            padding: 8px 0; border-top: 1px solid var(--rule); min-width: 0; }
+  .q-item:first-child { border-top: 0; }
+  .q-item .txt { margin-top: 3px; font: 15px/1.55 var(--serif); color: var(--ink); max-width: 80ch; white-space: pre-wrap; word-break: break-word; }
+  .q-item .meta { display: flex; flex-wrap: wrap; gap: 0 12px; margin-top: 2px; font-size: 12px; color: var(--slate); }
+  .q-item .meta .mono { font-size: 12px; }
+  @media (max-width: 900px) {
+    .now.idle, .now.playing, .q-drawer { padding-left: 16px; padding-right: 16px; }
+  }
 
   /* ---- controls ---- */
   button, input, select { font: inherit; font-size: 13px; color: var(--ink); background: var(--sheet);
@@ -222,22 +250,7 @@
   #s-table tr.muted td.last .txt, #s-table tr.muted td.sess, #s-table tr.muted td.ell { color: var(--slate); }
   #s-table tr.muted td.last .txt { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--slate) 60%, transparent); }
 
-  /* queue */
-  .np-who { font-size: 14px; margin-bottom: 4px; }
-  .np-text { font: 20px/1.4 var(--serif); color: var(--ink); max-width: 80ch; white-space: pre-wrap; word-break: break-word; margin: 0 0 8px; }
-  .np-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 14px; font-family: var(--mono); font-size: 12px; color: var(--slate); min-width: 0; }
-  .np-meta b { color: var(--ink); font-weight: 500; }
-  .q-empty { margin: 0; color: var(--slate); font-size: 13px; max-width: 80ch; }
-  .q-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-  .q-item { display: grid; grid-template-columns: 2.2em minmax(0, 1fr) auto; gap: 2px 10px; align-items: start;
-            padding: 9px 0; border-top: 1px solid var(--rule); min-width: 0; }
-  .q-item:first-child { border-top: 0; padding-top: 0; }
-  .q-item .n { font-family: var(--mono); font-size: 12px; color: var(--slate); padding-top: 2px; text-align: right; }
-  .q-item .body { min-width: 0; }
-  .q-item .txt { font: 15px/1.55 var(--serif); color: var(--ink); max-width: 80ch; white-space: pre-wrap; word-break: break-word; }
-  .q-item .meta { display: flex; flex-wrap: wrap; gap: 0 12px; margin-top: 2px; font-family: var(--mono); font-size: 12px; color: var(--slate); }
-  .q-item button { font-size: 12px; padding: 2px 8px; }
-  @media (max-width: 520px) { .q-item { grid-template-columns: minmax(0, 1fr) auto; } .q-item .n { display: none; } .np-text { font-size: 18px; } }
+  /* queue: the Up next drawer is styled with the subtitle bar (header) */
 
   /* history */
   .hitem { display: grid; grid-template-columns: minmax(220px, 320px) minmax(0, 1fr); gap: 4px 14px; align-items: start;
@@ -476,19 +489,27 @@
   <div class="hd">
   <h1>AfterWord</h1>
   <nav class="tabs" aria-label="views">
-    <a href="#log" id="tab-log">Log</a><a href="#sessions" id="tab-sessions">Sessions</a><a href="#queue" id="tab-queue">Queue<span class="cnt" id="tab-queue-n"></span></a><a href="#history" id="tab-history">History</a><a href="#lab" id="tab-lab">Voice lab</a><a href="#config" id="tab-config">Config</a>
+    <a href="#transcript" id="tab-log">Transcript</a><a href="#sessions" id="tab-sessions">Sessions</a><a href="#lab" id="tab-lab">Voice lab</a><a href="#config" id="tab-config">Config</a>
   </nav>
   <span class="grow"></span>
-  <span class="pill" id="live"><span id="dot" class="dot"></span><span id="conn">connecting…</span></span>
-  <span id="meta"></span>
   <span class="msg" id="hdr-msg"></span>
-  <span class="acts">
+  <span class="pill" id="live"><span id="dot" class="dot"></span><span id="conn">connecting…</span></span>
+  <span id="meta" hidden></span>
   <button id="muteall" class="toggle" aria-pressed="false" title="Mute every session (voices stay on; lines are logged as skipped)">Mute all</button>
-  <button id="skip" title="Stop the current clip; keep the queue">Skip</button>
-  <button id="stop" class="danger" title="Stop and clear the queue">Stop all</button>
-  </span>
   </div>
-  <div class="now" id="now" aria-live="polite"><span class="tally" aria-hidden="true"></span><span class="line idle">Nothing playing</span></div>
+  <div class="now idle" id="now">
+    <span class="tally" id="now-tally" aria-hidden="true"></span>
+    <div class="now-body" id="now-body" aria-live="polite"><span class="now-idle">Nothing spoken yet</span></div>
+    <span class="now-acts" id="now-acts">
+      <button id="skip" title="Stop the current clip; keep the queue" disabled>Skip</button>
+      <button id="stop" title="Stop and clear the queue" disabled>Stop all</button>
+      <button id="q-toggle" aria-expanded="false" aria-controls="q-drawer" title="Lines waiting to be spoken" hidden>Up next (<span id="q-n">0</span>)</button>
+    </span>
+  </div>
+  <section class="q-drawer" id="q-drawer" aria-label="Up next" hidden>
+    <div class="q-head"><span id="q-count"></span><span class="msg" id="q-msg"></span><span class="grow"></span><button id="q-close" title="Close Up next (Esc)">Close</button></div>
+    <div id="q-pending"></div>
+  </section>
 </header>
 <main id="view-log">
   <div class="toolbar" id="log-tools">
@@ -523,18 +544,7 @@
   </section>
 </main>
 
-<main id="view-queue" class="page" hidden>
-  <section class="panel" aria-label="now playing">
-    <h2>Now playing <span class="grow"></span><span class="msg" id="q-msg"></span>
-      <button id="q-skip" title="Stop the current clip; keep the queue">Skip</button>
-      <button id="q-stop" class="danger" title="Stop and clear the queue">Stop all</button></h2>
-    <div id="q-now"><p class="q-empty">Nothing playing. The line being spoken appears here.</p></div>
-  </section>
-  <section class="panel" aria-label="pending">
-    <h2>Pending <span class="hint" id="q-count"></span></h2>
-    <div id="q-pending"><p class="q-empty">Queue is empty. Lines waiting to be spoken are listed here in the order they will play.</p></div>
-  </section>
-</main>
+<!-- #queue opens the Up next drawer in the header (#q-drawer) -->
 
 <main id="view-history" class="page" hidden>
   <div class="banner" id="h-err" hidden></div>
@@ -888,6 +898,7 @@ function speakerTagHTML(profile) {
   const name = speakerName(profile);
   return `<span class="spk spk-${speakerSlot(profile)}" data-spk="${esc(name)}"><i aria-hidden="true"></i>${esc(name)}</span>`;
 }
+// ---------- end speakers ----------
 // ---------- player ----------
 // Every clip on this page plays through Web Audio, never an <audio> element:
 // a playing media element makes the browser the macOS "Now Playing" app, and
@@ -1333,7 +1344,7 @@ $("rows").addEventListener("click", (ev) => {
 });
 for (const id of ["filter", "q", "hideSystem", "showHooks"]) $(id).addEventListener("input", render);
 
-// Header actions (shown on every tab).
+// Transport (the subtitle bar, on every tab).
 async function queueAction(path, label, msgId = "hdr-msg") {
   const r = await api("POST", path);
   if (!r.ok) flashNote(msgId, `${label} failed: ${r.error}`, "err");
@@ -1342,35 +1353,73 @@ async function queueAction(path, label, msgId = "hdr-msg") {
 $("skip").onclick = () => queueAction("/api/queue/skip", "Skip");
 $("stop").onclick = () => queueAction("/api/queue/stop", "Stop all");
 
-// Subtitle bar (#now): tally light, speaker tag, the line being spoken.
-// Idle, it says so and keeps the last line it saw, faded, with its speaker.
-let lastSpoken = null;   // {text, profile} of the last now_playing line
-function paintNow(np, pending, idleText = "Nothing playing") {
-  const q = pending ? `<span class="q">${pending} queued</span>` : "";
-  const bar = $("now");
-  if (np) {
-    lastSpoken = {text: np.text, profile: np.profile};
-    bar.title = `${speakerName(np.profile)} · session ${shortId(np.session_id)}`;
-    bar.innerHTML = `<span class="tally on" aria-hidden="true"></span>${speakerTagHTML(np.profile)}`
-      + `<span class="line">${esc(np.text)}</span>${q}`;
+// Subtitle bar (#now). Playing: tally, speaker tag, the line being spoken, a
+// left edge in the speaker colour, then Skip, Stop all and "Up next (N)".
+// Idle: one slim strip with the newest spoken line the page knows of.
+let lastSpoken = null;   // {id, text, profile} of the newest event with status "spoken"
+// Remember e if it is a spoken line newer than the one we have; true when it was taken.
+function noteSpoken(e) {
+  if (!e || e.status !== "spoken" || typeof e.text !== "string" || !e.text.trim()) return false;
+  const id = Number(e.id);
+  if (lastSpoken && Number.isFinite(lastSpoken.id) && !(id >= lastSpoken.id)) return false;
+  lastSpoken = {id, text: e.text, profile: e.profile};
+  return true;
+}
+let nowView = {np: null, pending: 0, idleText: null};
+let nowStatus = {id: null, status: null};   // the event status of the current line (synthesizing -> playing)
+let nowSig = null, idleTimer = null;
+function paintNow(np, pending = 0, idleText = null) {
+  clearTimeout(idleTimer); idleTimer = null;
+  nowView = {np: np && typeof np === "object" ? np : null, pending: isNum(pending) ? pending : 0, idleText: idleText || null};
+  // Between two queued lines the daemon is idle for a moment: wait before
+  // dropping to the idle strip so the bar does not flicker.
+  if (!nowView.np && !nowView.idleText && $("now").classList.contains("playing")) {
+    idleTimer = setTimeout(drawNow, 400);
     return;
   }
-  bar.title = lastSpoken ? `Last line: ${lastSpoken.text}` : "";
-  bar.innerHTML = `<span class="tally" aria-hidden="true"></span><span class="line idle">${esc(idleText)}</span>`
-    + (lastSpoken ? `<span class="last">${speakerTagHTML(lastSpoken.profile)}<span class="line">${esc(lastSpoken.text)}</span></span>` : "")
-    + q;
+  drawNow();
+}
+function drawNow() {
+  clearTimeout(idleTimer); idleTimer = null;
+  const {np, pending, idleText} = nowView;
+  const bar = $("now"), body = $("now-body"), tally = $("now-tally");
+  const playing = !!np;
+  bar.classList.toggle("playing", playing);
+  bar.classList.toggle("idle", !playing);
+  let html, sig;
+  if (playing) {
+    paintSpeaker(bar, np.profile);
+    const st = nowStatus.id === np.event_id ? nowStatus.status : null;
+    const prep = st === "queued" || st === "synthesizing";
+    tally.className = prep ? "tally prep" : "tally on";
+    bar.title = `${speakerName(np.profile)} · session ${shortId(np.session_id)} · #${np.event_id}${prep ? " · rendering" : ""}`;
+    sig = JSON.stringify(["p", np.event_id, np.text, np.profile]);
+    html = speakerTagHTML(np.profile) + `<span class="line">${esc(np.text)}</span>`;
+  } else {
+    for (const c of [...bar.classList]) if (/^spk-\d$/.test(c)) bar.classList.remove(c);
+    delete bar.dataset.spk;
+    tally.className = "tally";
+    const last = !idleText && lastSpoken;
+    bar.title = last ? `Last line, #${last.id}: ${last.text}` : "";
+    sig = JSON.stringify(["i", idleText, last ? last.id : null, last ? last.text : null]);
+    html = idleText ? `<span class="now-idle">${esc(idleText)}</span>`
+      : last ? `<span class="now-idle"><span>Last</span>${speakerTagHTML(last.profile)}<span class="said">${esc(last.text)}</span></span>`
+      : `<span class="now-idle">Nothing spoken yet</span>`;
+  }
+  // Only touch the live region when the line changed (no re-announcing).
+  if (sig !== nowSig) { body.innerHTML = html; nowSig = sig; }
+  $("skip").disabled = !playing;
+  $("stop").disabled = !playing && !pending;
+  $("q-n").textContent = String(pending);
+  $("q-toggle").hidden = !(playing && pending > 0);
 }
 function showQueue(q) {
   if (!q || typeof q !== "object") return;
-  const np = q.now_playing;
-  const pending = Array.isArray(q.pending) ? q.pending.length : 0;
-  paintNow(np, pending);
-  const total = (np ? 1 : 0) + pending;
-  $("tab-queue-n").textContent = total ? String(total) : "";
   Queue.update(q);
 }
 
 // ---------- mute all (header) ----------
+// A toggle for persistent state (aria-pressed); it reads "All muted" while on.
 const MuteAll = (() => {
   let muted = null;   // null = unknown (endpoint missing or not loaded yet)
   function paint() {
@@ -1379,7 +1428,8 @@ const MuteAll = (() => {
     b.textContent = muted ? "All muted" : "Mute all";
     b.title = muted ? "All sessions are muted (lines are logged as skipped). Click to unmute."
       : "Mute every session (voices stay on; lines are logged as skipped)";
-    $("s-muted").hidden = muted !== true;
+    const banner = $("s-muted");   // the Sessions page's banner, when it has one
+    if (banner) banner.hidden = muted !== true;
   }
   function set(v) { if (typeof v === "boolean" && v !== muted) { muted = v; paint(); } }
   async function click() {
@@ -1695,33 +1745,21 @@ const Sessions = (() => {
 })();
 
 // ===================================================================
-// Queue (#queue): live from SSE "queue"
+// Up next (the drawer under the subtitle bar; #queue opens it) and the
+// bar's feed: live from SSE "queue" and "event"
 // ===================================================================
 const Queue = (() => {
   let snap = {now_playing: null, pending: [], max_size: null};
-  let visible = false;
-  // The contract has no start time for the current line, so elapsed is
-  // counted from when this page first saw it at the head of the queue
-  // (or from now_playing.started_at, if the daemon ever sends one).
-  const seen = new Map();   // event_id -> first time seen as now_playing (s)
-  let tick = null;
+  let isOpen = false;
+  const sess = (sid) => h("span", {class: "mono", title: sid || ""}, shortId(sid));
 
   function update(q) {
     if (!q || typeof q !== "object") return;
     snap = {now_playing: q.now_playing && typeof q.now_playing === "object" ? q.now_playing : null,
             pending: Array.isArray(q.pending) ? q.pending : [], max_size: q.max_size};
-    const np = snap.now_playing;
-    if (np && !seen.has(np.event_id)) seen.set(np.event_id, Date.now() / 1000);
-    for (const id of [...seen.keys()]) if (!np || id !== np.event_id) seen.delete(id);
-    if (visible) renderAll();
+    paintNow(snap.now_playing, snap.pending.length);
+    renderList();
   }
-  function startedAt(np) { return isNum(np.started_at) ? np.started_at : seen.get(np.event_id); }
-  function elapsedText(np) {
-    const t0 = startedAt(np);
-    return isNum(t0) ? fmtDur(Math.max(0, Date.now() / 1000 - t0)) : "—";
-  }
-  const sess = (sid) => h("span", {class: "mono", title: sid || ""}, shortId(sid));
-  const evStatus = (id) => { const e = events.get(id); return e && e.status ? e.status : null; };
 
   async function remove(id, btn) {
     if (!Number.isInteger(Number(id))) return;
@@ -1736,61 +1774,71 @@ const Queue = (() => {
     if (q.ok && q.data) showQueue(q.data);
   }
 
-  function renderAll() {
-    const np = snap.now_playing;
-    if (!np) $("q-now").replaceChildren(h("p", {class: "q-empty"}, "Nothing playing. The line being spoken appears here."));
-    else {
-      const st = evStatus(np.event_id);
-      $("q-now").replaceChildren(
-        h("div", {class: "np-who"}, speakerTag(np.profile)),
-        h("div", {class: "np-text"}, np.text || ""),
-        h("div", {class: "np-meta"},
-          h("span", null, "session ", h("b", {title: np.session_id || ""}, shortId(np.session_id))),
-          h("span", null, "event ", h("b", null, "#" + np.event_id)),
-          st ? h("span", null, "status ", h("span", {class: "badge s-" + cls(st)}, st)) : null,
-          h("span", {title: "since this page saw it start"}, "elapsed ", h("b", {id: "q-elapsed"}, elapsedText(np))),
-          h("span", null, "queued ", relSpan(np.enqueued_at))));
-    }
-    $("q-skip").disabled = !np;
+  function renderList() {
+    if (!isOpen) return;
     const p = snap.pending;
-    $("q-count").textContent = `${p.length}${isNum(snap.max_size) ? " of " + snap.max_size : ""} waiting, plays top to bottom`;
-    if (!p.length) { $("q-pending").replaceChildren(h("p", {class: "q-empty"}, "Queue is empty. Lines waiting to be spoken are listed here in the order they will play.")); }
-    else {
-      $("q-pending").replaceChildren(h("ol", {class: "q-list", id: "q-table"},
-        p.map((it, i) => {
-          const btn = h("button", {class: "small danger", title: `Drop #${it.event_id} from the queue`}, "Remove");
-          btn.addEventListener("click", () => remove(it.event_id, btn));
-          return h("li", {class: "q-item"},
-            h("span", {class: "n", title: `event #${it.event_id}`}, String(i + 1)),
-            h("div", {class: "body"},
-              speakerTag(it.profile),
-              h("div", {class: "txt"}, it.text || ""),
-              h("div", {class: "meta"},
-                h("span", null, "session ", sess(it.session_id)),
-                h("span", null, "waiting ", relSpan(it.enqueued_at)))),
-            btn);
-        })));
+    $("q-count").textContent = p.length
+      ? `${p.length}${isNum(snap.max_size) ? " of " + snap.max_size : ""} waiting, plays top to bottom` : "";
+    if (!p.length) {
+      $("q-pending").replaceChildren(h("p", {class: "q-empty"},
+        "Nothing waiting. Lines queued to be spoken are listed here in the order they will play."));
+      return;
     }
-    $("q-stop").disabled = !np && !p.length;
+    // Keep keyboard focus on the same Remove button across a redraw.
+    const focused = document.activeElement && document.activeElement.closest && document.activeElement.closest("#q-pending [data-eid]");
+    const refocus = focused ? focused.dataset.eid : null;
+    $("q-pending").replaceChildren(h("ol", {class: "q-list", id: "q-table"},
+      p.map((it) => {
+        const btn = h("button", {class: "danger", "data-eid": it.event_id, title: `Drop #${it.event_id} from the queue`}, "Remove");
+        btn.addEventListener("click", () => remove(it.event_id, btn));
+        return h("li", {class: "q-item"},
+          h("div", {class: "body"},
+            speakerTag(it.profile),
+            paintSpeaker(h("div", {class: "txt spk-rule"}, it.text || ""), it.profile),
+            h("div", {class: "meta"},
+              h("span", null, "session ", sess(it.session_id)),
+              h("span", null, "queued ", relSpan(it.enqueued_at)),
+              h("span", {class: "mono"}, "#" + it.event_id))),
+          btn);
+      })));
+    if (refocus != null) { const b = $("q-pending").querySelector(`[data-eid="${CSS.escape(refocus)}"]`); if (b) b.focus(); }
   }
 
-  $("q-skip").addEventListener("click", () => queueAction("/api/queue/skip", "Skip", "q-msg"));
-  $("q-stop").addEventListener("click", () => queueAction("/api/queue/stop", "Stop all", "q-msg"));
-  // Status of the head item (synthesizing -> playing) comes from event rows.
-  document.addEventListener("aw:speakers", () => { if (visible) renderAll(); });
-  sse.on("event", (e) => { if (visible && snap.now_playing && e.id === snap.now_playing.event_id) renderAll(); });
-  return {
-    update,
-    show() {
-      visible = true; renderAll();
-      api("GET", "/api/queue").then(r => { if (r.ok && r.data) showQueue(r.data); });
-      if (!tick) tick = setInterval(() => {
-        const el = $("q-elapsed");
-        if (visible && el && snap.now_playing) el.textContent = elapsedText(snap.now_playing);
-      }, 500);
-    },
-    hide() { visible = false; },
-  };
+  function setOpen(v, {focus = false} = {}) {
+    const was = isOpen;
+    isOpen = !!v;
+    $("q-drawer").hidden = !isOpen;
+    $("q-toggle").setAttribute("aria-expanded", String(isOpen));
+    if (isOpen) {
+      renderList();
+      if (!was) api("GET", "/api/queue").then(r => { if (r.ok && r.data) showQueue(r.data); });
+      if (focus) $("q-close").focus();
+    } else if (was && focus && !$("q-toggle").hidden) $("q-toggle").focus();
+  }
+
+  $("q-toggle").addEventListener("click", () => setOpen(!isOpen));
+  $("q-close").addEventListener("click", () => setOpen(false, {focus: true}));
+  $("q-drawer").addEventListener("keydown", (ev) => { if (ev.key === "Escape") { ev.stopPropagation(); setOpen(false, {focus: true}); } });
+
+  // The bar's tally follows the current line's status (synthesizing -> playing),
+  // and its idle strip shows the newest spoken line: from the live event
+  // stream, and on (re)connect from the newest events.
+  sse.on("event", (e) => {
+    const np = nowView.np;
+    if (np && e.id === np.event_id && e.status !== nowStatus.status) {
+      nowStatus = {id: e.id, status: e.status};
+      if (!idleTimer) drawNow();
+    }
+    if (noteSpoken(e) && !nowView.np && !idleTimer) drawNow();
+  });
+  sse.on("open", async () => {
+    const r = await api("GET", "/api/events?limit=100");
+    const list = r.ok && r.data && Array.isArray(r.data.events) ? r.data.events : [];
+    let took = false;
+    for (const e of list) if (noteSpoken(e)) took = true;
+    if (took && !nowView.np && !idleTimer) drawNow();
+  });
+  return {update, open: (focus) => setOpen(true, {focus}), close: () => setOpen(false), isOpen: () => isOpen};
 })();
 
 // ===================================================================
@@ -3699,11 +3747,15 @@ const Config = (() => {
   };
 })();
 
-const PAGES = {log: LogPage, sessions: Sessions, queue: Queue, history: History, lab: Lab, config: Config};
-const TITLES = {log: "log", sessions: "sessions", queue: "queue", history: "history", lab: "voice lab", config: "config"};
+// Four pages; the keys are the element-id suffixes (view-<key>, tab-<key>,
+// body.tab-<key>). Old hashes still land: #log, #history and #queue show the
+// transcript (#history turns on its "has audio" filter, #queue opens Up next).
+const PAGES = {log: LogPage, sessions: Sessions, lab: Lab, config: Config};
+const ALIASES = {transcript: "log", history: "log", queue: "log"};
+const TITLES = {log: "transcript", sessions: "sessions", lab: "voice lab", config: "config"};
 function route() {
-  const name = location.hash.replace(/^#/, "");
-  const tab = Object.hasOwn(PAGES, name) ? name : "log";
+  const hash = location.hash.replace(/^#/, "");
+  const tab = Object.hasOwn(PAGES, hash) ? hash : Object.hasOwn(ALIASES, hash) ? ALIASES[hash] : "log";
   for (const t of Object.keys(PAGES)) {
     $("view-" + t).hidden = t !== tab;
     document.body.classList.toggle("tab-" + t, t === tab);
@@ -3713,6 +3765,8 @@ function route() {
   document.title = "AfterWord · " + TITLES[tab];
   for (const [t, page] of Object.entries(PAGES)) if (t !== tab) page.hide();
   PAGES[tab].show();
+  if (hash === "queue") Queue.open();
+  document.dispatchEvent(new CustomEvent("aw:route", {detail: {view: tab, hash}}));
 }
 window.addEventListener("hashchange", route);
 route();
