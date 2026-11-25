@@ -245,8 +245,15 @@
   .hitem:first-child { border-top: 0; padding-top: 0; }
   @media (max-width: 760px) { .hitem { grid-template-columns: minmax(0, 1fr); } }
   .hitem aw-audio { width: 100%; height: 30px; }
-  .hitem .txt { font-size: 13px; white-space: pre-wrap; word-break: break-word; }
-  .hitem.playing { box-shadow: inset 3px 0 0 var(--accent); padding-left: 8px; }
+  .hitem { border-top-color: var(--rule); }
+  .hitem .txt { font-family: var(--serif); font-size: 15px; line-height: 1.55; max-width: 80ch; color: var(--ink); white-space: pre-wrap; word-break: break-word; }
+  .hitem .who { margin-bottom: 2px; font-size: 12px; }
+  .hitem .kv { font-family: var(--sans); margin-top: 4px; font-size: 12px; color: var(--slate); }
+  .hitem .kv b { font-weight: 400; color: var(--slate); }
+  .hitem .kv b.num { font-family: var(--mono); font-size: 12px; }
+  .hitem .ctl .btn { background: transparent; color: var(--slate); border-color: var(--rule); font-size: 12px; }
+  .hitem .ctl .btn:hover { color: var(--ink); }
+  .hitem.playing { box-shadow: inset 3px 0 0 var(--spk, var(--cue)); padding-left: 8px; }
   .hitem .ctl { display: flex; gap: 6px; align-items: center; min-width: 0; }
 
   /* stats */
@@ -505,7 +512,7 @@
 <main id="view-history" class="page" hidden>
   <div class="banner" id="h-err" hidden></div>
   <section class="panel" aria-label="history">
-    <h2>History <span class="hint" id="h-count" style="text-transform:none;letter-spacing:0;font-weight:400"></span><span class="grow"></span><span class="msg" id="h-msg"></span><button id="h-refresh" title="Reload the list from the newest clip">Refresh</button></h2>
+    <h2>History <span class="hint" id="h-count"></span><span class="grow"></span><span class="msg" id="h-msg"></span><button id="h-refresh" title="Reload the list from the newest clip">Refresh</button></h2>
     <div class="list" id="h-list"><span class="hint">Loading…</span></div>
     <div class="bar"><button id="h-more" hidden>Load more</button><span class="hint" id="h-end"></span></div>
   </section>
@@ -1768,20 +1775,20 @@ const History = (() => {
     const r = Number(d.playback_rate);
     applyRate(audio, Number.isFinite(r) && r >= 0.25 && r <= 4 ? r : 1);
     if (src) audio.src = src;
-    const node = h("div", {class: "hitem"},
+    const node = h("div", {class: "hitem " + ("spk-" + speakerSlot(d.profile))},
       h("div", {class: "ctl"}, audio,
         dl ? h("a", {class: "btn", href: dl, download: `afterword-${id}.wav`, title: "Download the WAV"}, "Download") : null),
       h("div", {style: "min-width:0"},
+        h("div", {class: "who"}, speakerTag(d.profile || "default")),
         h("div", {class: "txt"}, d.text || ""),
-        h("div", {class: "kv", style: "margin-top:3px"},
-          h("span", null, relSpan(d.ts, {title: fmtDateTime(d.ts)}), " · ", fmtDateTime(d.ts)),
-          h("span", null, "profile ", h("b", null, d.profile || "default")),
+        h("div", {class: "kv"},
+          h("span", null, relSpan(d.ts, {title: fmtDateTime(d.ts)}), ", ", fmtDateTime(d.ts)),
           h("span", {title: `${d.session_id || ""}\n${d.cwd || ""}`}, "session ", h("b", null, shortId(d.session_id)),
             d.cwd ? " " + base(d.cwd) : ""),
-          h("span", null, "audio ", h("b", null, isNum(d.audio_s) ? d.audio_s.toFixed(1) + " s" : "—")),
-          replayRate({playback_rate: d.playback_rate}) != null ? h("span", {title: "played at this pace; replays match it"}, "pace ", h("b", null, Number(d.playback_rate).toFixed(2) + "×")) : null,
+          h("span", null, "audio ", h("b", {class: "num"}, isNum(d.audio_s) ? d.audio_s.toFixed(1) + " s" : "—")),
+          replayRate({playback_rate: d.playback_rate}) != null ? h("span", {title: "played at this pace; replays match it"}, "pace ", h("b", {class: "num"}, Number(d.playback_rate).toFixed(2) + "×")) : null,
           d.synth_backend ? h("span", null, "synth ", h("b", null, d.synth_backend)) : null,
-          h("span", null, "#" + id))));
+          h("span", {class: "num", style: "font-family:var(--mono)"}, "#" + id))));
     audio.addEventListener("play", () => node.classList.add("playing"));
     for (const ev of ["pause", "ended"]) audio.addEventListener(ev, () => node.classList.remove("playing"));
     return {data: d, node, audio};
@@ -1808,7 +1815,7 @@ const History = (() => {
       let cur = box.firstChild;
       for (const node of order) { if (node === cur) cur = cur.nextSibling; else box.insertBefore(node, cur); }
     }
-    $("h-count").textContent = order.length ? `${order.length} clip${order.length === 1 ? "" : "s"} · newest first` : "";
+    $("h-count").textContent = order.length ? `${order.length} clip${order.length === 1 ? "" : "s"}, newest first` : "";
     $("h-more").hidden = !more;
     $("h-end").textContent = loadedOnce && !more && order.length ? "End of kept clips." : "";
   }
