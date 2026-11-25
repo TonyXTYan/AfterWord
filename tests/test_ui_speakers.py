@@ -304,3 +304,49 @@ def test_custom_text_tones_read_on_both_papers(r):
             assert _contrast(dark, paper) >= 4.5, (hx, dark, paper)
     # a colour that already reads is kept as it is
     assert {hx: lt for hx, lt, _ in r["inks"]}["#000080"] == "#000080"
+
+
+# --------------------------------------------------------------------------- #
+# Colour picker: the dots on a swatch and the cap on the hover card           #
+# --------------------------------------------------------------------------- #
+
+def test_picker_marks_and_card_cap(tmp_path):
+    src = UI.read_text(encoding="utf-8")
+    start = src.index("// ---------- cp marks")
+    end = src.index("// ---------- end cp marks")
+    assert start < end
+    harness = tmp_path / "marks.js"
+    harness.write_text(
+        'const src = require("fs").readFileSync(0, "utf8");\n'
+        'const lib = new Function(src + "\\nreturn {cpMarks, cpCap};")();\n'
+        "const names = Array.from({length: 15}, (_, i) => 'v' + i);\n"
+        "process.stdout.write(JSON.stringify({\n"
+        "  marks: [0, 1, 2, 3, 4, 9, -1, null, 'x', 2.7].map((n) => lib.cpMarks(n)),\n"
+        "  cap_small: lib.cpCap(names.slice(0, 3)), cap_edge: lib.cpCap(names.slice(0, 12)).rest,\n"
+        "  cap_big: lib.cpCap(names), cap_two: lib.cpCap(names, 2),\n"
+        "}));\n",
+        encoding="utf-8",
+    )
+    p = subprocess.run([NODE, str(harness)], input=src[start:end], capture_output=True, text=True, timeout=30)
+    assert p.returncode == 0, p.stderr
+    r = json.loads(p.stdout)
+    # one dot per other voice up to three; four or more: two dots and a plus
+    assert r["marks"] == [
+        {"dots": 0, "more": False}, {"dots": 1, "more": False}, {"dots": 2, "more": False}, {"dots": 3, "more": False},
+        {"dots": 2, "more": True}, {"dots": 2, "more": True}, {"dots": 0, "more": False}, {"dots": 0, "more": False},
+        {"dots": 0, "more": False}, {"dots": 2, "more": False},
+    ]
+    assert r["cap_small"] == {"shown": ["v0", "v1", "v2"], "rest": 0} and r["cap_edge"] == 0
+    assert r["cap_big"]["shown"] == names12() and r["cap_big"]["rest"] == 3
+    assert r["cap_two"] == {"shown": ["v0", "v1"], "rest": 13}
+
+
+def names12():
+    return [f"v{i}" for i in range(12)]
+
+
+def test_picker_has_no_legend_and_a_summary():
+    src = UI.read_text(encoding="utf-8")
+    block = src[src.index("// ---------- speaker colour picker"):src.index("// ---------- end speaker colour picker")]
+    assert "cp-use" not in src and "In use" not in block.replace("colours in use", "").replace("colour in use", "")
+    assert "cp-sum" in block and "cp-tip" in block
