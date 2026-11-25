@@ -590,7 +590,7 @@ def test_split_by_duration_bounds_every_piece():
     long_en = "This is a sentence that goes on for a while. " * 40
     pieces = qwen.split_by_duration(long_en, 20.0)
     assert len(pieces) > 1 and all(qwen.speech_seconds(x) <= 20.0 for x in pieces)
-    assert "".join(pieces).replace(" ", "") == long_en.replace(" ", "")
+    assert " ".join(pieces) == long_en.strip()
     zh = "重构已经完成了，所有测试现在都通过了。" * 12
     pieces = qwen.split_by_duration(zh, 20.0)
     assert "".join(pieces) == zh and all(qwen.speech_seconds(x) <= 20.0 for x in pieces)
@@ -618,3 +618,16 @@ def test_long_chatterbox_text_renders_in_bounded_pieces(tmp_path):
         assert len(eng.models_made["chatterbox"].prepared) == 1  # one conditioning for every piece
     finally:
         eng.shutdown()
+
+
+def test_split_keeps_numbers_urls_and_spacing():
+    line = "The release is version 3.14 and costs $12.50, with a URL of example.com. "
+    pieces = qwen.split_by_duration(line * 6, 20.0)
+    assert len(pieces) > 1
+    joined = " ".join(pieces)
+    assert joined == (line * 6).strip()  # nothing inserted, nothing lost
+    for bad in ("3. 14", "$12. 50", "example. com"):
+        assert bad not in joined
+    assert all(p.endswith("com.") for p in pieces)  # cut only at sentence ends
+    mixed = "第一句。第二句！" * 30
+    assert "".join(qwen.split_by_duration(mixed, 5.0)) == mixed

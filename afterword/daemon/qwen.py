@@ -105,9 +105,13 @@ REQUIRED_FILES_FOR = {
 SENTENCE_SPLIT = r"(?<=[.!?。！？])\s+|(?<=[。！？])"
 
 
-_CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\uf900-\ufaff]")
-_SENTENCE_END_RE = re.compile(r"(?<=[.!?。！？])\s*")
-_CLAUSE_END_RE = re.compile(r"(?<=[,;:，、；：])\s*")
+_CJK_RE = re.compile(r"[぀-ヿ㐀-鿿가-힯豈-﫿]")
+# Cut points (a piece keeps its trailing whitespace, so the pieces join back
+# to the exact text). ASCII marks count only before whitespace, so 3.14,
+# $12.50 and example.com stay whole; CJK marks need no space after them.
+_SENTENCE_CUT_RE = re.compile(r"[.!?]+[\"')\]]*\s+|[。！？]+[」』）\"]*\s*")
+_CLAUSE_CUT_RE = re.compile(r"[,;:]\s+|[，、；：]\s*")
+_WORD_RE = re.compile(r"\S+\s*|\s+")
 
 
 def speech_seconds(text: str) -> float:
@@ -117,9 +121,22 @@ def speech_seconds(text: str) -> float:
     return 0.25 * cjk + 0.07 * (len(text) - cjk)
 
 
+def _cut(text: str, pattern: re.Pattern) -> list[str]:
+    out, start = [], 0
+    for m in pattern.finditer(text):
+        if m.end() > start:
+            out.append(text[start:m.end()])
+            start = m.end()
+    if start < len(text):
+        out.append(text[start:])
+    return out
+
+
 def split_by_duration(text: str, max_s: float) -> list[str]:
     """`text` in pieces of at most `max_s` estimated seconds: whole
-    sentences where they fit, else clauses, else words (or characters)."""
+    sentences where they fit, else clauses, else words (or characters).
+    Nothing is added or changed: the pieces joined are the text again
+    (before each piece's outer whitespace is trimmed)."""
     text = text.strip()
     if not text or speech_seconds(text) <= max_s:
         return [text] if text else []
@@ -128,11 +145,11 @@ def split_by_duration(text: str, max_s: float) -> list[str]:
         if speech_seconds(part) <= max_s:
             return [part]
         if level == 0:
-            pieces = [x for x in _SENTENCE_END_RE.split(part) if x.strip()]
+            pieces = _cut(part, _SENTENCE_CUT_RE)
         elif level == 1:
-            pieces = [x for x in _CLAUSE_END_RE.split(part) if x.strip()]
+            pieces = _cut(part, _CLAUSE_CUT_RE)
         elif level == 2:
-            pieces = part.split(" ") if " " in part.strip() else list(part)
+            pieces = _WORD_RE.findall(part)
         else:
             per = max(1, int(max_s / 0.25))
             return [part[i:i + per] for i in range(0, len(part), per)]
@@ -142,9 +159,8 @@ def split_by_duration(text: str, max_s: float) -> list[str]:
 
     out: list[str] = []
     for unit in units(text, 0):
-        sep = "" if (not out or _CJK_RE.match(unit[:1]) or out[-1].endswith(" ")) else " "
-        if out and speech_seconds(out[-1] + sep + unit) <= max_s:
-            out[-1] = out[-1] + sep + unit
+        if out and speech_seconds((out[-1] + unit).strip()) <= max_s:
+            out[-1] += unit
         else:
             out.append(unit)
     return [o.strip() for o in out if o.strip()]

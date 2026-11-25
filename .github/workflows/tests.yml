@@ -1,0 +1,35 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    # AfterWord is macOS-only (say, afplay, AVSpeechSynthesizer, swiftc), and
+    # the qwen extra (mlx) needs Apple Silicon: an arm64 macOS runner.
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      # Base dependencies plus mlx-audio: the tests fake every model, so no
+      # weights are downloaded and the kokoro/chatterbox extras are not needed.
+      - name: Install
+        run: uv sync --frozen --extra qwen
+
+      - name: Test
+        run: uv run --frozen --no-sync pytest -q

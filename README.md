@@ -486,8 +486,17 @@ disables the `say` fallback; `AFTERWORD_DISABLE=1` makes the hook a no-op;
 ## Development
 
 ```bash
+uv sync --extra qwen
+```
+
+```bash
 uv run pytest -q
 ```
+
+The tests fake every model, so they need mlx-audio (the `qwen` extra) but no
+weights and none of the other extras. CI (`.github/workflows/tests.yml`) runs
+the same thing on an Apple Silicon macOS runner for every pull request and
+push to `main`.
 
 Tests that need the real models are skipped unless you opt in:
 
