@@ -249,24 +249,73 @@
   .empty-panel b { color: var(--ink); }
 
   /* sessions */
-  .scroll-x { overflow-x: auto; min-width: 0; }
-  #s-table td.sess { font-family: var(--mono); font-size: 12px; }
-  #s-table td.last { max-width: 420px; min-width: 200px; }
-  #s-table td.last .ell { display: block; }
-  #s-table td.last .txt { flex: 1 1 0; min-width: 0; font: 14px/1.45 var(--serif); color: var(--ink); }
-  #s-table td.last .reason { color: var(--slate); font-size: 12px; }
-  .vsel { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
-  .vsel > i { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--spk, transparent);
-              border: 1px dashed var(--slate); }
-  .vsel[class*="spk-"] > i { border: 0; }
-  .vsel.spk-4 > i { box-shadow: 0 0 0 1px var(--rule); }
-  .vsel select { max-width: 160px; min-width: 0; }
-  #s-table tr.off td.prof select { color: var(--slate); }
-  #s-table tr.pending { opacity: .65; }
-  /* muted: the voice stays on but plays nothing, so the swatch goes hollow and the text recedes */
-  #s-table tr.muted .vsel > i { background: transparent; box-shadow: inset 0 0 0 2px var(--spk, var(--slate)); border: 0; }
-  #s-table tr.muted td.last .txt, #s-table tr.muted td.sess, #s-table tr.muted td.ell { color: var(--slate); }
-  #s-table tr.muted td.last .txt { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--slate) 60%, transparent); }
+  #view-sessions { gap: 30px; max-width: 1180px; }
+  #view-sessions h3 { font-size: 15px; font-weight: 600; margin: 0; color: var(--ink); }
+  .sx-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin-bottom: 4px; min-width: 0; }
+  .sx-list { list-style: none; margin: 0; padding: 0; }
+  .sx-list > li { border-top: 1px solid color-mix(in srgb, var(--rule) 70%, transparent); }
+  .sx-list > li:last-child { border-bottom: 1px solid color-mix(in srgb, var(--rule) 70%, transparent); }
+  .sx-quiet { background: none; border-color: transparent; color: var(--slate); }
+  .sx-quiet:hover:not(:disabled) { color: var(--ink); border-color: var(--rule); }
+  .sx-empty { color: var(--slate); max-width: 80ch; font-size: 13px; }
+  .sx-empty b { color: var(--ink); }
+  /* voices roster */
+  .vx-row { display: grid; grid-template-columns: minmax(9em, 14em) minmax(0, 1fr) auto; gap: 2px 18px; align-items: start; padding: 10px 0; }
+  .vx-id { min-width: 0; }
+  .vx-id .spk { display: flex; font-size: 14px; }
+  .vx-voice { font-size: 12px; color: var(--slate); overflow-wrap: anywhere; margin-top: 2px; }
+  .vx-voice .mono { color: var(--slate); }
+  .vx-main { min-width: 0; }
+  .vx-desc { display: block; width: calc(100% + 8px); margin: -2px -4px; padding: 2px 4px; text-align: left; border: 0; border-radius: 6px;
+             background: none; font: 14px/1.5 var(--serif); color: var(--ink); cursor: text; max-width: 80ch; overflow-wrap: anywhere; }
+  .vx-desc:hover { background: color-mix(in srgb, var(--cue) 7%, transparent); }
+  .vx-desc.blank { color: var(--slate); font-style: italic; }
+  .vx-desc.saving { opacity: .65; }
+  .vx-input { width: 100%; max-width: 80ch; font: 14px/1.5 var(--serif); padding: 3px 8px; }
+  .vx-use { font-size: 12px; color: var(--slate); margin-top: 3px; }
+  .vx-act { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; justify-content: flex-end; min-width: 0; }
+  .vx-act .msg { flex-basis: 100%; text-align: right; }
+  @media (max-width: 720px) {
+    .vx-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    .vx-act { justify-content: flex-start; } .vx-act .msg { text-align: left; }
+  }
+  /* sessions list */
+  .sx-row { display: grid; grid-template-columns: minmax(130px, 1fr) auto minmax(0, 2.2fr); gap: 4px 20px; align-items: center; min-height: 56px; padding: 8px 0; }
+  .sx-who { min-width: 0; }
+  .sx-dir { font-size: 15px; font-weight: 600; line-height: 1.3; }
+  .sx-dir.unk { color: var(--slate); font-weight: 400; }
+  .sx-sid { font: 12px/1.4 var(--mono); color: var(--slate); }
+  .sx-chip { position: relative; display: inline-flex; align-items: center; min-width: 0; border: 1px solid var(--rule); border-radius: 999px;
+             background: var(--sheet); cursor: pointer; justify-self: start; }
+  .sx-chip:hover { border-color: var(--slate); }
+  .sx-chip:focus-within { outline: 2px solid var(--cue); outline-offset: 2px; }
+  .sx-chip > i { position: absolute; left: 10px; top: 50%; width: 10px; height: 10px; margin-top: -5px; border-radius: 50%; background: var(--spk, transparent);
+                 pointer-events: none; }
+  .sx-chip.spk-4 > i { box-shadow: 0 0 0 1px var(--rule); }
+  .sx-chip.none > i { background: transparent; box-shadow: inset 0 0 0 1.5px var(--slate); }
+  .sx-chip.hollow > i { background: transparent; box-shadow: inset 0 0 0 2px var(--spk, var(--slate)); }
+  .sx-chip::after { content: ""; position: absolute; right: 11px; top: 50%; width: 5px; height: 5px; border: solid var(--slate);
+                    border-width: 0 1.5px 1.5px 0; transform: translateY(-75%) rotate(45deg); pointer-events: none; }
+  .sx-chip select { appearance: none; -webkit-appearance: none; border: 0; background: transparent; margin: 0; padding: 5px 28px 5px 28px;
+                    font-weight: 600; color: var(--spk-ink, var(--slate)); cursor: pointer; max-width: 15em; min-width: 5.5em; text-overflow: ellipsis; }
+  .sx-chip select:focus-visible { outline: 0; }
+  .sx-chip select option { color: var(--ink); background: var(--sheet); font-weight: 400; }
+  .sx-chip.none select { font-weight: 400; }
+  .sx-right { min-width: 0; }
+  .sx-line { margin: 0; font: 14px/1.45 var(--serif); color: var(--slate); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sx-line.none { font: 12px/1.45 var(--sans); }
+  .sx-st { font: 600 12px/1 var(--sans); margin-right: 6px; }
+  .sx-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0 12px; min-width: 0; font-size: 12px; color: var(--slate); }
+  .sx-meta .mono { color: var(--slate); }
+  .sx-meta .tag { font-weight: 600; color: var(--slate); }
+  .sx-mute { margin-left: auto; font-size: 12px; padding: 1px 8px; }
+  .sx-mute[aria-pressed="true"] { color: var(--error); font-weight: 600; background: none; border-color: color-mix(in srgb, var(--error) 45%, var(--rule)); }
+  .sx-row.muted .sx-line { opacity: .6; }
+  .sx-row.pending { opacity: .65; }
+  @media (max-width: 760px) {
+    .sx-row { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding: 10px 0; }
+    .sx-right { grid-column: 1 / -1; }
+  }
 
   /* queue: the Up next drawer is styled with the subtitle bar (header) */
 
@@ -544,8 +593,12 @@
 <main id="view-sessions" class="page" hidden>
   <div class="banner" id="s-muted" hidden><b>All sessions are muted.</b> Voices stay on and lines are logged as skipped (“all muted”). Use <b>All muted</b> in the header to unmute.</div>
   <div class="banner" id="s-err" hidden></div>
-  <section class="panel" aria-label="sessions">
-    <h2>Sessions <span class="hint" id="s-count"></span><span class="grow"></span><span class="msg" id="s-msg"></span><button id="s-refresh">Refresh</button></h2>
+  <section aria-labelledby="v-h">
+    <div class="sx-head"><h3 id="v-h">Voices</h3><span class="hint" id="v-count"></span></div>
+    <div id="v-body"><span class="hint">Loading…</span></div>
+  </section>
+  <section aria-labelledby="s-h">
+    <div class="sx-head"><h3 id="s-h">Sessions</h3><span class="hint" id="s-count"></span></div>
     <div id="s-body"><span class="hint">Loading…</span></div>
   </section>
 </main>
@@ -1813,10 +1866,23 @@ const LogPage = {
 };
 
 // ===================================================================
-// Sessions (#sessions): GET/POST /api/sessions, live from SSE "sessions"
+// Sessions (#sessions): the voice roster (GET /api/voices, PATCH
+// /api/lab/profiles/{name}, POST /api/lab/preview) and the session list
+// (GET/POST /api/sessions, live from SSE "sessions")
 // ===================================================================
 const Sessions = (() => {
   const SOURCES = {"env": "AFTERWORD_VOICE", "voice-tag": "<voice> tag", "voice-command": "/voice", "gui": "this GUI"};
+  // Same sentences as the lab catalog's "samples", for a profile's Preview.
+  const SAMPLES = {
+    en: "I've finished the refactor, and all the tests pass now.",
+    ja: "リファクタリングが終わって、テストもすべて通りました。",
+    zh: "重构已经完成了，所有测试现在都通过了。",
+    es: "Terminé la refactorización y ahora pasan todas las pruebas.",
+    fr: "J'ai fini la refactorisation, et tous les tests passent maintenant.",
+    de: "Ich bin mit dem Refactoring fertig, und alle Tests laufen jetzt durch.",
+    ko: "리팩터링을 마쳤고, 이제 모든 테스트가 통과합니다.",
+  };
+  const DESC_MAX = 300;
   let visible = false, stale = true, loadedOnce = false;
   let data = new Map(), profiles = [];
   const rows = new Map();     // session_id -> {tr, sig}
@@ -1830,7 +1896,7 @@ const Sessions = (() => {
     if (!r.ok || !r.data) {
       $("s-err").hidden = false;
       $("s-err").replaceChildren(h("b", null, "Couldn't load sessions"), `: ${r.error || "empty response"}`);
-      if (!loadedOnce) $("s-body").replaceChildren(h("p", {class: "q-empty"}, "No session data yet. Use Refresh to try again."));
+      if (!loadedOnce) $("s-body").replaceChildren(h("p", {class: "sx-empty"}, "No session data yet. It retries when a session reports in."));
       return;
     }
     $("s-err").hidden = true;
@@ -1868,53 +1934,59 @@ const Sessions = (() => {
       setTimeout(() => { const n = notes.get(id); if (n && n.text === what) { notes.delete(id); if (visible) renderAll(); } }, 3000);
     }
     renderAll();
+    if (r.ok) vSoon();   // the roster's "in use" line follows a voice change
   }
+
+  const num = (n) => h("span", {class: "mono"}, String(n));
 
   function rowFor(s) {
     const id = s.session_id;
     const busy = pending.has(id);
     const on = typeof s.profile === "string" && s.profile !== "";
-    const sel = h("select", {"aria-label": "voice profile", "data-k": "profile", disabled: busy,
+    const folder = base(s.cwd || "");
+    const sel = h("select", {"aria-label": `voice for ${folder || shortId(id)}`, "data-k": "profile", disabled: busy,
       title: on ? `voice on with profile ${s.profile}` : "voice off"});
     sel.append(h("option", {value: ""}, "off"));
     for (const p of profiles) sel.append(h("option", {value: p}, p));
     if (on && !profiles.includes(s.profile)) sel.append(h("option", {value: s.profile}, `${s.profile} (not in config)`));
     sel.value = on ? s.profile : "";
     sel.addEventListener("change", () => change(id, {profile: sel.value || null}));
-    const vsel = h("span", {class: "vsel"}, h("i", {"aria-hidden": "true"}), sel);
-    if (on) paintSpeaker(vsel, s.profile);
-    const mute = h("button", {class: "small toggle", "data-k": "mute", "aria-pressed": String(!!s.muted), disabled: busy,
+    const chip = h("span", {class: "sx-chip" + (on ? "" : " none") + (on && s.muted ? " hollow" : "")}, h("i", {"aria-hidden": "true"}), sel);
+    if (on) paintSpeaker(chip, s.profile);
+    const mute = h("button", {class: "small toggle sx-mute sx-quiet", "data-k": "mute", "aria-pressed": String(!!s.muted), disabled: busy,
       title: s.muted ? "Muted: lines are logged but not played. Click to unmute." : "Keep the voice on but play nothing"},
       s.muted ? "Muted" : "Mute");
     mute.addEventListener("click", () => change(id, {muted: !s.muted}));
     const le = s.last_event && typeof s.last_event === "object" ? s.last_event : null;
     const n = notes.get(id);
     const src = typeof s.source === "string" ? s.source : null;
-    const idLink = h("a", {class: "plain", href: "#log", title: `${id}\nshow this session in the log`}, shortId(id));
-    idLink.addEventListener("click", () => { $("q").value = id; render(); });
-    return h("tr", {class: [on ? "" : "off", s.muted ? "muted" : "", busy ? "pending" : ""].join(" ").trim()},
-      h("td", {class: "sess"}, idLink),
-      h("td", {class: "ell", style: "max-width:180px", title: s.cwd || ""}, base(s.cwd || "") || "—"),
-      h("td", {class: "prof nowrap"}, vsel),
-      h("td", {class: "nowrap"}, mute, n ? h("div", {class: "msg " + n.kind, style: "max-width:220px;white-space:normal"}, n.text) : null),
-      h("td", {class: "nowrap muted", title: src || ""}, src ? (SOURCES[src] || src) : "—"),
-      h("td", {class: "nowrap"}, relSpan(s.last_seen)),
-      h("td", {class: "num", title: `${s.events ?? 0} events logged, ${s.spoken ?? 0} spoken`}, `${isNum(s.events) ? s.events : 0} / ${isNum(s.spoken) ? s.spoken : 0}`),
-      h("td", {class: "last"}, le ? [
-        h("div", {class: "row", style: "flex-wrap:nowrap"},
-          le.status ? h("span", {class: "badge s-" + cls(le.status)}, String(le.status)) : null,
-          h("span", {class: "ell txt", title: le.text || ""}, le.text || "")),
-        le.reason ? h("div", {class: "reason ell", title: le.reason}, le.reason) : null,
-      ] : h("span", {class: "muted"}, "—")));
+    const events = isNum(s.events) ? s.events : 0, spoken = isNum(s.spoken) ? s.spoken : 0;
+    const line = le && le.text
+      ? h("p", {class: "sx-line", title: [le.text, le.reason].filter(Boolean).join("\n")},
+          le.status && le.status !== "spoken" ? h("span", {class: "sx-st s-" + cls(le.status)}, String(le.status)) : null, le.text)
+      : h("p", {class: "sx-line none"}, "No lines yet");
+    return h("li", {class: ["sx-row", on ? "" : "off", s.muted ? "muted" : "", busy ? "pending" : ""].join(" ").trim()},
+      h("div", {class: "sx-who"},
+        h("div", {class: "sx-dir ell" + (folder ? "" : " unk"), title: s.cwd || ""}, folder || "unknown folder"),
+        h("div", {class: "sx-sid", title: id}, shortId(id))),
+      chip,
+      h("div", {class: "sx-right"}, line,
+        h("div", {class: "sx-meta"},
+          s.muted ? h("span", {class: "tag"}, "muted") : null,
+          isNum(s.last_seen) ? h("span", null, "seen ", relSpan(s.last_seen)) : null,
+          src && src !== "gui" ? h("span", {title: src}, "set by ", SOURCES[src] || src) : null,
+          events || spoken ? h("span", {title: `${events} events logged, ${spoken} spoken`}, num(events), " events, ", num(spoken), " spoken") : null,
+          n ? h("span", {class: "msg " + n.kind}, n.text) : null,
+          mute)));
   }
 
   function emptyState() {
-    return h("div", {class: "empty-panel"},
+    return h("div", {class: "sx-empty"},
       h("div", null, h("b", null, "No sessions yet."), " Sessions appear here after their first Claude Code hook call. Voice is off by default; turn it on in any of three ways:"),
       h("ol", {class: "steps"},
         h("li", null, "Launch with a profile: ", h("code", null, "AFTERWORD_VOICE=nova claude")),
         h("li", null, "Inside a running session: ", h("code", null, "/voice nova"), " (", h("code", null, "/voice off"), " to stop)"),
-        h("li", null, "Here: pick a profile in a session’s voice column once it shows up.")),
+        h("li", null, "Here: pick a profile in a session’s voice chip once it shows up.")),
       h("div", {class: "hint", style: "margin-top:8px"}, profiles.length ? `Profiles in config: ${profiles.join(", ")}.` : "No profiles configured yet: make one in the Voice lab."));
   }
 
@@ -1922,19 +1994,17 @@ const Sessions = (() => {
     $("s-count").textContent = loadedOnce && data.size ? `${data.size} ${data.size === 1 ? "session" : "sessions"}, newest activity first` : "";
     if (!loadedOnce) return;
     if (!data.size) { rows.clear(); $("s-body").replaceChildren(emptyState()); return; }
-    let table = $("s-table");
-    if (!table) {
-      table = h("table", {id: "s-table"},
-        h("thead", null, h("tr", null, ["session", "folder", "voice", "mute", "set by", "last seen", "events / spoken", "last line"].map(t => h("th", {class: "nowrap"}, t)))),
-        h("tbody"));
+    let list_ = $("s-list");
+    if (!list_) {
+      list_ = h("ul", {id: "s-list", class: "sx-list"});
       // Don't reshuffle rows under the pointer: newest-first order is applied when it leaves.
-      table.addEventListener("mouseenter", () => { hovering = true; });
-      table.addEventListener("mouseleave", () => { hovering = false; renderAll(); });
-      $("s-body").replaceChildren(h("div", {class: "scroll-x"}, table));
+      list_.addEventListener("mouseenter", () => { hovering = true; });
+      list_.addEventListener("mouseleave", () => { hovering = false; renderAll(); });
+      rows.clear();
+      $("s-body").replaceChildren(list_);
     }
-    const tbody = table.tBodies[0];
     const recency = (s) => s.last_seen || s.updated || 0;
-    const shown = new Map([...tbody.children].map((tr, i) => [tr, i]));
+    const shown = new Map([...list_.children].map((tr, i) => [tr, i]));
     const pos = (s) => { const r = rows.get(s.session_id); return r && shown.has(r.tr) ? shown.get(r.tr) : -1; };
     const list = [...data.values()].sort((a, b) => {
       if (hovering) {
@@ -1961,18 +2031,214 @@ const Sessions = (() => {
     }
     const ids = new Set(list.map(s => s.session_id));
     for (const [id, r] of rows) if (!ids.has(id)) { r.tr.remove(); rows.delete(id); }
-    let cur = tbody.firstChild;
-    for (const node of want) { if (node === cur) cur = cur.nextSibling; else tbody.insertBefore(node, cur); }
+    let cur = list_.firstChild;
+    for (const node of want) { if (node === cur) cur = cur.nextSibling; else list_.insertBefore(node, cur); }
   }
 
-  sse.on("sessions", upsert);
-  document.addEventListener("aw:speakers", () => { if (visible && loadedOnce) renderAll(); });
-  sse.on("event", loadSoon);
-  sse.on("open", () => { if (visible) load(); else stale = true; });
-  $("s-refresh").addEventListener("click", async () => { note("s-msg", "refreshing…", "run"); await load(); note("s-msg", ""); });
+  // ---------- voices roster ----------
+  // GET /api/voices: the profiles in config order, with description, last use
+  // and the sessions using each one now.
+  let voices = null;              // array of profile dicts, null until the first good load
+  let voicesErr = "";             // quiet note when the roster can't be had
+  const vrows = new Map();        // name -> {li, sig}
+  const vnotes = new Map();       // name -> {text, kind}
+  const saving = new Map();       // name -> description being saved
+  let editing = null;             // name of the profile whose description is being edited
+  let pv = null;                  // preview: {name, phase: "render" | "play"}
+  let vBusy = false, vTimer = null, vTick = null;
+  const player = new AwAudio();
+
+  async function loadVoices() {
+    if (vBusy) return;
+    vBusy = true;
+    try {
+      const r = await api("GET", "/api/voices");
+      if (r.ok && r.data && Array.isArray(r.data.profiles)) {
+        voices = r.data.profiles.filter(p => p && typeof p.name === "string");
+        voicesErr = "";
+        setSpeakerProfiles(voices.map(p => p.name));
+      } else {
+        voicesErr = r.status === 404 ? "The voice roster isn't available from this daemon yet." : `Voice roster unavailable: ${r.error || "empty response"}`;
+      }
+    } finally { vBusy = false; }
+    if (visible) renderVoices();
+  }
+  function vSoon() {
+    if (!visible || vTimer) return;
+    vTimer = setTimeout(() => { vTimer = null; loadVoices(); }, 1500);
+  }
+
+  function langLabel(code) {
+    code = String(code || "").trim();
+    if (!code || code.toLowerCase() === "auto") return "";
+    try { return new Intl.DisplayNames([navigator.language || "en"], {type: "language"}).of(code) || code; } catch { return code; }
+  }
+  const folderOf = (u) => base(u.cwd || "") || shortId(u.session_id);
+  function usageLine(p) {
+    const use = Array.isArray(p.in_use) ? p.in_use.filter(u => u && typeof u === "object") : [];
+    if (use.length) {
+      const names = use.map(folderOf);
+      const shown = names.slice(0, 4).join(", ") + (names.length > 4 ? ` +${names.length - 4} more` : "");
+      return h("span", {title: names.join("\n")}, `in use by ${use.length} ${use.length === 1 ? "session" : "sessions"}: ${shown}`);
+    }
+    if (isNum(p.last_used)) {
+      const where = p.last_cwd ? base(p.last_cwd) : "";
+      return h("span", {title: p.last_session || ""}, "last used ", relSpan(p.last_used), where ? ` in ${where}` : "");
+    }
+    return h("span", null, "never used");
+  }
+
+  function setVNote(name, text, kind = "info", ms = 4000) {
+    const n = {text, kind};
+    vnotes.set(name, n);
+    renderVoices();
+    if (ms) setTimeout(() => { if (vnotes.get(name) === n) { vnotes.delete(name); if (visible) renderVoices(); } }, ms);
+  }
+
+  function vrow(p) {
+    const name = p.name;
+    const text = saving.has(name) ? saving.get(name) : String(p.description || "").trim();
+    const desc = h("button", {type: "button", class: "vx-desc" + (text ? "" : " blank") + (saving.has(name) ? " saving" : ""),
+      title: "Edit description", "aria-label": `Edit description of ${name}: ${text || "empty"}`}, text || "Add a description so Claude can pick this voice");
+    desc.addEventListener("click", () => startEdit(name));
+    const lang = langLabel(p.lang);
+    const rendering = pv && pv.phase === "render";
+    const mine = pv && pv.name === name ? pv.phase : "";
+    const hear = h("button", {class: "small", "data-k": "preview", disabled: rendering,
+      title: mine === "play" ? "Stop the preview" : "Hear a short sample in this voice"},
+      mine === "render" ? "Rendering…" : mine === "play" ? "Stop" : "Preview");
+    hear.addEventListener("click", () => preview(p));
+    const edit = h("button", {class: "small sx-quiet", "data-k": "edit", title: "Edit description"}, "Edit");
+    edit.addEventListener("click", () => startEdit(name));
+    const n = vnotes.get(name);
+    return h("li", {class: "vx-row", "data-name": name},
+      h("div", {class: "vx-id"}, speakerTag(name),
+        h("div", {class: "vx-voice"}, h("span", {class: "mono", title: "voice id"}, p.voice || "default voice"), lang ? ` · ${lang}` : "")),
+      h("div", {class: "vx-main"}, h("div", {class: "vx-descwrap"}, desc), h("div", {class: "vx-use"}, usageLine(p))),
+      h("div", {class: "vx-act"}, hear, edit, n ? h("span", {class: "msg " + n.kind}, n.text) : null));
+  }
+
+  function renderVoices() {
+    const body = $("v-body");
+    if (!voices) {
+      $("v-count").textContent = "";
+      if (voicesErr) body.replaceChildren(h("p", {class: "sx-empty"}, voicesErr));
+      return;
+    }
+    $("v-count").textContent = voices.length
+      ? `${voices.length} ${voices.length === 1 ? "profile" : "profiles"}. Claude picks a voice from its description.` : "";
+    if (!voices.length) {
+      vrows.clear();
+      body.replaceChildren(h("p", {class: "sx-empty"}, "No profiles configured yet: make one in the ", h("a", {href: "#lab"}, "Voice lab"), "."));
+      return;
+    }
+    let ul = $("v-list");
+    if (!ul) { ul = h("ul", {id: "v-list", class: "sx-list"}); vrows.clear(); body.replaceChildren(ul); }
+    const rendering = !!pv && pv.phase === "render";
+    const want = [];
+    for (const p of voices) {
+      let r = vrows.get(p.name);
+      if (r && editing === p.name && r.li.isConnected) { want.push(r.li); continue; }   // never rebuild the field being typed in
+      const sig = JSON.stringify([p, speakerProfiles, pv && pv.name === p.name ? pv.phase : rendering ? "other" : "",
+        saving.has(p.name) ? saving.get(p.name) : null, vnotes.get(p.name) || null]);
+      if (!r || r.sig !== sig) {
+        const li = vrow(p);
+        const hadFocus = r && r.li.contains(document.activeElement) ? document.activeElement.dataset.k : null;
+        if (r && r.li.parentNode) r.li.replaceWith(li);
+        r = {li, sig};
+        vrows.set(p.name, r);
+        if (hadFocus) { const f = li.querySelector(`[data-k="${hadFocus}"]`); if (f && !f.disabled) f.focus(); }
+      }
+      want.push(r.li);
+    }
+    const names = new Set(voices.map(p => p.name));
+    for (const [name, r] of vrows) if (!names.has(name)) { r.li.remove(); vrows.delete(name); }
+    let cur = ul.firstChild;
+    for (const node of want) { if (node === cur) cur = cur.nextSibling; else ul.insertBefore(node, cur); }
+  }
+
+  // Inline description editor: Enter or blur saves, Esc cancels.
+  function startEdit(name) {
+    const r = vrows.get(name);
+    const p = (voices || []).find(x => x.name === name);
+    if (!r || !p || editing === name) return;
+    if (editing) { const o = vrows.get(editing); if (o) o.sig = null; editing = null; }
+    editing = name;
+    const input = h("input", {type: "text", class: "vx-input", maxlength: DESC_MAX, "data-k": "desc",
+      placeholder: "Add a description so Claude can pick this voice", "aria-label": `Description of ${name}`});
+    input.value = saving.has(name) ? saving.get(name) : String(p.description || "").trim();
+    const wrap = r.li.querySelector(".vx-descwrap");
+    wrap.replaceChildren(input, h("div", {class: "hint"}, "Enter saves, Esc cancels."));
+    input.focus(); input.select();
+    let done = false;
+    const finish = (save) => {
+      if (done) return;
+      done = true;
+      if (editing === name) editing = null;
+      const cur = vrows.get(name);
+      if (cur) cur.sig = null;
+      if (save) saveDesc(name, input.value.trim()); else renderVoices();
+    };
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") { ev.preventDefault(); finish(true); }
+      else if (ev.key === "Escape") { ev.preventDefault(); finish(false); }
+    });
+    input.addEventListener("blur", () => finish(true));
+  }
+  async function saveDesc(name, text) {
+    const p = (voices || []).find(x => x.name === name);
+    if (!p || text === String(p.description || "").trim()) return renderVoices();
+    saving.set(name, text); vnotes.delete(name); renderVoices();
+    const r = await api("PATCH", "/api/lab/profiles/" + encodeURIComponent(name), {description: text});
+    saving.delete(name);
+    if (r.ok && r.data && r.data.profile && typeof r.data.profile === "object") {
+      const i = voices.findIndex(x => x.name === name);
+      if (i >= 0) voices[i] = {...voices[i], ...r.data.profile, name};
+      setVNote(name, text ? "saved" : "description removed", "ok", 3000);
+    } else {
+      setVNote(name, r.status === 404 ? "Couldn't save: this daemon can't edit descriptions yet." : `Couldn't save: ${r.error || "no response"}`, "err", 6000);
+    }
+  }
+
+  // ---------- preview ----------
+  player.addEventListener("pause", () => { if (pv && pv.phase === "play") { pv = null; renderVoices(); } });
+  async function preview(p) {
+    if (pv && pv.phase === "render") return;
+    if (pv && pv.name === p.name) { player.pause(); return; }
+    try { awContext().resume().catch(() => {}); } catch { /* play() resumes it again */ }
+    player.pause();
+    const name = p.name;
+    const lang = String(p.lang || "").toLowerCase().split(/[-_]/)[0];
+    pv = {name, phase: "render"}; vnotes.delete(name); renderVoices();
+    const r = await api("POST", "/api/lab/preview", {text: SAMPLES[lang] || SAMPLES.en, profile: name});
+    if (!r.ok || !r.data || typeof r.data.url !== "string" || !r.data.url.startsWith("/api/lab/")) {
+      pv = null; return setVNote(name, r.error || "render failed", "err", 6000);
+    }
+    player.src = r.data.url;
+    applyRate(player, Math.min(2, Math.max(0.5, Number(r.data.pace) || 1)));
+    pv = {name, phase: "play"}; renderVoices();
+    try { await player.play(); }
+    catch { if (pv && pv.name === name) { pv = null; setVNote(name, "The browser blocked playback; click Preview again.", "err", 6000); } }
+  }
+
+  sse.on("sessions", (m) => { upsert(m); vSoon(); });
+  document.addEventListener("aw:speakers", () => { if (visible) { if (loadedOnce) renderAll(); loadVoices(); } });
+  sse.on("event", () => { loadSoon(); vSoon(); });
+  sse.on("open", () => { if (visible) { load(); loadVoices(); } else stale = true; });
+  document.addEventListener("visibilitychange", () => { if (visible && !document.hidden) loadVoices(); });
   return {
-    show() { visible = true; if (stale || !loadedOnce) load(); else renderAll(); },
-    hide() { visible = false; },
+    show() {
+      visible = true;
+      if (stale || !loadedOnce) load(); else renderAll();
+      if (voices) renderVoices();
+      loadVoices();
+      if (!vTick) vTick = setInterval(() => { if (visible && !document.hidden) loadVoices(); }, 10000);
+    },
+    hide() {
+      visible = false;
+      clearInterval(vTick); vTick = null;
+      player.pause();
+    },
   };
 })();
 
