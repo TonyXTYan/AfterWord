@@ -129,7 +129,15 @@ seed = 1234                  # optional: the same line always sounds the same
 max_chars = 400
 say_voice = "Samantha"       # macOS voice used if Qwen3-TTS is unavailable
 description = "calm narrator for long explanations"  # optional: for /afterword:voice pick
+color = "teal"               # optional: the GUI's colour for this voice
 ```
+
+`color` is one of the GUI's 16 speaker colours (`yellow`, `cyan`, `green`,
+`magenta`, `white`, `orange`, `blue`, `red`, `violet`, `lime`, `pink`,
+`brown`, `teal`, `grey`, `olive`, `sky`) or a hex `"#RRGGBB"`. Voices
+without one get the palette colours no other voice has chosen, in order.
+You can also pick it in the GUI: on Sessions, click a voice's name under
+Voices.
 
 | `voice` | Model | Notes |
 |---|---|---|

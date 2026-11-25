@@ -25,6 +25,10 @@ playing keeps the player it started with.
 
 `config` in `GET /api/status` also has `"early_say": true` (`[daemon] early_say`).
 
+`config` in `GET /api/status` also has `"profile_colors"`: every profile's
+`[profiles.<name>] color`, `{"nova": "teal", "ember": "#12ab9f", "echo": null}`
+(null: automatic). The GUI colours each voice from it (see Voices below).
+
 ## Early speaking: event rows
 
 Lines spoken while Claude is still writing (the `MessageDisplay` hook) are
@@ -257,7 +261,7 @@ counting the `info` rows that UserPromptSubmit and SessionStart log)
 same order as `/api/status` `config.profiles`):
 ```json
 {"profiles": [{"name": "nova", "description": "calm narrator", "voice": "say:Samantha",
-  "lang": "en", "style": "…", "persona": "", "pace": 1.0, "langs": {},
+  "lang": "en", "style": "…", "persona": "", "pace": 1.0, "langs": {}, "color": "teal",
   "last_used": 1795597634.0, "last_session": "abc", "last_cwd": "/path",
   "in_use": [{"session_id": "abc", "cwd": "/path", "ts": 1795597634.0}],
   "stats": {"lines_7d": 38, "audio_s_7d": 712.4, "synth_ms_avg_7d": 912.0}}]}
@@ -272,14 +276,25 @@ events DB: `lines_7d` (count), `audio_s_7d` (summed `audio_s`) and
 used that week reports `0`, `0.0`, `null`. Only `GET /api/voices` carries it.
 Each profile also carries the other lab fields (`ref_text`, `max_chars`,
 `say_voice`, `seed`, `temperature`).
+`color` is the profile's GUI colour: one of the 16 palette names (`yellow`,
+`cyan`, `green`, `magenta`, `white`, `orange`, `blue`, `red`, `violet`,
+`lime`, `pink`, `brown`, `teal`, `grey`, `olive`, `sky`) or `"#rrggbb"`,
+both lower case, or null when none is set. The GUI gives a voice without one
+the first palette colours no explicit choice uses, in `config.profiles`
+order, wrapping when there are more such voices than free colours. A bad
+value in config.toml is a config warning and counts as unset.
 
-`PATCH /api/lab/profiles/<name>` with `{"description": "text"}` sets the
+`PATCH /api/lab/profiles/<name>` with `{"description": "text"}` and/or
+`{"color": "teal"}` (a palette name, `"#RRGGBB"`, or `""`) sets the
 profile's one-line description (trimmed, at most 300 characters; `""` removes
-it) and returns `{"ok": true, "profile": {…one item of GET /api/voices…}}`.
-Only that key of `[profiles.<name>]` is written, so comments and the rest of
-the table stay as they are; the daemon then reloads the config. 404 for an
-unknown profile, 400 for a missing, non-string or too long description,
-403 without the `X-AfterWord: 1` header.
+it) and its colour (either case, stored lower case; `""` removes it, so the
+GUI picks one), and returns `{"ok": true, "profile": {…one item of GET
+/api/voices…}}`. Only those keys of `[profiles.<name>]` are written, in one
+write, so comments and the rest of the table stay as they are; the daemon
+then reloads the config. 404 for an unknown profile; 400 when neither key is
+sent, for a non-string or too long description, or for a bad colour (nothing
+is written then); 403 without the `X-AfterWord: 1` header. A save from the
+lab (`POST /api/lab/profiles`) keeps the colour.
 
 `POST /api/lab/profiles` (save from the lab) takes the same optional
 `description` (at most 300 characters). When it is present it is written
