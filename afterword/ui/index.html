@@ -215,7 +215,6 @@
 
   [hidden] { display: none !important; }
 
-  @media (max-width: 1180px) { #meta { display: none; } }
   @media (max-width: 900px) {
     .hd { padding: 8px 16px 0; }
     .tabs { order: 9; flex: 1 0 100%; overflow-x: auto; min-height: 38px; scrollbar-width: none; }
@@ -225,7 +224,6 @@
   @media (max-width: 760px) { main { padding: 12px 16px 32px; } }
   @media (max-width: 640px) {
     .now .line { font-size: 18px; }
-    .now .last { display: none; }
     input[type=search] { width: 100%; flex: 1 1 160px; }
   }
   @media (prefers-reduced-motion: reduce) {
@@ -2161,7 +2159,8 @@ const Sessions = (() => {
       if (r.ok && r.data && Array.isArray(r.data.profiles)) {
         voices = r.data.profiles.filter(p => p && typeof p.name === "string");
         voicesErr = "";
-        setSpeakerProfiles(voices.map(p => p.name));
+        // Colours come from one source only (the status feed's profile list),
+        // so a voice never changes colour between this roster and other pages.
       } else {
         voicesErr = r.status === 404 ? "The voice roster isn't available from this daemon yet." : `Voice roster unavailable: ${r.error || "empty response"}`;
       }
@@ -2445,6 +2444,9 @@ const Queue = (() => {
 })();
 
 connect();
+// Also right away, not only when the stream opens: the profile list sets the
+// speaker colours, and a page drawn without it shows hashed colours first.
+loadStatus();
 setInterval(loadStatus, 10000);
 
 // ===================================================================
@@ -2576,7 +2578,9 @@ const Lab = (() => {
     if (!box) return;
     const m = SRC_MODEL[src], mi = mi0(m), eng = (cat && cat.engine) || {};
     const show = !!(mi && mi.downloaded && !mi.loaded && !mi.error && eng.available !== false);
-    if (!show && warming !== m) { box.hidden = true; box.replaceChildren(); box.dataset.model = ""; return; }
+    // A source without a model (say, Apple) never shows the line: m is undefined,
+    // and warming is null, so the old "warming !== m" test let it through.
+    if (!m || (!show && warming !== m)) { box.hidden = true; box.replaceChildren(); box.dataset.model = ""; return; }
     if (box.dataset.model === m && !box.hidden) return;   // keep a running "warming…" or its error
     box.dataset.model = m;
     const msg = h("span", {class: "msg"});
