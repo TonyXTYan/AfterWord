@@ -12,7 +12,11 @@ from pathlib import Path
 
 import pytest
 
-from conftest import HOOK, hook_log, run_hook, stop_payload, wait_for
+from conftest import TIME_SCALE, HOOK, hook_log, run_hook, stop_payload, wait_for
+
+# The hook must not wait on a slow daemon or a FIFO (which would take 3 s or
+# forever): 1 s locally, scaled on CI but kept well below that.
+HANG_LIMIT_S = min(1.0 * TIME_SCALE, 2.0)
 
 # Python startup alone is ~20 ms; this bound is about "never hangs", the
 # real timing is reported by test_hook_is_fast.
@@ -364,7 +368,7 @@ def test_slow_daemon_does_not_hang_hook_or_double_speak(aw_home, say_stub, fake_
     fake_daemon(delay=3.0)
     proc, elapsed = run_hook(stop_payload('<voice set="nova"/><say>slow</say>'))
     assert_clean_exit(proc, elapsed)
-    assert elapsed < 1.0
+    assert elapsed < HANG_LIMIT_S
     time.sleep(0.3)
     assert not say_stub.exists()  # connected: the daemon owns playback
 
@@ -436,7 +440,7 @@ def test_never_blocks_on_fifo_transcript(aw_home, tmp_path):
     os.mkfifo(fifo)
     proc, elapsed = run_hook({"session_id": "s", "transcript_path": str(fifo)})
     assert_clean_exit(proc, elapsed)
-    assert elapsed < 1.0
+    assert elapsed < HANG_LIMIT_S
 
 
 def test_never_fails_on_huge_input(aw_home):
@@ -584,7 +588,7 @@ def test_fifo_in_home_never_blocks(aw_home, say_stub, name):
     os.mkfifo(path)
     proc, elapsed = run_hook(stop_payload('<voice set="nova"/><say>fifo</say>'))
     assert_clean_exit(proc, elapsed)
-    assert elapsed < 1.0, elapsed
+    assert elapsed < HANG_LIMIT_S, elapsed
 
 
 def test_symlinked_hook_log_is_not_followed(aw_home, tmp_path):
@@ -710,4 +714,4 @@ def test_hook_is_fast(aw_home, say_stub):
     print("hook wall time incl. interpreter start: best %.1f ms" % (best * 1000))
     in_hook = [r["elapsed_ms"] for r in hook_log(aw_home) if "elapsed_ms" in r]
     print("hook time after interpreter start: best %.1f ms" % min(in_hook))
-    assert min(in_hook) < 50
+    assert min(in_hook) < 50 * TIME_SCALE

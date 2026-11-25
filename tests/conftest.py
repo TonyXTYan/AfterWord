@@ -9,6 +9,10 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
+
+# Speed budgets (upper time limits) are set on a developer Mac; shared CI
+# runners are slower. AFTERWORD_TEST_TIME_SCALE overrides; CI defaults to 3x.
+TIME_SCALE = float(os.environ.get("AFTERWORD_TEST_TIME_SCALE") or (3.0 if os.environ.get("CI") else 1.0))
 HOOK = ROOT / "afterword" / "hooks" / "afterword_hook.py"
 
 

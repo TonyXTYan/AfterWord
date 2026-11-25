@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import ROOT, hook_log, run_hook, stop_payload, wait_for
+from conftest import TIME_SCALE, ROOT, hook_log, run_hook, stop_payload, wait_for
 
 CONFIG = """
 [profiles.nova]
@@ -222,7 +222,7 @@ def test_prompt_hook_is_fast(home):
     for _ in range(3):
         prompt("hi")
     times = [r["elapsed_ms"] for r in hook_log(home) if r.get("hook_event") == "UserPromptSubmit"]
-    assert min(times) < 50
+    assert min(times) < 50 * TIME_SCALE
 
 
 # --------------------------------------------------------------------------- #

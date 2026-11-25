@@ -20,6 +20,7 @@ from afterword.daemon.config import ConfigStore
 from afterword.daemon.lab import Lab, LabError
 
 from test_lab import SR, FakeEngine, FakeModel, _daemon, home, make_lab, run  # noqa: F401  (fixtures)
+from conftest import TIME_SCALE
 
 
 def tone(f0, seconds, sr=SR):
@@ -158,7 +159,7 @@ def _req(text, kind="design"):
 
 
 def test_live_render_preempts_a_preemptible_lab_render():
-    eng = ToneEngine(chunks=20, delay=0.05)
+    eng = ToneEngine(chunks=100, delay=0.05)  # ~5 s if it ran to the end
     lab = eng.submit_render(_req("explore"), limit=False, stream=True, preemptible=True)
     assert lab.result is not None
     end = time.time() + 5
@@ -169,10 +170,10 @@ def test_live_render_preempts_a_preemptible_lab_render():
     live = eng.submit_render(_req("live", "builtin"), limit=False, priority=qwen.LIVE)
     with pytest.raises(qwen.RenderPreempted) as info:
         lab.result(5)
-    assert time.monotonic() - t0 < 0.3  # at its next chunk, not after the ~0.9 s it had left
+    assert time.monotonic() - t0 < 0.3 * TIME_SCALE  # at its next chunk, not after the ~4.9 s it had left
     assert isinstance(info.value, qwen.RenderCancelled)
     assert info.value.partial.seed == 7  # its timings are kept, as for a skip
-    live.result(5)
+    live.result(15)  # the live render itself is ~5 s here
     assert eng.preemptions == 1
     eng.shutdown()
 
