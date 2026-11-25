@@ -132,35 +132,55 @@
   th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
   th { font-size: 12px; color: var(--slate); font-weight: 500; }
 
-  /* log: transcript lines on the page, hairlines between them */
-  table.log { background: none; border: 0; border-radius: 0; overflow: visible; }
-  table.log > thead th { padding: 4px 12px 6px; border-bottom: 1px solid var(--rule); font-size: 12px; font-weight: 500; color: var(--slate); }
-  table.log > tbody > tr > td { padding: 10px 12px; border-bottom: 1px solid color-mix(in srgb, var(--rule) 55%, transparent); }
-  tr.ev { cursor: pointer; }
-  tr.ev:hover td { background: color-mix(in srgb, var(--cue) 6%, transparent); }
-  tr.ev.flash td { animation: flash 1.2s ease-out; }
+  /* transcript: one live list of subtitle lines, newest first, hairlines between them */
+  .tx { display: flex; flex-direction: column; min-width: 0; }
+  .tx .ev { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 2px 16px; padding: 10px 4px 11px; min-width: 0;
+            border-bottom: 1px solid color-mix(in srgb, var(--rule) 55%, transparent); cursor: pointer; }
+  .tx .ev:hover { background: color-mix(in srgb, var(--cue) 5%, transparent); }
+  .tx .ev.flash { animation: flash 1.2s ease-out; }
   @keyframes flash { from { background: color-mix(in srgb, var(--cue) 18%, transparent); } }
-  td.t { font-family: var(--mono); font-size: 12px; color: var(--slate); white-space: nowrap; }
-  td.when { width: 1%; }
-  td.when .eid { display: block; margin-top: 2px; }
-  td.who { min-width: 110px; max-width: 200px; font-size: 12px; color: var(--slate); }
-  td.who .spk { display: flex; font-size: 13px; margin-bottom: 3px; }
-  td.who .sid { display: block; font-family: var(--mono); font-size: 12px; white-space: nowrap; }
-  td.who small { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  td.kind { font-size: 13px; }
-  td.kind .badge { margin-top: 3px; }
-  td.text { min-width: 300px; max-width: 640px; font: 15px/1.55 var(--serif); color: var(--ink); }
-  td.text .reason { font: 12px/1.45 var(--sans); color: var(--slate); margin-top: 2px; }
-  td.tim { font-family: var(--mono); font-size: 12px; color: var(--slate); line-height: 1.6; max-width: 260px; }
-  td.tim div { overflow-wrap: anywhere; }
+  /* a run of lines from one speaker and session reads as one block: no hairline inside it */
+  .tx .ev:has(+ .ev.cont) { border-bottom-color: transparent; padding-bottom: 3px; }
+  .tx .ev.cont { padding-top: 3px; }
+  .tx .gut { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 8px; align-items: start; min-width: 0; }
+  .tx .play { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0;
+              border: 0; border-radius: 50%; background: var(--ink); color: var(--sheet); font: 9px/1 var(--sans); }
+  .tx .play:hover, .tx .ev.listening .play { background: var(--cue); color: var(--on-accent); }
+  .tx .who { display: flex; flex-direction: column; min-width: 0; padding-top: 2px; }
+  .tx .who .top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .tx .who .spk { font-size: 13px; font-weight: 600; }
+  .tx .who small { font-size: 12px; color: var(--slate); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tx .tally { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--tally); animation: tx-tally 1.6s ease-in-out infinite; }
+  @keyframes tx-tally { 50% { opacity: .35; } }
+  .tx .body { min-width: 0; }
+  .tx .ev.err .body { --spk: var(--error); }
+  .tx .line { font: 15px/1.55 var(--serif); color: var(--ink); max-width: 72ch; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .tx .meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; margin-top: 2px; font-size: 12px; color: var(--slate); min-width: 0; }
+  .tx .meta .num { font-family: var(--mono); font-size: 12px; }
+  .tx .meta .tm { padding: 0; border: 0; border-radius: 3px; background: none; font: inherit; color: inherit; }
+  .tx .meta .tm:hover { color: var(--ink); text-decoration: underline; }
+  .tx .meta .st { font-weight: 600; }
+  .tx .meta .rs { overflow-wrap: anywhere; }
+  .tx .ev.quiet { padding-top: 6px; padding-bottom: 6px; }
+  .tx .ev.quiet .who .spk { font-weight: 500; }
+  .tx .ev.quiet .meta { margin: 0; padding-top: 2px; }
+  .tx .ev.quiet .what { color: var(--ink); font-size: 13px; }
+  .tx .pl:empty { display: none; }
+  .tx .pl aw-audio { width: min(100%, 420px); margin-top: 6px; }
+  .tx .empty { margin: 0; }
+  .tx .detail { margin: 2px 0 8px 148px; padding: 12px 14px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 10px; min-width: 0; }
+  .tx .detail .acts { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-bottom: 12px; }
+  .tx .detail .acts button, .tx .detail .acts a.btn { font-size: 12px; padding: 2px 8px; }
+  .tx .detail .said { margin: 0 0 12px; max-width: 72ch; font: 14px/1.5 var(--serif); color: var(--ink); }
+  .tx .detail .said span { font: 12px var(--sans); color: var(--slate); margin-right: 6px; }
+  .tx-more { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; padding: 14px 4px 0; }
   .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap;
            border: 1px solid color-mix(in srgb, currentColor 40%, transparent); background: color-mix(in srgb, currentColor 9%, transparent); }
   .s-spoken { color: var(--spoken); } .s-queued, .s-synthesizing { color: var(--queued); }
   .s-playing { color: var(--playing); } .s-skipped { color: var(--skipped); }
   .s-error { color: var(--error); } .s-info { color: var(--info); }
   .via { font-size: 11px; color: var(--slate); }
-  tr.detail td { background: var(--sheet); padding: 0; border-bottom: 1px solid var(--rule); }
-  .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; padding: 14px 12px; }
+  .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
   .detail-grid h3 { font-size: 12px; color: var(--slate); margin: 0 0 6px; font-weight: 500; }
   .detail-grid h3.next { margin-top: 12px; }
   pre { margin: 0; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-word;
@@ -168,32 +188,30 @@
         border-radius: 6px; padding: 8px; }
   dl.timings { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; font-family: var(--mono); font-size: 12px; }
   dl.timings dt { color: var(--slate); }
-  dl.timings dd { margin: 0; }
+  dl.timings dd { margin: 0; overflow-wrap: anywhere; }
   @media (max-width: 720px) {
-    table.log, table.log > tbody { display: block; }
-    table.log > thead { display: none; }
-    table.log > tbody > tr.ev { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 14px; padding: 10px 4px;
-                                border-bottom: 1px solid color-mix(in srgb, var(--rule) 55%, transparent); }
-    table.log > tbody > tr.ev > td { display: block; padding: 0; border: 0; min-width: 0; max-width: none; width: auto; }
-    tr.ev td.when .eid { display: inline; margin: 0 0 0 8px; }
-    tr.ev td.who { grid-column: 2; grid-row: 1; max-width: none; }
-    tr.ev td.who .spk { display: inline-flex; margin: 0 8px 0 0; }
-    tr.ev td.who .sid, tr.ev td.who small { display: inline; }
-    tr.ev td.who small { margin-left: 8px; }
-    tr.ev td.kind, tr.ev td.text, tr.ev td.tim { grid-column: 1 / -1; }
-    tr.ev td.kind .badge { margin: 0 0 0 8px; }
-    tr.ev td.tim { max-width: none; }
-    table.log > tbody > tr.detail { display: block; }
-    table.log > tbody > tr.detail > td { display: block; }
-    table.log > tbody > tr:not(.ev):not(.detail) > td { display: block; }
+    .tx .ev { grid-template-columns: minmax(0, 1fr); }
+    .tx .gut { display: flex; align-items: center; gap: 8px; }
+    .tx .gut > span:empty { display: none; }
+    .tx .who { flex-direction: row; align-items: baseline; gap: 8px; padding: 0; }
+    .tx .detail { margin-left: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tx .tally, .tx .ev.flash { animation: none; }
   }
   .empty { text-align: center; color: var(--muted); padding: 40px; }
   .warn { color: var(--error); font-size: 12px; }
   .warn:empty { display: none; }
 
-  /* log toolbar (filters) */
+  /* transcript toolbar (search and filters): quiet, one row, wraps */
   .toolbar { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
   .toolbar .pill { font-size: 13px; }
+  .toolbar select { max-width: 220px; }
+  .vchips { display: inline-flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+  button.vchip { border-radius: 999px; padding: 2px 10px 2px 8px; font-size: 12px; line-height: 18px; }
+  button.vchip[aria-pressed="false"] { color: var(--slate); font-weight: 400; }
+  button.vchip[aria-pressed="false"] > i { background: transparent; box-shadow: inset 0 0 0 1.5px var(--spk, var(--slate)); }
+  #st-btn[aria-expanded="true"] { border-color: var(--cue); color: var(--cue); }
 
   [hidden] { display: none !important; }
 
@@ -252,24 +270,7 @@
 
   /* queue: the Up next drawer is styled with the subtitle bar (header) */
 
-  /* history */
-  .hitem { display: grid; grid-template-columns: minmax(220px, 320px) minmax(0, 1fr); gap: 4px 14px; align-items: start;
-           border-top: 1px solid var(--line); padding: 9px 0; min-width: 0; }
-  .hitem:first-child { border-top: 0; padding-top: 0; }
-  @media (max-width: 760px) { .hitem { grid-template-columns: minmax(0, 1fr); } }
-  .hitem aw-audio { width: 100%; height: 30px; }
-  .hitem { border-top-color: var(--rule); }
-  .hitem .txt { font-family: var(--serif); font-size: 15px; line-height: 1.55; max-width: 80ch; color: var(--ink); white-space: pre-wrap; word-break: break-word; }
-  .hitem .who { margin-bottom: 2px; font-size: 12px; }
-  .hitem .kv { font-family: var(--sans); margin-top: 4px; font-size: 12px; color: var(--slate); }
-  .hitem .kv b { font-weight: 400; color: var(--slate); }
-  .hitem .kv b.num { font-family: var(--mono); font-size: 12px; }
-  .hitem .ctl .btn { background: transparent; color: var(--slate); border-color: var(--rule); font-size: 12px; }
-  .hitem .ctl .btn:hover { color: var(--ink); }
-  .hitem.playing { box-shadow: inset 3px 0 0 var(--spk, var(--cue)); padding-left: 8px; }
-  .hitem .ctl { display: flex; gap: 6px; align-items: center; min-width: 0; }
-
-  /* stats */
+  /* stats (the Timings panel behind the transcript toolbar's button) */
   details.panel > summary { font-size: 13px; color: var(--ink); font-weight: 600;
                             cursor: pointer; display: flex; gap: 8px; align-items: center; list-style: none; }
   details.panel > summary::-webkit-details-marker { display: none; }
@@ -278,7 +279,9 @@
   details.panel[open] > summary { margin-bottom: 10px; }
   details.panel > summary .hint, details.panel > summary .msg { font-weight: 400; }
   details.panel > summary:focus-visible { outline-offset: 4px; border-radius: 4px; }
-  #view-log > details.panel { margin-bottom: 14px; background: none; border: 0; border-bottom: 1px solid var(--rule); border-radius: 0; padding: 0 0 12px; }
+  .tx-stats { margin: 0 0 14px; padding: 0 0 14px; border-bottom: 1px solid var(--rule); min-width: 0; }
+  .tx-stats > h2 { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin: 0 0 10px; font-size: 13px; font-weight: 600; color: var(--ink); }
+  .tx-stats > h2 .hint, .tx-stats > h2 .msg { font-weight: 400; }
   .stats { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(200px, 1fr) minmax(360px, 2fr); gap: 14px; align-items: start; }
   @media (max-width: 980px) { .stats { grid-template-columns: minmax(0, 1fr); } }
   .stats h3 { font-size: 12px; color: var(--slate); margin: 0 0 6px; font-weight: 500; }
@@ -513,26 +516,29 @@
 </header>
 <main id="view-log">
   <div class="toolbar" id="log-tools">
-    <select id="filter">
+    <input type="search" id="q" placeholder="Search text, session, reason" aria-label="Search the transcript">
+    <select id="filter" aria-label="Status">
       <option value="">All events</option>
       <option value="spoken">Spoken</option>
       <option value="skipped">Skipped</option>
       <option value="error">Errors</option>
       <option value="active">Queued / playing</option>
     </select>
-    <input type="search" id="q" placeholder="Filter text, session, reason">
+    <span class="vchips" id="voice-chips" role="group" aria-label="Voices" hidden></span>
+    <select id="sessfilter" aria-label="Session"><option value="">All sessions</option></select>
+    <label class="pill" title="Only lines whose audio is still kept (replayable)"><input type="checkbox" id="hasAudio"> Has audio</label>
     <label class="pill"><input type="checkbox" id="hideSystem" checked> Hide system</label>
     <label class="pill" title="UserPromptSubmit / SessionStart hook calls (status info), one per prompt"><input type="checkbox" id="showHooks"> Show prompt/session hooks</label>
+    <button type="button" id="st-btn" aria-expanded="false" aria-controls="st-panel" title="Latency and status counts over recent lines">Timings</button>
+    <span class="msg" id="tx-msg"></span>
   </div>
   <div class="warn" id="cfgwarn"></div>
-  <details class="panel" id="st-panel" open>
-    <summary>Timings <span class="hint" id="st-scope"></span><span class="grow"></span><span class="msg" id="st-msg"></span></summary>
+  <section class="tx-stats" id="st-panel" aria-label="timings" hidden>
+    <h2>Timings <span class="hint" id="st-scope"></span><span class="grow"></span><span class="msg" id="st-msg"></span></h2>
     <div class="stats" id="st-body"><span class="hint">Loading…</span></div>
-  </details>
-  <table class="log">
-    <thead><tr><th>Time</th><th>Speaker</th><th>Event</th><th>Line</th><th>Timings</th></tr></thead>
-    <tbody id="rows"><tr><td colspan="5" class="empty">No events yet.</td></tr></tbody>
-  </table>
+  </section>
+  <div class="tx" id="rows"><p class="empty">No events yet.</p></div>
+  <div class="tx-more" id="tx-more" hidden><button type="button" id="tx-older" hidden>Load older clips</button><span class="hint" id="tx-end"></span></div>
 </main>
 
 <main id="view-sessions" class="page" hidden>
@@ -545,15 +551,6 @@
 </main>
 
 <!-- #queue opens the Up next drawer in the header (#q-drawer) -->
-
-<main id="view-history" class="page" hidden>
-  <div class="banner" id="h-err" hidden></div>
-  <section class="panel" aria-label="history">
-    <h2>History <span class="hint" id="h-count"></span><span class="grow"></span><span class="msg" id="h-msg"></span><button id="h-refresh" title="Reload the list from the newest clip">Refresh</button></h2>
-    <div class="list" id="h-list"><span class="hint">Loading…</span></div>
-    <div class="bar"><button id="h-more" hidden>Load more</button><span class="hint" id="h-end"></span></div>
-  </section>
-</main>
 
 <main id="view-lab" hidden>
   <section class="panel" aria-label="engine status">
@@ -1213,13 +1210,31 @@ function clipUrl(url, id, download) {
 }
 const audioInUse = (a) => !!a && (!a.paused || (a.currentTime > 0 && !a.ended));
 
+// ---------- transcript (#transcript; #log, #history and #queue land here too) ----------
+// One live list, newest first. A speech row reads as a subtitle line: a gutter
+// with the speaker and session folder (dropped when the row above has the same
+// speaker and session) and, for a kept clip, a play button; the serif line in
+// the speaker's rule; one quiet meta line. Clicking a row opens its detail.
+// "Has audio" shows only rows with a kept clip, paging older ones from
+// /api/history once the events list runs out (olderClips).
+const olderClips = new Map();   // id -> /api/history item shaped like an event summary
+const offVoices = new Set();    // speaker names whose voice chip is switched off
+const isQuiet = (e) => e.kind === "system" || !(typeof e.text === "string" && e.text.trim());
+const hasClip = (e) => !!e.clip;
+const fmtHMS = (ts) => isNum(ts) ? new Date(ts * 1000).toLocaleTimeString([], {hour12: false}) : "—";
+const fmtStamp = (ts) => isNum(ts) ? `${new Date(ts * 1000).toLocaleDateString()} ${fmtTime(ts)}` : "";
+const rowEvent = (id) => events.get(id) || olderClips.get(id) || null;
+
 function matches(e) {
-  const f = $("filter").value, q = $("q").value.trim().toLowerCase();
+  const f = $("filter").value, q = $("q").value.trim().toLowerCase(), sid = $("sessfilter").value;
+  if ($("hasAudio").checked && !hasClip(e)) return false;
   if ($("hideSystem").checked && e.kind === "system") return false;
   // UserPromptSubmit / SessionStart calls are logged as hook rows with status "info" (one per prompt).
   if (!$("showHooks").checked && e.kind === "hook" && e.status === "info") return false;
   if (f === "active" && !["queued", "synthesizing", "playing"].includes(e.status)) return false;
   if (f && f !== "active" && e.status !== f) return false;
+  if (sid && e.session_id !== sid) return false;
+  if (offVoices.size && e.kind !== "system" && offVoices.has(speakerName(e.profile))) return false;
   if (q) {
     const hay = [e.text, e.reason, e.session_id, e.cwd, e.profile, e.status, e.hook_event, e.kind].join(" ").toLowerCase();
     if (!hay.includes(q)) return false;
@@ -1227,37 +1242,71 @@ function matches(e) {
   return true;
 }
 
-function rowHtml(e) {
-  const alertEv = e.kind === "alert" && e.parsed && e.parsed.alert ? e.parsed.alert.event : null;
-  const evName = e.kind === "hook" ? (e.hook_event || "hook") : alertEv ? `alert: ${alertEv}` : e.kind;
-  const via = e.delivery === "spool" ? ` <span class="via" title="daemon was down; imported from spool">(spooled)</span>` : "";
-  const text = e.text ? esc(e.text) : "";
-  const spoken = e.timings && typeof e.timings.spoken_text === "string" ? `<div class="reason" title="after the pronunciation list">spoken as: ${esc(e.timings.spoken_text)}</div>` : "";
-  const reason = (e.reason ? `<div class="reason">${esc(e.reason)}</div>` : "") + spoken;
-  const spk = e.profile ? speakerTagHTML(e.profile) : "";
-  const tim = timingsLine(e.timings).split(" \u00b7 ").filter(Boolean).map((b) => `<div>${esc(b)}</div>`).join("");
-  return `<tr class="ev" data-id="${esc(e.id)}">
-    <td class="t when">${esc(fmtTime(e.ts))}<span class="eid">#${esc(e.id)}</span></td>
-    <td class="who" title="${esc(e.session_id)}\n${esc(e.cwd)}">${spk}<span class="sid">${esc(shortId(e.session_id))}</span><small>${esc(base(e.cwd))}</small></td>
-    <td class="kind"${e.hook_event === "early" && e.kind === "hook" ? ' title="spoken while Claude was still writing (MessageDisplay hook)"' : ""}>${esc(evName)}${via}<br><span class="badge s-${esc(cls(e.status))}">${esc(e.status)}</span></td>
-    <td class="text">${text}${reason}</td>
-    <td class="tim">${tim}</td>
-  </tr>`;
+// The meta line: time (seconds; the full stamp in the title, and it opens the
+// detail), synth ms, rtf and the replay pace; the status only when it is not
+// "spoken"; then what kind of row it is and why, when that says something.
+function metaHtml(e, quiet) {
+  const t = e.timings || {};
+  const bits = [];
+  if (quiet) {
+    const alertEv = e.parsed && e.parsed.alert ? e.parsed.alert.event : null;
+    const what = e.kind === "hook" ? (e.hook_event || "hook") : alertEv ? `alert: ${alertEv}` : (e.kind || "event");
+    bits.push(`<span class="what">${esc(what)}</span>`);
+  }
+  bits.push(`<button type="button" class="tm" data-act="detail" aria-expanded="${open.has(e.id)}" title="${esc(fmtStamp(e.ts))} · #${esc(e.id)}. Show details">${esc(fmtHMS(e.ts))}</button>`);
+  if (isNum(t.synth_ms)) bits.push(`<span>synth <span class="num">${esc(Math.round(t.synth_ms))}</span> ms</span>`);
+  if (isNum(t.rtf)) bits.push(`<span>rtf <span class="num">${esc(t.rtf)}</span></span>`);
+  const rate = replayRate(t);
+  if (rate != null) bits.push(`<span title="played at this pace; the clip replays at it">pace <span class="num">${esc(rate)}</span>×</span>`);
+  if (e.status && e.status !== "spoken") bits.push(`<span class="st s-${esc(cls(e.status))}">${esc(e.status)}</span>`);
+  if (!quiet && e.kind === "alert") bits.push(`<span>alert${e.parsed && e.parsed.alert && e.parsed.alert.event ? ": " + esc(e.parsed.alert.event) : ""}</span>`);
+  if (!quiet && e.kind === "hook" && e.hook_event === "early") bits.push(`<span title="spoken while Claude was still writing (MessageDisplay hook)">early</span>`);
+  if (e.delivery === "spool") bits.push(`<span title="daemon was down; imported from spool">spooled</span>`);
+  if (e.reason) bits.push(`<span class="rs">${esc(e.reason)}</span>`);
+  return `<div class="meta">${bits.join("")}</div>`;
 }
 
-function detailHtml(d) {
+// cont: the row above is the same speaker and session, so the tag is dropped.
+function rowHtml(e, cont) {
+  const quiet = isQuiet(e), err = e.status === "error";
+  const id = esc(e.id);
+  const play = hasClip(e) && clipUrl(e._url, e.id)
+    ? `<button type="button" class="play" data-act="play" aria-label="Play clip #${id}" title="Play the clip">▶</button>` : "<span></span>";
+  const tally = e.status === "playing" ? `<span class="tally" role="img" aria-label="playing now" title="playing now"></span>` : "";
+  const folder = base(e.cwd);
+  // System rows belong to no voice; a quiet hook row names its voice only when it has one.
+  const tag = e.kind === "system" || (quiet && !e.profile) ? "" : speakerTagHTML(e.profile);
+  const who = cont ? `<span class="top">${tally}</span>`
+    : `<span class="top">${tally}${tag}</span>${e.kind === "system" ? "" : `<small>${esc(folder || (e.session_id ? shortId(e.session_id) : ""))}</small>`}`;
+  const gutTitle = e.session_id || e.cwd ? `session ${e.session_id || "—"}\n${e.cwd || ""}` : "";
+  const rule = err || !quiet ? " spk-rule" : "";
+  const spk = !err && !quiet ? ` spk-${speakerSlot(e.profile)}" data-spk="${esc(speakerName(e.profile))}` : "";
+  const line = quiet ? "" : `<div class="line">${esc(e.text)}</div>`;
+  return `<div class="ev${quiet ? " quiet" : ""}${err ? " err" : ""}${cont ? " cont" : ""}" data-id="${id}">
+    <div class="gut"${gutTitle ? ` title="${esc(gutTitle)}"` : ""}>${play}<div class="who">${who}</div></div>
+    <div class="body${rule}${spk}">${line}${metaHtml(e, quiet)}<div class="pl"></div></div>
+  </div>`;
+}
+
+function detailHtml(d, id) {
   const t = d.timings || {};
-  const dl = Object.entries(t).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("") || "<dt>—</dt><dd></dd>";
+  const dl = Object.entries(t).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(typeof v === "object" && v !== null ? JSON.stringify(v) : v)}</dd>`).join("") || "<dt>—</dt><dd></dd>";
   const rate = replayRate(t);
-  const src = d.clip ? clipUrl(null, d.id) : null;
-  const clip = src ? `<p><aw-audio preload="none" src="${esc(src)}"${rate != null ? ` data-rate="${esc(rate)}"` : ""}></aw-audio>${rate != null ? ` <span class="via">plays at ${esc(rate)}× (the pace it was heard at)</span>` : ""}</p>` : "";
-  return `<tr class="detail" data-for="${esc(d.id)}"><td colspan="5"><div class="detail-grid">
+  const dlUrl = d.clip ? clipUrl(null, id, true) : null;
+  const acts = [
+    typeof d.text === "string" && d.text ? `<button type="button" data-act="copy">Copy text</button>` : "",
+    dlUrl ? `<a class="btn" href="${esc(dlUrl)}" download="afterword-${esc(id)}.wav" title="Download the WAV">Download clip</a>` : "",
+    rate != null ? `<span class="via">the clip plays at ${esc(rate)}× (the pace it was heard at)</span>` : "",
+    d.error && !d.kind ? `<span class="warn">${esc(d.error)}</span>` : "",
+  ].join("");
+  const said = typeof t.spoken_text === "string" ? `<p class="said"><span>spoken as</span>${esc(t.spoken_text)}</p>` : "";
+  return `<div class="detail" data-id="${esc(id)}">${acts ? `<div class="acts">${acts}</div>` : ""}${said}<div class="detail-grid">
     <div><h3>Decision</h3><pre>${esc(JSON.stringify({kind: d.kind, decision: d.decision, status: d.status,
        reason: d.reason, profile: d.profile, delivery: d.delivery, error: d.error, attrs: d.attrs}, null, 2))}</pre>
-       <h3 class="next">Timings</h3><dl class="timings">${dl}</dl>${clip}</div>
+       <h3 class="next">Timings</h3><dl class="timings">${dl}</dl></div>
     <div><h3>Parsed tags</h3><pre>${esc(JSON.stringify(d.parsed, null, 2))}</pre></div>
     <div><h3>Raw payload</h3><pre>${esc(JSON.stringify(d.payload, null, 2))}</pre></div>
-  </div></td></tr>`;
+  </div></div>`;
 }
 function trFrom(html) {
   const t = document.createElement("template");
@@ -1265,41 +1314,88 @@ function trFrom(html) {
   return t.content.firstElementChild;
 }
 
-// The log table is reconciled by event id rather than rebuilt: a row is only
-// replaced when its summary changed, and an expanded row's detail (with its
-// <aw-audio>) is left alone while that audio is playing or paused mid-way, so a
-// live SSE update never cuts off a clip being listened to.
-const rowNodes = new Map();   // id -> {tr, sig, det, detSig}
+// Voice chips: one per configured profile, all on by default.
+function paintVoiceChips() {
+  for (const name of [...offVoices]) if (!speakerProfiles.includes(name)) offVoices.delete(name);
+  const box = $("voice-chips");
+  box.hidden = speakerProfiles.length < 2;
+  box.replaceChildren(...speakerProfiles.map((name) => {
+    const b = h("button", {type: "button", class: `vchip spk spk-${speakerSlot(name)}`, "data-spk": name,
+      "aria-pressed": String(!offVoices.has(name)), title: `Show lines spoken by ${name}`}, h("i", {"aria-hidden": "true"}), name);
+    b.addEventListener("click", () => {
+      if (offVoices.has(name)) offVoices.delete(name); else offVoices.add(name);
+      b.setAttribute("aria-pressed", String(!offVoices.has(name)));
+      render();
+    });
+    return b;
+  }));
+}
+// Session select: every session in the listed rows, by folder name.
+let sessKey = "";
+function syncSessionSelect(pool) {
+  const seen = new Map();   // session_id -> {cwd, ts} (cwd of its newest row that has one)
+  for (const e of pool.values()) {
+    if (!e.session_id) continue;
+    const s = seen.get(e.session_id);
+    if (!s) seen.set(e.session_id, {cwd: e.cwd || "", ts: e.ts});
+    else if (e.cwd && (!s.cwd || e.ts > s.ts)) { s.cwd = e.cwd; s.ts = e.ts; }
+  }
+  const sel = $("sessfilter"), cur = sel.value;
+  const list = [...seen].map(([sid, s]) => ({sid, folder: base(s.cwd)}))
+    .sort((a, b) => (a.folder || "￿").localeCompare(b.folder || "￿") || a.sid.localeCompare(b.sid));
+  if (cur && !seen.has(cur)) list.push({sid: cur, folder: ""});   // keep the choice while its rows are gone
+  const key = list.map((x) => x.sid + "\u0000" + x.folder).join("\u0001");
+  if (key === sessKey) return;
+  sessKey = key;
+  sel.replaceChildren(h("option", {value: ""}, "All sessions"),
+    ...list.map((x) => h("option", {value: x.sid, title: x.sid}, `${x.folder || "unknown folder"} · ${shortId(x.sid)}`)));
+  sel.value = cur;
+}
+
+// The list is reconciled by event id rather than rebuilt: a row is only
+// replaced when its summary (or its place in a speaker run) changed, and its
+// inline player (<aw-audio>) is moved into the new row rather than recreated,
+// so a live SSE update never cuts off a clip being listened to. A row whose
+// clip is playing or paused mid-way stays even when a filter would drop it.
+const rowNodes = new Map();   // id -> {tr, sig, det, detSig, player}
 let emptyRow = null;
 let renderQueued = false;
+const playerBusy = (id) => { const n = rowNodes.get(id); return !!n && audioInUse(n.player); };
 function render() {
   if (renderQueued) return;
   renderQueued = true;
   requestAnimationFrame(() => {
     renderQueued = false;
-    const tbody = $("rows");
-    const list = [...events.values()].sort((a, b) => b.id - a.id).filter(matches);
+    const box = $("rows");
+    const audioMode = $("hasAudio").checked;
+    const pool = audioMode && olderClips.size ? new Map([...olderClips, ...events]) : events;
+    syncSessionSelect(pool);
+    const list = [...pool.values()].filter((e) => matches(e) || playerBusy(e.id)).sort((a, b) => b.id - a.id);
     const want = [];
     const keep = new Set();
+    let prev = null;
     for (const e of list) {
+      const cont = !!prev && !isQuiet(e) && !isQuiet(prev) && speakerName(e.profile) === speakerName(prev.profile)
+        && (e.session_id || "") === (prev.session_id || "");
+      prev = e;
       let n = rowNodes.get(e.id);
-      if (!n) { n = {tr: null, sig: null, det: null, detSig: null}; rowNodes.set(e.id, n); }
-      const sig = JSON.stringify(e);
+      if (!n) { n = {tr: null, sig: null, det: null, detSig: null, player: null}; rowNodes.set(e.id, n); }
+      const sig = JSON.stringify(e) + (cont ? "|cont" : "") + (open.has(e.id) ? "|open" : "");
       if (n.sig !== sig || !n.tr) {
-        const tr = trFrom(rowHtml(e));
+        const tr = trFrom(rowHtml(e, cont));
+        // Moved within this frame, so the player never sees itself leave the page.
+        if (n.player) tr.querySelector(".pl").append(n.player);
         if (n.tr && n.tr.parentNode) n.tr.replaceWith(tr);
         n.tr = tr; n.sig = sig;
+        paintPlay(n);
       }
       want.push(n.tr);
       keep.add(e.id);
       if (open.has(e.id) && detailCache.has(e.id)) {
         const d = detailCache.get(e.id);
         const dsig = JSON.stringify(d);
-        if (!n.det || (n.detSig !== dsig && !audioInUse(n.det.querySelector("aw-audio")))) {
-          const det = trFrom(detailHtml(d));
-          for (const a of det.querySelectorAll("aw-audio[data-rate]")) applyRate(a, Number(a.dataset.rate));
-          // When a held-back clip finishes, re-render so the detail catches up.
-          for (const a of det.querySelectorAll("aw-audio")) a.addEventListener("ended", render);
+        if (!n.det || n.detSig !== dsig) {
+          const det = trFrom(detailHtml(d, e.id));
           if (n.det && n.det.parentNode) n.det.replaceWith(det);
           n.det = det; n.detSig = dsig;
         }
@@ -1308,41 +1404,106 @@ function render() {
     }
     for (const [id, n] of rowNodes) if (!keep.has(id)) { n.tr && n.tr.remove(); n.det && n.det.remove(); rowNodes.delete(id); }
     if (!list.length) {
-      emptyRow = emptyRow || trFrom(`<tr><td colspan="5" class="empty"></td></tr>`);
-      emptyRow.firstElementChild.textContent = `No events${events.size ? " match the filter" : " yet"}.`;
+      emptyRow = emptyRow || trFrom(`<p class="empty"></p>`);
+      emptyRow.textContent = audioMode
+        ? ([...pool.values()].some(hasClip) ? "No kept clips match the filter."
+          : "No kept clips yet. Spoken lines keep their audio for a while (the newest 50 by default).")
+        : `No events${events.size ? " match the filter" : " yet"}.`;
       want.push(emptyRow);
     }
     const wanted = new Set(want);
-    for (const c of [...tbody.children]) if (!wanted.has(c)) c.remove();
+    for (const c of [...box.children]) if (!wanted.has(c)) c.remove();
     // Put nodes in order, moving only the ones that are out of place.
-    let cur = tbody.firstChild;
+    let cur = box.firstChild;
     for (const node of want) {
       if (node === cur) cur = cur.nextSibling;
-      else tbody.insertBefore(node, cur);
+      else box.insertBefore(node, cur);
     }
     for (const id of flashing) { const n = rowNodes.get(id); if (n && n.tr) n.tr.classList.add("flash"); }
     flashing.clear();
+    paintClipsFooter();
   });
 }
 const flashing = new Set();
-// Speaker colours follow the profile order; redraw the rows when it changes.
-document.addEventListener("aw:speakers", () => { for (const n of rowNodes.values()) n.sig = null; render(); });
+// Speaker colours follow the profile order; redraw the chips and rows when it changes.
+document.addEventListener("aw:speakers", () => { paintVoiceChips(); for (const n of rowNodes.values()) n.sig = null; render(); });
 
-async function toggle(id) {
+// The gutter's play button mounts an <aw-audio> under the line (at the pace
+// the clip was heard at) and plays it; it collapses when the clip ends. A
+// pruned clip (404) stays mounted so the player can show its own error.
+function paintPlay(n) {
+  const btn = n && n.tr && n.tr.querySelector(".play");
+  if (!btn) return;
+  const on = !!n.player && !n.player.paused;
+  btn.textContent = on ? "❚❚" : "▶";
+  btn.setAttribute("aria-label", `${on ? "Pause" : "Play"} clip #${n.tr.dataset.id}`);
+  n.tr.classList.toggle("listening", on);
+}
+function playClip(id) {
+  const n = rowNodes.get(id);
+  if (!n || !n.tr) return;
+  if (n.player) {
+    if (n.player.paused) n.player.play().catch(() => {}); else n.player.pause();
+    return;
+  }
+  const e = rowEvent(id);
+  const src = e ? clipUrl(e._url, id) : null;
+  if (!src) return;
+  const a = h("aw-audio", {preload: "none", "aria-label": `clip #${id}`});
+  applyRate(a, replayRate(e.timings) ?? 1);
+  a.src = src;
+  const repaint = () => paintPlay(rowNodes.get(id));
+  a.addEventListener("play", repaint);
+  a.addEventListener("pause", repaint);
+  a.addEventListener("ended", () => {
+    const m = rowNodes.get(id);
+    if (m && m.player === a) m.player = null;
+    a.remove();
+    repaint();
+    render();   // a row kept only for its clip can go now
+  });
+  n.player = a;
+  n.tr.querySelector(".pl").append(a);
+  paintPlay(n);
+  a.play().catch(() => {});
+}
+async function copyText(id, btn) {
+  const e = rowEvent(id) || detailCache.get(id);
+  if (!e || typeof e.text !== "string") return;
+  let ok = true;
+  try { await navigator.clipboard.writeText(e.text); } catch { ok = false; }
+  btn.textContent = ok ? "Copied" : "Copy failed";
+  setTimeout(() => { if (btn.isConnected) btn.textContent = "Copy text"; }, 1500);
+}
+
+async function toggleDetail(id) {
   if (open.has(id)) { open.delete(id); render(); return; }
   open.add(id);
+  render();
   try {
     const r = await fetch(`/api/events/${id}`);
-    detailCache.set(id, await r.json());
+    const d = await r.json().catch(() => null);
+    detailCache.set(id, r.ok && d ? d : {id, error: (d && (d.error || d.detail)) || `HTTP ${r.status}`});
   } catch (e) { detailCache.set(id, {id, error: String(e)}); }
   render();
 }
 
 $("rows").addEventListener("click", (ev) => {
-  const tr = ev.target.closest("tr.ev");
-  if (tr && !ev.target.closest("aw-audio")) toggle(Number(tr.dataset.id));
+  const act = ev.target.closest("[data-act]");
+  const holder = ev.target.closest("[data-id]");
+  if (act && holder) {
+    const id = Number(holder.dataset.id);
+    if (act.dataset.act === "play") playClip(id);
+    else if (act.dataset.act === "detail") toggleDetail(id);
+    else if (act.dataset.act === "copy") copyText(id, act);
+    return;
+  }
+  if (ev.target.closest("a, button, input, select, aw-audio, .pl, .detail")) return;
+  const row = ev.target.closest(".ev");
+  // A click that ends a text selection is not a request for the detail.
+  if (row && !String(window.getSelection ? window.getSelection() : "")) toggleDetail(Number(row.dataset.id));
 });
-for (const id of ["filter", "q", "hideSystem", "showHooks"]) $(id).addEventListener("input", render);
+for (const id of ["filter", "q", "hideSystem", "showHooks", "sessfilter"]) $(id).addEventListener("input", render);
 
 // Transport (the subtitle bar, on every tab).
 async function queueAction(path, label, msgId = "hdr-msg") {
@@ -1515,7 +1676,7 @@ function connect() {
 }
 
 // ===================================================================
-// Timings panel (on the Log page): GET /api/stats
+// Timings panel (behind the transcript toolbar's Timings button): GET /api/stats
 // ===================================================================
 const Stats = (() => {
   const METRICS = [
@@ -1523,6 +1684,7 @@ const Stats = (() => {
     ["rtf", "real-time factor", ""], ["first_chunk_ms", "first chunk", "ms"], ["first_audio_ms", "first audio", "ms"],
   ];
   let visible = false, timer = null, loading = false;
+  const isOpen = () => !$("st-panel").hidden;
   const fmt = (v, unit) => {
     if (!isNum(v)) return "—";
     if (unit === "ms") return v >= 10000 ? (v / 1000).toFixed(1) + " s" : (v < 10 ? v.toFixed(1) : Math.round(v)) + " ms";
@@ -1559,24 +1721,94 @@ const Stats = (() => {
     note("st-msg", "");
     renderStats(r.data);
   }
-  // Remember collapsed/open per browser (a convenience only).
-  try { if (localStorage.getItem("aw.stats.open") === "0") $("st-panel").open = false; } catch { /* storage blocked */ }
-  $("st-panel").addEventListener("toggle", () => {
-    try { localStorage.setItem("aw.stats.open", $("st-panel").open ? "1" : "0"); } catch { /* storage blocked */ }
-    if ($("st-panel").open && visible) load();
-  });
-  document.addEventListener("visibilitychange", () => { if (visible && document.visibilityState === "visible") load(); });
+  // Collapsed by default; remember open/closed per browser (a convenience only).
+  function setOpen(on, save) {
+    $("st-panel").hidden = !on;
+    $("st-btn").setAttribute("aria-expanded", String(on));
+    if (save) { try { localStorage.setItem("aw.timings.open", on ? "1" : "0"); } catch { /* storage blocked */ } }
+    if (on && visible) load();
+  }
+  try { if (localStorage.getItem("aw.timings.open") === "1") setOpen(true, false); } catch { /* storage blocked */ }
+  $("st-btn").addEventListener("click", () => setOpen(!isOpen(), true));
+  document.addEventListener("visibilitychange", () => { if (visible && isOpen() && document.visibilityState === "visible") load(); });
   return {
     show() {
-      visible = true; load();
-      if (!timer) timer = setInterval(() => { if (visible && document.visibilityState === "visible") load(); }, 30000);
+      visible = true;
+      if (isOpen()) load();
+      if (!timer) timer = setInterval(() => { if (visible && isOpen() && document.visibilityState === "visible") load(); }, 30000);
     },
     hide() { visible = false; },
   };
 })();
 
+// ---------- kept clips for "Has audio" (GET /api/history) ----------
+// The events list holds the newest few hundred rows; clips older than that are
+// paged in from /api/history ("Load older clips") and listed only in has-audio mode.
+const CLIP_PAGE = 50;
+let clipsMore = true, clipsLoaded = false, clipsLoading = false, clipsStale = false;
+function clipEvent(d) {
+  const id = Number(d && d.id);
+  if (!Number.isInteger(id)) return null;
+  return {id, ts: d.ts, session_id: d.session_id, cwd: d.cwd, profile: d.profile, text: d.text,
+          status: d.status || "spoken", clip: d.url || true, _url: d.url,
+          timings: {audio_s: d.audio_s, playback_rate: d.playback_rate, synth_backend: d.synth_backend}};
+}
+async function loadClips(before) {
+  if (clipsLoading) return;
+  clipsLoading = true;
+  $("tx-older").disabled = true;
+  const q = new URLSearchParams({limit: String(CLIP_PAGE)});
+  if (before != null) q.set("before", String(before));
+  const r = await api("GET", "/api/history?" + q);
+  clipsLoading = false;
+  $("tx-older").disabled = false;
+  if (!r.ok || !r.data) { flashNote("tx-msg", `Couldn't load kept clips: ${r.error || "empty response"}`, "err"); render(); return; }
+  const items = (Array.isArray(r.data.items) ? r.data.items : []).map(clipEvent).filter(Boolean);
+  if (before == null) {
+    // A fresh newest page: clips listed before that are missing from it were
+    // pruned since (one still playing stays until it ends).
+    const ids = new Set(items.map((e) => e.id));
+    const floor = items.length ? Math.min(...ids) : -Infinity;
+    for (const id of [...olderClips.keys()]) if (id >= floor && !ids.has(id) && !playerBusy(id)) olderClips.delete(id);
+    clipsLoaded = true; clipsStale = false;
+  }
+  for (const e of items) olderClips.set(e.id, e);
+  clipsMore = items.length >= CLIP_PAGE;
+  render();
+}
+function loadOlderClips() {
+  let min = Infinity;
+  for (const e of events.values()) if (hasClip(e) && e.id < min) min = e.id;
+  for (const id of olderClips.keys()) if (id < min) min = id;
+  loadClips(Number.isFinite(min) ? min : null);
+}
+function paintClipsFooter() {
+  const on = $("hasAudio").checked;
+  $("tx-more").hidden = !on;
+  $("tx-older").hidden = !on || !clipsMore;
+  $("tx-end").textContent = on && clipsLoaded && !clipsMore ? "End of kept clips." : "";
+}
+function setHasAudio(on) {
+  $("hasAudio").checked = on;
+  if (on && (!clipsLoaded || clipsStale)) loadClips(null);
+  render();
+}
+$("hasAudio").addEventListener("change", () => setHasAudio($("hasAudio").checked));
+$("tx-older").addEventListener("click", loadOlderClips);
+// After a reconnect the kept clips may have changed; reload when next shown.
+sse.on("open", () => {
+  if (!clipsLoaded) return;
+  clipsStale = true;
+  if ($("hasAudio").checked && !$("view-log").hidden) loadClips(null);
+});
+// Routing contract: #history shows the transcript with "Has audio" on.
+document.addEventListener("aw:route", (ev) => {
+  const d = (ev && ev.detail) || {};
+  if (d.view === "log" && d.hash === "history") setHasAudio(true);
+});
+
 const LogPage = {
-  show() { Stats.show(); render(); },
+  show() { Stats.show(); paintVoiceChips(); render(); },
   hide() { Stats.hide(); },
 };
 
@@ -1839,121 +2071,6 @@ const Queue = (() => {
     if (took && !nowView.np && !idleTimer) drawNow();
   });
   return {update, open: (focus) => setOpen(true, {focus}), close: () => setOpen(false), isOpen: () => isOpen};
-})();
-
-// ===================================================================
-// History (#history): GET /api/history, newest first, "load more" via before
-// ===================================================================
-const History = (() => {
-  const PAGE = 50;
-  let visible = false, stale = true, loading = false, more = false, loadedOnce = false;
-  const items = new Map();   // id -> {data, node, audio}
-  let timer = null;
-
-  const fetchPage = (before) => {
-    const q = new URLSearchParams({limit: String(PAGE)});
-    if (before != null) q.set("before", String(before));
-    return api("GET", "/api/history?" + q);
-  };
-  function itemNode(d) {
-    const id = Number(d.id);
-    const src = clipUrl(d.url, id, false), dl = clipUrl(d.download_url, id, true);
-    const audio = h("aw-audio", {preload: "none"});
-    const r = Number(d.playback_rate);
-    applyRate(audio, Number.isFinite(r) && r >= 0.25 && r <= 4 ? r : 1);
-    if (src) audio.src = src;
-    const node = paintSpeaker(h("div", {class: "hitem"}), d.profile);
-    node.append(
-      h("div", {class: "ctl"}, audio,
-        dl ? h("a", {class: "btn", href: dl, download: `afterword-${id}.wav`, title: "Download the WAV"}, "Download") : null),
-      h("div", {style: "min-width:0"},
-        h("div", {class: "who"}, speakerTag(d.profile || "default")),
-        h("div", {class: "txt"}, d.text || ""),
-        h("div", {class: "kv"},
-          h("span", null, relSpan(d.ts, {title: fmtDateTime(d.ts)}), ", ", fmtDateTime(d.ts)),
-          h("span", {title: `${d.session_id || ""}\n${d.cwd || ""}`}, "session ", h("b", null, shortId(d.session_id)),
-            d.cwd ? " " + base(d.cwd) : ""),
-          h("span", null, "audio ", h("b", {class: "num"}, isNum(d.audio_s) ? d.audio_s.toFixed(1) + " s" : "—")),
-          replayRate({playback_rate: d.playback_rate}) != null ? h("span", {title: "played at this pace; replays match it"}, "pace ", h("b", {class: "num"}, Number(d.playback_rate).toFixed(2) + "×")) : null,
-          d.synth_backend ? h("span", null, "synth ", h("b", null, d.synth_backend)) : null,
-          h("span", {class: "num", style: "font-family:var(--mono)"}, "#" + id))));
-    audio.addEventListener("play", () => node.classList.add("playing"));
-    for (const ev of ["pause", "ended"]) audio.addEventListener(ev, () => node.classList.remove("playing"));
-    return {data: d, node, audio};
-  }
-  function merge(list, {prune = false} = {}) {
-    const fresh = list.filter(d => d && Number.isInteger(Number(d.id)));
-    const ids = new Set(fresh.map(d => Number(d.id)));
-    if (prune) {
-      // A fresh newest page replaces the list: anything older may have had its
-      // audio pruned by the daemon, and "Load more" pages the rest back in.
-      // A clip that is playing stays until it ends.
-      for (const [id, it] of items) if (!ids.has(id) && !audioInUse(it.audio)) { it.node.remove(); items.delete(id); }
-    }
-    for (const d of fresh) if (!items.has(Number(d.id))) items.set(Number(d.id), itemNode(d));
-    paint();
-  }
-  function paint() {
-    const box = $("h-list");
-    const order = [...items.keys()].sort((a, b) => b - a).map(id => items.get(id).node);
-    if (!order.length) {
-      box.replaceChildren(h("span", {class: "hint"}, "No clips kept yet. Spoken lines appear here while their audio is on disk (the newest 50 by default)."));
-    } else {
-      for (const c of [...box.children]) if (!c.classList.contains("hitem")) c.remove();
-      let cur = box.firstChild;
-      for (const node of order) { if (node === cur) cur = cur.nextSibling; else box.insertBefore(node, cur); }
-    }
-    $("h-count").textContent = order.length ? `${order.length} clip${order.length === 1 ? "" : "s"}, newest first` : "";
-    $("h-more").hidden = !more;
-    $("h-end").textContent = loadedOnce && !more && order.length ? "End of kept clips." : "";
-  }
-  async function loadNewest() {
-    if (loading) return;
-    loading = true;
-    const r = await fetchPage(null);
-    loading = false; stale = false;
-    if (!r.ok || !r.data) {
-      $("h-err").hidden = false;
-      $("h-err").replaceChildren(h("b", null, "Couldn't load history"), `: ${r.error || "empty response"}`);
-      if (!loadedOnce) $("h-list").replaceChildren(h("span", {class: "hint"}, "No history data."));
-      return;
-    }
-    $("h-err").hidden = true;
-    const list = Array.isArray(r.data.items) ? r.data.items : [];
-    more = list.length >= PAGE;
-    loadedOnce = true;
-    merge(list, {prune: true});
-  }
-  async function loadMore() {
-    if (loading || !items.size) return;
-    loading = true;
-    $("h-more").disabled = true;
-    const r = await fetchPage(Math.min(...items.keys()));
-    loading = false;
-    $("h-more").disabled = false;
-    if (!r.ok || !r.data) return flashNote("h-msg", `Load more failed: ${r.error}`, "err");
-    const list = Array.isArray(r.data.items) ? r.data.items : [];
-    more = list.length >= PAGE;
-    merge(list);
-  }
-  async function fullRefresh() {
-    for (const it of items.values()) { it.audio.pause(); it.node.remove(); }
-    items.clear(); loadedOnce = false; more = false;
-    $("h-list").replaceChildren(h("span", {class: "hint"}, "Loading…"));
-    await loadNewest();
-  }
-  $("h-more").addEventListener("click", loadMore);
-  $("h-refresh").addEventListener("click", fullRefresh);
-  sse.on("event", (e) => {
-    if (e.status !== "spoken") return;
-    if (!visible) { stale = true; return; }
-    clearTimeout(timer); timer = setTimeout(loadNewest, 1200);
-  });
-  sse.on("open", () => { stale = true; if (visible) loadNewest(); });
-  return {
-    show() { visible = true; if (stale || !loadedOnce) loadNewest(); },
-    hide() { visible = false; },
-  };
 })();
 
 connect();
