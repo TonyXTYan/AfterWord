@@ -22,7 +22,7 @@ from afterword.hooks import common, pronounce
 from afterword.hooks.tags import PROFILE_NAME_RE, clean_text
 
 from . import apple, pitch, qwen, voices
-from .config import LANG_FIELDS, ConfigStore, Profile, build_config, lang_code
+from .config import LANG_FIELDS, ConfigStore, Profile, build_config, lang_code, parse_color
 from .explore import Explorer, StarStore, semitones, stability_plan
 from .synth import SaySynth
 
@@ -79,6 +79,7 @@ def profile_dict(p: Profile) -> dict[str, Any]:
     out: dict[str, Any] = {k: getattr(p, k) for k in PROFILE_FIELDS}
     out["langs"] = {code: lv.as_dict() for code, lv in p.langs.items()}
     out["description"] = p.description
+    out["color"] = p.color or None  # None: the GUI picks one automatically
     return out
 
 
@@ -587,15 +588,25 @@ class Lab:
         return {"profiles": [voice_item(p, usage, now) for p in self.store.get().profiles.values()]}
 
     def set_description(self, name: str, body: Any) -> dict[str, Any]:
-        if not isinstance(body, dict) or "description" not in body:
-            raise LabError(400, "send {\"description\": \"text\"}")
-        text = _opt_str(body, "description", DESCRIPTION_MAX)
-        if text is None:
-            raise LabError(400, "description must be a string")
+        """PATCH /api/lab/profiles/{name}: {"description": "text"} and/or
+        {"color": "teal" | "#RRGGBB" | ""}; "" removes the key."""
+        if not isinstance(body, dict) or not ({"description", "color"} & set(body)):
+            raise LabError(400, "send {\"description\": \"text\"} and/or {\"color\": \"teal\" | \"#RRGGBB\" | \"\"}")
+        keys: dict[str, str] = {}
+        if "description" in body:
+            text = _opt_str(body, "description", DESCRIPTION_MAX)
+            if text is None:
+                raise LabError(400, "description must be a string")
+            keys["description"] = text
+        if "color" in body:
+            try:
+                keys["color"] = parse_color(body["color"])
+            except ValueError as exc:
+                raise LabError(400, f"color: {exc}") from None
         if name not in self.store.get().profiles:
             raise LabError(404, f"no profile named {name!r}")
         try:
-            found = write_description(self.store.path, name, text)
+            found = write_profile_keys(self.store.path, name, keys)
         except ValueError as exc:
             raise LabError(400, f"config.toml could not be updated: {exc}") from None
         if not found:
@@ -844,16 +855,24 @@ def _write_profile(path: Path, name: str, fields: dict[str, Any], overwrite: boo
 def write_description(path: Path, name: str, text: str) -> bool:
     """Set (or, for "", remove) only `description` in [profiles.<name>],
     keeping comments and the rest of the table. False if there is no such profile."""
+    return write_profile_keys(path, name, {"description": text})
+
+
+def write_profile_keys(path: Path, name: str, keys: dict[str, str]) -> bool:
+    """Set (or, for "", remove) only the given string keys in [profiles.<name>]
+    in one write, keeping comments and the rest of the table. False if there
+    is no such profile."""
     with CONFIG_WRITE_LOCK:
         doc = _load_doc(path)
         profiles = doc.get("profiles")
         if profiles is None or name not in profiles:
             return False
         table = profiles[name]
-        if text:
-            table["description"] = text
-        elif "description" in table:
-            del table["description"]
+        for key, text in keys.items():
+            if text:
+                table[key] = text
+            elif key in table:
+                del table[key]
         _write_doc(path, doc)
         return True
 

@@ -21,6 +21,29 @@ PLAYERS = ("afplay", "null")
 QWEN_MODEL_KINDS = ("custom_voice", "base", "voice_design")
 OTHER_MODEL_KINDS = ("kokoro", "chatterbox")  # [models]
 MODEL_FALLBACKS = ("apple", "say", "none")
+# [profiles.x] color: one of these names (the GUI's speaker palette, in its
+# order; afterword/ui/index.html SPEAKER_PALETTE) or a hex "#RRGGBB". 64
+# colours: 16 hue families, each as itself and as "<family>-deep",
+# "<family>-light" and "<family>-pale"; automatic colours take them in this
+# order (every base colour first).
+SPEAKER_FAMILIES = ("yellow", "cyan", "green", "magenta", "white", "orange", "blue", "red",
+                    "violet", "lime", "pink", "brown", "teal", "grey", "olive", "sky")
+SPEAKER_SHADES = ("", "deep", "light", "pale")
+SPEAKER_COLORS = tuple(f + ("-" + s if s else "") for s in SPEAKER_SHADES for f in SPEAKER_FAMILIES)
+
+
+def parse_color(value: Any) -> str:
+    """A profile colour as stored: a palette name (lower case) or "#rrggbb";
+    "" for none (automatic). Raises ValueError for anything else."""
+    if not isinstance(value, str):
+        raise ValueError(f"expected a colour name or \"#RRGGBB\", got {value!r}")
+    v = value.strip().lower()
+    if v == "" or v in SPEAKER_COLORS:
+        return v
+    if len(v) == 7 and v[0] == "#" and all(c in "0123456789abcdef" for c in v[1:]):
+        return v
+    raise ValueError(f"{value!r} is not a colour: use one of {', '.join(SPEAKER_FAMILIES)}, optionally with "
+                     f"-deep, -light or -pale (\"teal-deep\"), or \"#RRGGBB\"")
 
 DEFAULT_CONFIG_TOML = """\
 # AfterWord config. Edits are picked up automatically (hot reload).
@@ -167,6 +190,7 @@ class Profile:
     temperature: float | None = None  # None: the model's default
     persona: str = ""  # free text, only for `afterword alerts generate`
     description: str = ""  # one line for the `/afterword:voice pick` menu
+    color: str = ""  # GUI speaker colour: a SPEAKER_COLORS name or "#rrggbb"; "" = automatic
     known: bool = True  # False when the name was not in config.toml
     pronounce: _pron.Pairs = ()  # [profiles.x.pronounce]: (word, spoken as) pairs
     # [profiles.x.langs.<iso>]: a voice per language (read-only mapping)
@@ -315,6 +339,16 @@ def _str(value: Any, default: str, where: str, errors: list[str]) -> str:
     return value
 
 
+def _color(value: Any, where: str, errors: list[str]) -> str:
+    if value is None:
+        return ""
+    try:
+        return parse_color(value)
+    except ValueError as exc:
+        errors.append(f"{where}: {exc}; using an automatic colour")
+        return ""
+
+
 def build_config(raw: dict[str, Any]) -> tuple[Config, list[str]]:
     """Validate a parsed TOML dict. Bad values fall back to defaults and are
     reported as warnings, never raised."""
@@ -386,6 +420,7 @@ def build_config(raw: dict[str, Any]) -> tuple[Config, list[str]]:
             temperature=_num(p.get("temperature"), float, None, 0.05, 2.0, f"{where}.temperature", errors),
             persona=_str(p.get("persona"), base.persona, f"{where}.persona", errors)[:2000],
             description=_str(p.get("description"), base.description, f"{where}.description", errors)[:300],
+            color=_color(p.get("color"), f"{where}.color", errors),
             pronounce=_pron.clean_table(p.get("pronounce"), errors, f"{where}.pronounce"),
             langs=_langs(p.get("langs"), f"{where}.langs", errors),
         )

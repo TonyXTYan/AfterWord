@@ -43,24 +43,76 @@
       --on-accent: #10131f;
     }
   }
-  /* speakers: one colour per voice profile (slot from speakerSlot()) */
-  .spk-0 { --spk: #F5C400; --spk-ink: #6E5600; }
-  .spk-1 { --spk: #00B8D9; --spk-ink: #00687A; }
-  .spk-2 { --spk: #2FBF71; --spk-ink: #1B6B40; }
-  .spk-3 { --spk: #D63AAF; --spk-ink: #8A1F70; }
-  .spk-4 { --spk: #FFFFFF; --spk-ink: #3A4048; }
-  .spk-5 { --spk: #F08C00; --spk-ink: #8A4B00; }
-  @media (prefers-color-scheme: dark) {
-    .spk-0 { --spk-ink: #FFD43B; } .spk-1 { --spk-ink: #4FD6EE; } .spk-2 { --spk-ink: #63D99A; }
-    .spk-3 { --spk-ink: #F17ACF; } .spk-4 { --spk-ink: #F2F4F6; } .spk-5 { --spk-ink: #FFA94D; }
-  }
+  /* speakers: one colour per voice profile (slot from speakerSlot()). The .spk-0 … .spk-63
+     palette and custom .spk-x<i> rules (--spk swatch, --spk-ink text tone) are written by
+     speakerCss() into <style id="spk-css"> from SPEAKER_PALETTE in the script. A swatch too
+     close to the sheet (white, the pale shades) also gets --spk-ring (a hairline round its dot
+     and rule) and --spk-strong (its text tone, for lines and highlights). */
+  [data-spk] { --spk-ring: initial; --spk-strong: initial; }
   .spk { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; font-weight: 600;
          color: var(--spk-ink, var(--slate)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: baseline; }
-  .spk > i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--spk, var(--slate)); }
-  .spk-4 > i { box-shadow: 0 0 0 1px var(--rule); }
+  .spk > i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--spk, var(--slate));
+             box-shadow: 0 0 0 1px var(--spk-ring, transparent); }
   /* a block of spoken text that belongs to a voice: a rule in the speaker colour (the element carries .spk-N) */
-  .spk-rule { border-left: 3px solid var(--spk, var(--rule)); padding-left: 12px; }
-  .spk-rule.spk-4 { box-shadow: -1px 0 0 var(--rule); }
+  .spk-rule { border-left: 3px solid var(--spk, var(--rule)); padding-left: 12px; box-shadow: -1px 0 0 var(--spk-ring, transparent); }
+  /* speaker colour picker (Sessions → Voices): the voice's tag is a button; the popover has the
+     64 palette colours as a chart (16 hue columns × base, deep, light, pale rows; a check on this
+     voice's, one to three dots and a plus on the ones other voices use; a hover card names the
+     voices), Automatic, and a custom hex */
+  .vx-color { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; margin: 0 -5px; padding: 1px 5px;
+              background: none; border: 1px solid transparent; border-radius: 6px; }
+  .vx-color:hover { background: color-mix(in srgb, var(--cue) 7%, transparent); border-color: transparent; }
+  .vx-color[aria-expanded="true"] { border-color: var(--rule); }
+  .vx-color > .spk > i { width: 10px; height: 10px; }
+  .cp { --cp-sw: 22px; position: fixed; z-index: 15; width: min(456px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto;
+        background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; padding: 8px 10px 10px;
+        box-shadow: 0 6px 20px rgba(0, 0, 0, .22); display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-sm); }
+  .cp-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; min-width: 0; color: var(--slate); }
+  .cp-sum { margin-left: auto; font-size: 11.5px; color: var(--slate); }
+  .cp-chart { display: grid; grid-template-columns: auto repeat(16, var(--cp-sw)); gap: 2px; align-items: center;
+              overflow-x: auto; padding: 3px 3px 4px 0; }
+  .cp-shade { padding-right: 4px; font-size: 10.5px; line-height: 1; color: var(--slate); text-align: right; }
+  .cp-sw { position: relative; display: grid; place-items: center; width: var(--cp-sw); height: var(--cp-sw); min-height: 0; padding: 0;
+           border: 0; border-radius: 4px; background: var(--cp-c); color: var(--cp-k);
+           box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 16%, transparent); font: normal 700 13px/1 var(--sans); }
+  .cp-sw:hover { box-shadow: inset 0 0 0 1px var(--cp-k); }
+  .cp-sw.on { box-shadow: inset 0 0 0 2px var(--cp-k); }
+  .cp-sw:focus-visible { z-index: 1; outline-offset: 1px; }
+  /* used by other voices: one dot each (two dots and a plus for four or more), along the bottom edge,
+     in the check's ink with a hairline ring in the opposite ink so they read on any swatch */
+  .cp-dots { position: absolute; left: 50%; bottom: 2px; transform: translateX(-50%); display: flex; align-items: center; gap: 2px;
+             pointer-events: none; }
+  .cp-dots > i { width: 4px; height: 4px; border-radius: 50%; background: var(--cp-k); box-shadow: 0 0 0 .5px var(--cp-r); }
+  .cp-dots > b { position: relative; width: 5px; height: 5px;
+                 background: linear-gradient(var(--cp-k), var(--cp-k)) center / 5px 1.5px no-repeat,
+                             linear-gradient(var(--cp-k), var(--cp-k)) center / 1.5px 5px no-repeat;
+                 filter: drop-shadow(0 0 .5px var(--cp-r)) drop-shadow(0 0 .5px var(--cp-r)); }
+  /* the hover (and focus) card: the colour's name and every voice painted with it */
+  .cp-tip { position: fixed; z-index: 16; max-width: min(280px, calc(100vw - 16px)); padding: 6px 8px; pointer-events: none;
+            background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; box-shadow: 0 4px 14px rgba(0, 0, 0, .25);
+            font-size: 11.5px; line-height: 1.3; color: var(--slate); }
+  .cp-tip-name { display: flex; align-items: center; gap: 6px; color: var(--ink); font-weight: 600; }
+  .cp-tip-name > i { flex: none; width: 10px; height: 10px; border-radius: 3px; background: var(--cp-c);
+                     box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 20%, transparent); }
+  .cp-tip-who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 1px 9px; margin-top: 3px; }
+  .cp-tip-who .me { font-style: italic; }
+  .cp-tip-free { margin-top: 3px; }
+  .cp-info { min-height: 1.3em; font-size: 11.5px; color: var(--slate); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cp-info b { color: var(--ink); font-weight: 600; }
+  .cp-who { max-width: 100%; min-width: 0; font-size: 11px; line-height: 1.2; color: var(--slate); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+  .cp-auto { display: inline-flex; align-items: center; gap: 5px; }
+  .cp-auto[aria-pressed="true"] { font-weight: 600; }
+  .cp-mini { width: 10px; height: 10px; border-radius: 50%; box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 20%, transparent); }
+  .cp-lbl { color: var(--slate); }
+  .cp input[type="color"] { width: 34px; height: var(--ctl-h); padding: 1px 2px; }
+  .cp input.cp-hex { width: 10ch; font-family: var(--mono); }
+  .cp .msg { flex: 1 1 100%; }
+  /* narrow screens: bigger swatches, as big as fit (22–28px); below about 440px the chart scrolls sideways */
+  @media (max-width: 640px) {
+    .cp { --cp-sw: clamp(22px, calc((100vw - 104px) / 16), 28px); width: min(540px, calc(100vw - 16px)); }
+    .vx-color, .cp-auto, .cp .cp-row button, .cp input { min-height: 32px; }
+  }
 
   /* ---- base ---- */
   * { box-sizing: border-box; }
@@ -107,8 +159,7 @@
   .now.idle .tally, .now.idle .now-acts { display: none; }
   .now-idle { display: flex; align-items: center; gap: 8px; min-width: 0; font: var(--bar-idle-fs)/1.4 var(--sans); color: var(--slate); }
   .now-idle .said { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .now.playing { padding: var(--bar-py) var(--pad-x); box-shadow: inset 3px 0 0 var(--spk, var(--rule)); }
-  .now.playing.spk-4 { box-shadow: inset 3px 0 0 var(--spk), inset 4px 0 0 var(--rule); }
+  .now.playing { padding: var(--bar-py) var(--pad-x); box-shadow: inset 3px 0 0 var(--spk, var(--rule)), inset 4px 0 0 var(--spk-ring, transparent); }
   .now-acts { flex: none; display: flex; align-items: center; gap: 2px; margin-left: auto; }
   .now-acts button, .q-drawer button { background: none; border-color: transparent; color: var(--slate); font-size: var(--ctl-fs); padding: 2px 8px; }
   .now-acts button:hover:not(:disabled), .q-drawer button:hover:not(:disabled) {
@@ -337,8 +388,7 @@
   .sx-chip:hover { border-color: var(--slate); }
   .sx-chip:focus-within { outline: 2px solid var(--cue); outline-offset: 2px; }
   .sx-chip > i { position: absolute; left: 10px; top: 50%; width: 10px; height: 10px; margin-top: -5px; border-radius: 50%; background: var(--spk, transparent);
-                 pointer-events: none; }
-  .sx-chip.spk-4 > i { box-shadow: 0 0 0 1px var(--rule); }
+                 pointer-events: none; box-shadow: 0 0 0 1px var(--spk-ring, transparent); }
   .sx-chip.none > i { background: transparent; box-shadow: inset 0 0 0 1.5px var(--slate); }
   .sx-chip.hollow > i { background: transparent; box-shadow: inset 0 0 0 2px var(--spk, var(--slate)); }
   .sx-chip::after { content: ""; position: absolute; right: 11px; top: 50%; width: 5px; height: 5px; border: solid var(--slate);
@@ -583,12 +633,10 @@
   /* results */
   .results { display: flex; flex-direction: column; }
   /* a card (or A/B slot) from a profile carries .spk-N; --spk-bar is the speaker colour for the playing highlight, else --cue */
-  .card, .ab .slot { --spk-bar: var(--spk, var(--cue)); }
-  .card.spk-4, .ab .slot.spk-4 { --spk-bar: var(--spk-ink); }
+  .card, .ab .slot { --spk-bar: var(--spk-strong, var(--spk, var(--cue))); }
   /* a result reads like a transcript row: who, the line on its speaker rule, the player, one quiet meta line, actions */
   .card { --spk-line: var(--rule); padding: calc(var(--row-y) + 3px) 0; border-top: 1px solid var(--rule); display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-  .card[class*="spk-"] { --spk-line: var(--spk); }
-  .card.spk-4 { --spk-line: var(--spk-ink); }
+  .card[class*="spk-"] { --spk-line: var(--spk-strong, var(--spk)); }
   .results > .card:first-child, .results > .group:first-child { border-top: 0; padding-top: 0; }
   .card-top { display: flex; gap: 8px; align-items: center; min-width: 0; flex-wrap: wrap; }
   .card-top .spk { flex: none; max-width: 60%; font-size: 13px; }
@@ -623,6 +671,34 @@
   .ab .slot .card { border-top: 0; padding: 4px 0 0 6px; }
   .ab .slot .card aw-audio { min-width: 140px; max-width: none; }
   .ab .slot.playing { border-color: var(--spk-bar); box-shadow: 0 0 0 1px var(--spk-bar); }
+  /* Engines mode: one row per engine (tick, name, voice, state); its results are a compact list */
+  .en-rows { display: flex; flex-direction: column; margin: 8px 0 2px; max-width: 720px; }
+  .en-row { display: grid; grid-template-columns: minmax(8.5em, 10em) minmax(0, 1fr) minmax(7.5em, auto); gap: 3px 10px; align-items: center;
+            padding: 4px 0; border-top: 1px solid var(--rule); }
+  .en-row:first-child { border-top: 0; }
+  .en-row .en-nm { color: var(--ink); font-size: var(--fs); }
+  .en-row.off .en-nm { color: var(--slate); }
+  #view-lab .en-row select { width: 100%; }
+  .en-row .en-st { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: var(--fs-sm); }
+  .en-row .en-st button { background: none; border: 0; padding: 1px 0; font-size: 12px; color: var(--cue); font-weight: 600; }
+  .en-row .en-st button:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 2px; }
+  .en-row .en-why { grid-column: 2 / -1; font-size: var(--fs-sm); color: var(--slate); word-break: break-word; }
+  .en-row .en-why code { font-family: var(--mono); font-size: var(--fs-meta); }
+  .en-row .en-st .msg:empty { display: none; }
+  @media (max-width: 560px) {
+    .en-row { grid-template-columns: minmax(0, 1fr) auto; }
+    .en-row select { grid-column: 1 / -1; grid-row: 2; }
+    .en-row .en-why { grid-column: 1 / -1; }
+  }
+  .en-txt { font: var(--line-fs)/var(--line-lh) var(--serif); color: var(--ink); max-width: 72ch; margin: 0 0 4px;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+  .card.compact { display: grid; grid-template-columns: 8.5em minmax(0, 1fr); gap: 2px 10px; align-items: center; }
+  .card.compact > * { grid-column: 2; }
+  .card.compact > .card-top { grid-column: 1; grid-row: 1 / span 3; align-self: start; padding-top: 4px; }
+  @media (max-width: 560px) {
+    .card.compact { grid-template-columns: minmax(0, 1fr); }
+    .card.compact > *, .card.compact > .card-top { grid-column: 1; grid-row: auto; }
+  }
   .langs { display: inline-flex; gap: 8px; flex-wrap: wrap; }
   .samples { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
 
@@ -906,6 +982,7 @@
           <label><input type="radio" name="lab-mode" value="langs">Every language</label>
           <label><input type="radio" name="lab-mode" value="ab">A/B</label>
           <label><input type="radio" name="lab-mode" value="explore">Explore seeds</label>
+          <label><input type="radio" name="lab-mode" value="engines">Engines</label>
         </div>
 
         <div data-mode="preview">
@@ -965,6 +1042,16 @@
           <div class="ex-takes" id="ex-takes" role="listbox" aria-label="takes" tabindex="0"></div>
           <h3 class="sub">Starred <span class="hint" id="ex-starcount"></span></h3>
           <div class="list" id="ex-stars"><span class="hint">Star a take (<kbd>s</kbd>) to keep it; stars survive daemon restarts.</span></div>
+        </div>
+
+        <div data-mode="engines" hidden>
+          <div class="hint">Renders the text once with each ticked engine, one after another, so you can compare them. <span id="en-lang"></span></div>
+          <div class="en-rows" id="en-rows" role="group" aria-label="engines to compare"><span class="hint">Loading the catalog…</span></div>
+          <div class="bar">
+            <button id="en-go" class="primary">Render all</button>
+            <button id="en-cancel" hidden>Stop after this one</button>
+            <span class="msg" id="en-msg"></span>
+          </div>
         </div>
       </section>
 
@@ -1096,18 +1183,149 @@ function h(tag, props, ...kids) {
   return el;
 }
 // ---------- speakers ----------
-// Each voice profile is a "speaker" with one of six subtitle colours
-// (CSS .spk-0 … .spk-5 set --spk, the swatch, and --spk-ink, the text tone).
-// Slots follow the configured profile order (config.profiles from /api/status),
-// so they stay put while the config does; a name not in it hashes to a slot.
-// When the list changes, document gets an "aw:speakers" event so a page can redraw.
-const SPEAKER_SLOTS = 6;
+// Each voice profile is a "speaker" with a subtitle colour: --spk, the swatch,
+// and --spk-ink, the text tone (at least 4.5:1 on --paper and --sheet, light
+// and dark). SPEAKER_PALETTE holds 64 named colours (CSS .spk-0 … .spk-63,
+// rules written by speakerCss): 16 hue families in four shade rows. Row one
+// (0 … 15) is the original sixteen; then "<family>-deep", "<family>-light"
+// and "<family>-pale" (16 … 63), derived from each base swatch in OKLCH
+// (deep: darker at about the same chroma; light: lighter, less chroma; pale:
+// near white, low chroma; white and grey step through near-neutral greys),
+// no two closer than CIEDE2000 9 (tests/test_colours.py). The new rows' text
+// tones keep the swatch's OKLCH hue and chroma and move its lightness until
+// they read at 4.5:1.
+// A profile's `color` in config.toml (config.profile_colors from /api/status:
+// a palette name or "#rrggbb") picks its colour. The others take the palette
+// colours no explicit choice uses, in palette order (every base colour, then
+// deep, light, pale) and the configured profile order (config.profiles),
+// wrapping when there are more voices than free colours; so they stay put
+// while the config does. A name not in the list hashes to a base colour. A
+// custom hex gets a generated class .spk-x<i> whose text tones speakerInk
+// computes. When the list or the colours change, the page is repainted and
+// document gets an "aw:speakers" event so a page can redraw.
+const SPEAKER_PALETTE = [
+  // name, swatch (--spk), light text tone, dark text tone (--spk-ink)
+  // base: the original sixteen, unchanged
+  ["yellow", "#F5C400", "#6E5600", "#FFD43B"],
+  ["cyan", "#00B8D9", "#00687A", "#4FD6EE"],
+  ["green", "#2FBF71", "#1B6B40", "#63D99A"],
+  ["magenta", "#D63AAF", "#8A1F70", "#F17ACF"],
+  ["white", "#FFFFFF", "#3A4048", "#F2F4F6"],
+  ["orange", "#F08C00", "#8A4B00", "#FFA94D"],
+  ["blue", "#3B5BDB", "#3451C7", "#8DA2FB"],
+  ["red", "#E03131", "#B71C1C", "#FF8A8A"],
+  ["violet", "#9061F9", "#6A35E0", "#B69CFF"],
+  ["lime", "#94D82D", "#4D7215", "#A9E34B"],
+  ["pink", "#FF8FAB", "#B4235A", "#FFA8C0"],
+  ["brown", "#8D5524", "#7A4A1F", "#D9A066"],
+  ["teal", "#0B8A80", "#08665F", "#3CC7B9"],
+  ["grey", "#868E96", "#5C636B", "#ADB5BD"],
+  ["olive", "#8F9A1F", "#5C6312", "#C3CF48"],
+  ["sky", "#74C0FC", "#0B5FA5", "#8ACBFF"],
+  // deep: darker, as saturated
+  ["yellow-deep", "#B99300", "#826700", "#B99300"],
+  ["cyan-deep", "#00839B", "#00748A", "#1F90A8"],
+  ["green-deep", "#00894B", "#007A42", "#219758"],
+  ["magenta-deep", "#980079", "#980079", "#D64FB1"],
+  ["white-deep", "#C5C6B8", "#6B6B5F", "#C5C6B8"],
+  ["orange-deep", "#AD6300", "#9D5900", "#BD721F"],
+  ["blue-deep", "#1F31B0", "#1F31B0", "#557AFD"],
+  ["red-deep", "#9A0010", "#9A0010", "#E1554E"],
+  ["violet-deep", "#6729C8", "#6729C8", "#9566FF"],
+  ["lime-deep", "#72AD00", "#4C7600", "#72AD00"],
+  ["pink-deep", "#C85E7A", "#AE4764", "#CC627E"],
+  ["brown-deep", "#6C3800", "#6C3800", "#B17749"],
+  ["teal-deep", "#005750", "#005750", "#499087"],
+  ["grey-deep", "#4D575F", "#4D575F", "#7B858E"],
+  ["olive-deep", "#616900", "#616900", "#808A31"],
+  ["sky-deep", "#418DC6", "#1F6FA6", "#418DC6"],
+  // light: lighter, a little less saturated
+  ["yellow-light", "#FFDD7C", "#826700", "#FFDD7C"],
+  ["cyan-light", "#65DBF8", "#00748A", "#65DBF8"],
+  ["green-light", "#87E0A5", "#177945", "#87E0A5"],
+  ["magenta-light", "#FB8DD9", "#AA438D", "#FB8DD9"],
+  ["white-light", "#F1E4D4", "#74685A", "#F1E4D4"],
+  ["orange-light", "#FFBA7B", "#995B16", "#FFBA7B"],
+  ["blue-light", "#86A6FF", "#4A66B9", "#86A6FF"],
+  ["red-light", "#FF9186", "#AF4A42", "#FF9186"],
+  ["violet-light", "#BCAAFF", "#715EAC", "#BCAAFF"],
+  ["lime-light", "#B4DE88", "#50741E", "#B4DE88"],
+  ["pink-light", "#FFB7C7", "#975767", "#FFB7C7"],
+  ["brown-light", "#C99C7B", "#8B6142", "#C99C7B"],
+  ["teal-light", "#7CC0B8", "#30756E", "#7CC0B8"],
+  ["grey-light", "#97ABB9", "#5A6C79", "#97ABB9"],
+  ["olive-light", "#B4BF67", "#67700C", "#B4BF67"],
+  ["sky-light", "#B0DAFE", "#486E8E", "#B0DAFE"],
+  // pale: near white, low chroma
+  ["yellow-pale", "#F7E6B7", "#78693E", "#F7E6B7"],
+  ["cyan-pale", "#BAF0FF", "#3F717F", "#BAF0FF"],
+  ["green-pale", "#BAE2C5", "#4E7259", "#BAE2C5"],
+  ["magenta-pale", "#FFD3EF", "#845E77", "#FFD3EF"],
+  ["white-pale", "#F7F9E0", "#6A6C56", "#F7F9E0"],
+  ["orange-pale", "#FFD6B3", "#876344", "#FFD6B3"],
+  ["blue-pale", "#B4C4EE", "#5C698F", "#B4C4EE"],
+  ["red-pale", "#FFCBC4", "#8C5F5A", "#FFCBC4"],
+  ["violet-pale", "#DCD4FF", "#6D658B", "#DCD4FF"],
+  ["lime-pale", "#E1FEC5", "#59713E", "#E1FEC5"],
+  ["pink-pale", "#FFE6EA", "#7A6568", "#FFE6EA"],
+  ["brown-pale", "#D4BEAF", "#7A6659", "#D4BEAF"],
+  ["teal-pale", "#C0DBD7", "#576F6C", "#C0DBD7"],
+  ["grey-pale", "#C3CAD0", "#656B71", "#C3CAD0"],
+  ["olive-pale", "#CFD6AA", "#686D45", "#CFD6AA"],
+  ["sky-pale", "#DDF0FF", "#5C6C79", "#DDF0FF"],
+];
+const SPEAKER_FAMILIES = 16;   // columns of the picker; a palette index is shade * 16 + family
+const SPEAKER_SHADES = ["base", "deep", "light", "pale"];
+const SPEAKER_SLOTS = SPEAKER_PALETTE.length;
+// --paper and --sheet of each scheme: the text tones must read on both.
+const SPEAKER_PAPERS = {light: ["#E8EBEE", "#F7F8F9"], dark: ["#121417", "#1A1D21"]};
+const SPEAKER_CLASS = /^spk-x?\d+$/;   // .spk-3, .spk-x0 (not .spk-rule)
 let speakerProfiles = [];
-function setSpeakerProfiles(list) {
+let speakerColors = {};           // profile -> "teal" | "#rrggbb": the explicit choices
+let speakerSlots = new Map();     // profile -> palette index, or "x<i>" for a custom hex
+let speakerCustom = [];           // the custom hex colours; index i is .spk-x<i>
+// A colour as config.toml may hold it, normalised: a palette name, "#rrggbb", or "" (automatic).
+function speakerColorValue(v) {
+  if (typeof v !== "string") return "";
+  const s = v.trim().toLowerCase();
+  return SPEAKER_PALETTE.some((p) => p[0] === s) || /^#[0-9a-f]{6}$/.test(s) ? s : "";
+}
+// Every listed profile's slot for a set of explicit colours. New custom hex
+// colours are appended to `custom` (their index is the "x<i>" slot).
+function speakerAssign(list, colors, custom = []) {
+  const out = new Map(), used = new Set(), auto = [];
+  for (const name of list) {
+    const c = speakerColorValue(colors && colors[name]);
+    let slot = null;
+    if (c.startsWith("#")) {
+      const i = SPEAKER_PALETTE.findIndex((p) => p[1].toLowerCase() === c);
+      if (i >= 0) slot = i;
+      else { let j = custom.indexOf(c); if (j < 0) j = custom.push(c) - 1; slot = "x" + j; }
+    } else if (c) slot = SPEAKER_PALETTE.findIndex((p) => p[0] === c);
+    if (slot == null) auto.push(name);
+    else { out.set(name, slot); if (typeof slot === "number") used.add(slot); }
+  }
+  const free = [];
+  for (let i = 0; i < SPEAKER_SLOTS; i++) if (!used.has(i)) free.push(i);
+  auto.forEach((name, k) => out.set(name, free.length ? free[k % free.length] : k % SPEAKER_SLOTS));
+  return out;
+}
+// setSpeakerProfiles(list, colors): colors is {profile: colour | null}; left
+// out, the current colours are kept.
+function setSpeakerProfiles(list, colors) {
   if (!Array.isArray(list)) return;
   const next = list.filter((p) => typeof p === "string");
-  if (next.length === speakerProfiles.length && next.every((p, i) => p === speakerProfiles[i])) return;
+  const src = colors === undefined ? speakerColors : colors && typeof colors === "object" ? colors : {};
+  const nextColors = {};
+  for (const name of next) { const c = speakerColorValue(src[name]); if (c) nextColors[name] = c; }
+  if (next.length === speakerProfiles.length && next.every((p, i) => p === speakerProfiles[i]) &&
+      JSON.stringify(nextColors) === JSON.stringify(speakerColors)) return;
   speakerProfiles = next;
+  speakerColors = nextColors;
+  const custom = [];
+  speakerSlots = speakerAssign(next, nextColors, custom);
+  speakerCustom = custom;
+  speakerCss();
   // Repaint every speaker-coloured element already on the page (tags, rows,
   // cards drawn before the list arrived) so a voice has one colour everywhere.
   for (const el of document.querySelectorAll("[data-spk]")) paintSpeaker(el, el.dataset.spk);
@@ -1116,20 +1334,88 @@ function setSpeakerProfiles(list) {
 // Give `el` the speaker class of `profile` (replacing any other) and remember
 // the profile so a later profile-list change repaints it.
 function paintSpeaker(el, profile) {
-  for (const c of [...el.classList]) if (/^spk-\d$/.test(c)) el.classList.remove(c);
+  for (const c of [...el.classList]) if (SPEAKER_CLASS.test(c)) el.classList.remove(c);
   el.classList.add("spk-" + speakerSlot(profile));
   el.dataset.spk = speakerName(profile);
   return el;
 }
 function speakerName(profile) { return profile == null || profile === "" ? "default" : String(profile); }
+// A palette index (0 … 63), or "x<i>" for a custom hex colour. A name not
+// in the list hashes to one of the 16 base colours.
 function speakerSlot(profile) {
   const name = speakerName(profile);
-  const i = speakerProfiles.indexOf(name);
-  if (i >= 0) return i % SPEAKER_SLOTS;
+  if (speakerSlots.has(name)) return speakerSlots.get(name);
   let x = 0;
   for (const c of name) x = (Math.imul(x, 31) + c.codePointAt(0)) >>> 0;
-  return x % SPEAKER_SLOTS;
+  return x % SPEAKER_FAMILIES;
 }
+// The swatch colour of a profile (hex) and a short label: "teal", "#12ab9f", "teal (automatic)".
+function speakerSwatch(profile) {
+  const s = speakerSlot(profile);
+  return typeof s === "number" ? SPEAKER_PALETTE[s][1] : speakerCustom[Number(s.slice(1))];
+}
+function speakerColorLabel(profile) {
+  const s = speakerSlot(profile);
+  const label = typeof s === "number" ? SPEAKER_PALETTE[s][0] : speakerCustom[Number(s.slice(1))];
+  return speakerColors[speakerName(profile)] ? label : `${label} (automatic)`;
+}
+// WCAG contrast of two "#rrggbb" colours.
+function speakerRgb(hex) { const n = parseInt(hex.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; }
+function speakerLum(hex) {
+  const [r, g, b] = speakerRgb(hex).map((v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+function speakerContrast(a, b) {
+  const x = speakerLum(a), y = speakerLum(b);
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
+// A text tone for a custom swatch: the same hue and saturation, darker (light
+// scheme) or lighter (dark scheme) until it reads at 4.5:1 on --paper and --sheet.
+function speakerInk(hex, dark) {
+  const [r, g, b] = speakerRgb(hex).map((v) => v / 255);
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let hue = 0, l = (mx + mn) / 2;
+  const sat = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  if (d) hue = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  const toHex = (L) => {
+    const c = (1 - Math.abs(2 * L - 1)) * sat, x = c * (1 - Math.abs((hue % 2 + 2) % 2 - 1)), m = L - c / 2;
+    const k = Math.floor((hue + 6) % 6);
+    const [p, q, s] = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][k];
+    return "#" + [p, q, s].map((v) => Math.round(Math.min(1, Math.max(0, v + m)) * 255).toString(16).padStart(2, "0")).join("");
+  };
+  const papers = dark ? SPEAKER_PAPERS.dark : SPEAKER_PAPERS.light;
+  const ok = (c) => papers.every((p) => speakerContrast(c, p) >= 4.5);
+  for (let i = 0; i <= 100; i++) {
+    const c = toHex(Math.min(1, Math.max(0, dark ? l + i / 100 : l - i / 100)));
+    if (ok(c)) return c;
+  }
+  return dark ? "#ffffff" : "#000000";
+}
+// The CSS for the palette and the custom colours. A swatch too close to the
+// sheet (white, the pale shades) gets --spk-ring, a hairline round its dot
+// and rule, and --spk-strong, its text tone for lines and highlights; the
+// page's [data-spk] rule resets both, so they never leak to a nested voice.
+const speakerFaint = (hex, dark) => speakerContrast(hex, SPEAKER_PAPERS[dark ? "dark" : "light"][1]) < 1.35;
+const SPEAKER_FAINT = " --spk-ring: var(--rule); --spk-strong: var(--spk-ink);";
+const SPEAKER_UNFAINT = " --spk-ring: initial; --spk-strong: initial;";
+function speakerCssText() {
+  const light = [], dark = [];
+  const add = (c, sw, ink, inkDark) => {
+    const fl = speakerFaint(sw, false), fd = speakerFaint(sw, true);
+    light.push(`${c} { --spk: ${sw}; --spk-ink: ${ink};${fl ? SPEAKER_FAINT : ""} }`);
+    dark.push(`${c} { --spk-ink: ${inkDark};${fd ? SPEAKER_FAINT : fl ? SPEAKER_UNFAINT : ""} }`);
+  };
+  SPEAKER_PALETTE.forEach(([, sw, ink, inkDark], i) => add(`.spk-${i}`, sw, ink, inkDark));
+  speakerCustom.forEach((hex, i) => add(`.spk-x${i}`, hex, speakerInk(hex, false), speakerInk(hex, true)));
+  return light.join("\n") + "\n@media (prefers-color-scheme: dark) {\n" + dark.join("\n") + "\n}";
+}
+function speakerCss() {
+  if (typeof document.createElement !== "function" || !document.head) return;   // no DOM (tests)
+  let el = document.getElementById("spk-css");
+  if (!el) { el = document.createElement("style"); el.id = "spk-css"; document.head.append(el); }
+  el.textContent = speakerCssText();
+}
+speakerCss();
 // <span class="spk spk-N"><i></i>name</span>: a round swatch + the name in the
 // speaker's text tone. speakerTag returns an element, speakerTagHTML a string.
 function speakerTag(profile, props = {}) {
@@ -1142,6 +1428,281 @@ function speakerTagHTML(profile) {
   return `<span class="spk spk-${speakerSlot(profile)}" data-spk="${esc(name)}"><i aria-hidden="true"></i>${esc(name)}</span>`;
 }
 // ---------- end speakers ----------
+// ---------- speaker colour picker
+// Sessions → Voices: a voice's colour button opens a popover: the 64
+// palette colours as a chart (16 hue columns × base, deep, light and pale
+// rows; a check on this voice's colour; one, two or three dots on a colour
+// that many other voices use, two dots and a plus for four or more), Automatic,
+// and a custom hex. Hovering or focusing a swatch shows a card with its name
+// and every voice using it (as tags in that colour; "free" when none); the
+// swatch's aria-label lists them too. A one-line summary sits in the heading.
+// Arrow keys move
+// across hues (left, right) and shades (up, down); Home/End go to the ends
+// of a row, with Ctrl or Cmd to the ends of the chart. A pick saves through
+// PATCH /api/lab/profiles/{name} {"color"} and repaints every page at once.
+const cp = {el: null, tip: null, name: null, busy: false, retip: null};
+// Did the last input come from the keyboard? Focus then shows a swatch's card;
+// focus from a mouse open or click does not (the pointer's hover does).
+let cpKeys = false;
+document.addEventListener("keydown", () => { cpKeys = true; }, true);
+document.addEventListener("pointerdown", () => { cpKeys = false; }, true);
+function cpAnchor() {
+  if (!cp.name) return null;
+  for (const li of document.querySelectorAll(".vx-row")) if (li.dataset.name === cp.name) return li.querySelector(".vx-color");
+  return null;
+}
+function cpTipHide() { if (cp.tip) { cp.tip.remove(); cp.tip = null; } }
+function cpClose(focus) {
+  cpTipHide();
+  cp.retip = null;
+  if (!cp.el) return;
+  cp.el.remove(); cp.el = null;
+  const a = cpAnchor();
+  if (a) { a.setAttribute("aria-expanded", "false"); if (focus) a.focus(); }
+  cp.name = null;
+}
+// On scroll (the page, or the chart sideways) and resize: the hover card sits
+// at the old coordinates, so it goes; a keyboard-focused swatch gets it back.
+function cpPlace() {
+  cpTipHide();
+  const el = cp.el, a = cpAnchor();
+  if (!el || !a) return;
+  const r = a.getBoundingClientRect();
+  const vw = document.documentElement.clientWidth, vh = window.innerHeight;
+  const left = Math.min(Math.max(8, r.left), Math.max(8, vw - el.offsetWidth - 8));
+  let top = r.bottom + 6;
+  if (top + el.offsetHeight > vh - 8) top = Math.max(8, r.top - el.offsetHeight - 6);
+  el.style.left = left + "px"; el.style.top = top + "px";
+  if (cp.retip) cp.retip();
+}
+// The voices painted with each slot: slot -> [names].
+function cpUsers() {
+  const m = new Map();
+  for (const n of speakerProfiles) { const s = String(speakerSlot(n)); if (!m.has(s)) m.set(s, []); m.get(s).push(n); }
+  return m;
+}
+const cpCheckInk = (sw) => speakerContrast(sw, "#1B1F24") >= speakerContrast(sw, "#FFFFFF") ? "#1B1F24" : "#FFFFFF";
+const cpRingInk = (sw) => cpCheckInk(sw) === "#FFFFFF" ? "#1B1F24" : "#FFFFFF";
+// ---------- cp marks
+// How many dots a swatch shows for n other voices using it: one to three dots
+// as they are; four or more: two dots and a plus. And the cap on names in the
+// hover card: the first max, then "and N more".
+function cpMarks(n) {
+  n = Math.max(0, Math.floor(Number(n) || 0));
+  return n > 3 ? {dots: 2, more: true} : {dots: n, more: false};
+}
+function cpCap(list, max = 12) {
+  return list.length > max ? {shown: list.slice(0, max), rest: list.length - max} : {shown: list.slice(), rest: 0};
+}
+// A failed PATCH: the daemon's own words ("no profile named 'x'", a bad
+// colour) when it sent some; only a bare 404/405 (a route this daemon does
+// not have) reads as "can't set colours yet".
+function cpSaveError(r) {
+  r = r || {};
+  const err = typeof r.error === "string" ? r.error.trim() : "";
+  const bare = !err || /^(HTTP \d+|not found|method not allowed)$/i.test(err);
+  if (bare && (r.status === 404 || r.status === 405)) return "Couldn't save: this daemon can't set colours yet.";
+  return `Couldn't save: ${err || "no response"}`;
+}
+// ---------- end cp marks
+function cpToggle(anchor, name) {
+  if (cp.el && cp.name === name) return cpClose(true);
+  cpClose(false);
+  cp.name = name;
+  anchor.setAttribute("aria-expanded", "true");
+  cpRender(null, "");
+}
+// (Re)draw the popover for cp.name; focusKey is the data-k to focus after.
+function cpRender(focusKey, status, kind = "ok") {
+  const name = cp.name;
+  const cur = speakerColors[name] || "";
+  const slot = String(speakerSlot(name));
+  const users = cpUsers();
+  const others = (s) => (users.get(String(s)) || []).filter((n) => n !== name);
+  cpTipHide();
+  const msg = h("span", {class: "msg", role: "status"});
+  if (status) note(msg, status, kind);
+  const thisVoice = cur ? "this voice" : "this voice (automatic)";
+  // The card by a swatch: its name and every voice using it. Built on demand, so
+  // there is only ever one; it lives on the page (the popover scrolls and clips).
+  const showTip = (btn, i) => {
+    cpTipHide();
+    const who = others(i), mine = String(i) === slot, [cname, sw] = SPEAKER_PALETTE[i];
+    const {shown, rest} = cpCap(who);
+    const card = h("div", {class: "cp-tip", "aria-hidden": "true", style: `--cp-c:${sw}`},
+      h("div", {class: "cp-tip-name"}, h("i"), cname));
+    if (mine || who.length) {
+      card.append(h("div", {class: "cp-tip-who"},
+        mine ? [speakerTag(name), h("span", {class: "me"}, "this voice")] : null,
+        shown.map((n) => speakerTag(n)),
+        rest ? h("span", null, `and ${rest} more`) : null));
+    } else card.append(h("div", {class: "cp-tip-free"}, "free"));
+    document.body.append(card);
+    cp.tip = card;
+    const r = btn.getBoundingClientRect(), vw = document.documentElement.clientWidth;
+    const left = Math.min(Math.max(8, r.left + r.width / 2 - card.offsetWidth / 2), Math.max(8, vw - card.offsetWidth - 8));
+    let top = r.top - card.offsetHeight - 6;
+    if (top < 8) top = r.bottom + 6;
+    card.style.left = left + "px"; card.style.top = top + "px";
+  };
+  // The line under the chart: the hovered or focused swatch, else this voice's colour.
+  const info = h("div", {class: "cp-info", "aria-hidden": "true"});
+  const describe = (i) => {
+    const who = others(i);
+    info.replaceChildren(h("b", null, SPEAKER_PALETTE[i][0]), String(i) === slot ? ` · ${thisVoice}` : "",
+      who.length ? ` · ${String(i) === slot ? "also " : ""}${who.join(", ")}` : (String(i) === slot ? "" : " · free"));
+  };
+  const idle = () => {
+    const a = document.activeElement, k = a && a.dataset ? a.dataset.k || "" : "";
+    if (cp.el && cp.el.contains(a) && /^p\d+$/.test(k)) return describe(Number(k.slice(1)));
+    if (/^\d+$/.test(slot)) return describe(Number(slot));
+    const who = others(slot);
+    info.replaceChildren(h("b", null, speakerSwatch(name)), ` · ${thisVoice}, custom`, who.length ? ` · also ${who.join(", ")}` : "");
+  };
+  const chart = h("div", {class: "cp-chart", role: "radiogroup", "aria-label": `Palette colours for ${name}`});
+  const anyOn = /^\d+$/.test(slot);
+  SPEAKER_SHADES.forEach((shade, r) => {
+    chart.append(h("span", {class: "cp-shade", "aria-hidden": "true"}, shade));
+    for (let f = 0; f < SPEAKER_FAMILIES; f++) {
+      const i = r * SPEAKER_FAMILIES + f, [cname, sw] = SPEAKER_PALETTE[i];
+      const on = String(i) === slot, who = others(i);
+      const label = cname + (on ? ", " + thisVoice : "") + (who.length ? `, used by ${who.join(", ")}` : "");
+      const mk = cpMarks(who.length);
+      const dots = mk.dots ? h("span", {class: "cp-dots", "aria-hidden": "true"},
+        Array.from({length: mk.dots}, () => h("i")), mk.more ? h("b") : null) : null;
+      const b = h("button", {type: "button", class: "cp-sw" + (on ? " on" : "") + (who.length ? " used" : ""), role: "radio",
+        "aria-checked": String(on), tabindex: on || (!anyOn && i === 0) ? "0" : "-1", "data-k": "p" + i,
+        "aria-label": label, style: `--cp-c:${sw};--cp-k:${cpCheckInk(sw)};--cp-r:${cpRingInk(sw)}`}, on ? "✓" : "", dots);
+      b.addEventListener("click", () => cpSave(cname, "p" + i));
+      b.addEventListener("focus", () => { describe(i); if (cpKeys) showTip(b, i); });
+      b.addEventListener("pointerenter", () => { describe(i); showTip(b, i); });
+      chart.append(b);
+    }
+  });
+  chart.addEventListener("keydown", cpGridKey);
+  // Away from the swatches: the card follows keyboard focus, else goes.
+  const tipIdle = () => {
+    const a = document.activeElement;
+    if (!chart.isConnected) return;   // a stale render: the popover was redrawn
+    if (cpKeys && cp.el && a && cp.el.contains(a) && a.classList && a.classList.contains("cp-sw")) showTip(a, Number(a.dataset.k.slice(1)));
+    else cpTipHide();
+  };
+  cp.retip = tipIdle;
+  chart.addEventListener("pointerleave", () => { idle(); tipIdle(); });
+  chart.addEventListener("focusout", () => setTimeout(() => { idle(); tipIdle(); }));
+  const isCustom = cur.startsWith("#") && !anyOn;
+  const hexNow = speakerSwatch(name) || "#888888";
+  const picker = h("input", {type: "color", "data-k": "pick", value: hexNow.toLowerCase(), "aria-label": "Custom colour"});
+  const hex = h("input", {type: "text", class: "cp-hex", "data-k": "hex", maxlength: 7, spellcheck: "false", autocomplete: "off",
+    placeholder: "#RRGGBB", value: isCustom ? cur : "", "aria-label": "Custom colour as hex"});
+  const autoSlot = speakerAssign(speakerProfiles, {...speakerColors, [name]: ""}).get(name);
+  const autoSw = typeof autoSlot === "number" ? SPEAKER_PALETTE[autoSlot] : null;
+  const auto = h("button", {type: "button", class: "small cp-auto", "data-k": "auto", "aria-pressed": String(!cur),
+    title: "Let AfterWord pick a colour no other voice has chosen"},
+    autoSw ? h("i", {class: "cp-mini", style: `background:${autoSw[1]}`, "aria-hidden": "true"}) : null,
+    autoSw ? `Automatic (${autoSw[0]})` : "Automatic", !cur ? " ✓" : "");
+  auto.addEventListener("click", () => cpSave("", "auto"));
+  const use = h("button", {type: "button", class: "small", "data-k": "use"}, "Use");
+  const useHex = () => {
+    let v = hex.value.trim();
+    if (/^[0-9a-f]{6}$/i.test(v)) v = "#" + v;
+    if (!/^#[0-9a-f]{6}$/i.test(v)) return note(msg, "Type a colour as #RRGGBB", "err");
+    cpSave(v.toLowerCase(), "use");
+  };
+  picker.addEventListener("input", () => { hex.value = picker.value; });
+  picker.addEventListener("change", () => { hex.value = picker.value; cpSave(picker.value.toLowerCase(), "pick"); });
+  hex.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); useHex(); } });
+  use.addEventListener("click", useHex);
+  const customWho = isCustom ? others(slot) : [];
+  // One quiet line: how many voices, and how many colours they use between them.
+  const voices = speakerProfiles.includes(name) ? speakerProfiles : [...speakerProfiles, name];
+  const nCol = new Set(voices.map((n) => String(speakerSlot(n)))).size;
+  const summary = `${voices.length} voice${voices.length === 1 ? "" : "s"} · ${nCol} colour${nCol === 1 ? "" : "s"} in use`;
+  const body = [
+    h("div", {class: "cp-head"}, h("span", null, "Colour of"), speakerTag(name), h("span", {class: "cp-sum"}, summary)),
+    chart,
+    info,
+    h("div", {class: "cp-row"}, auto),
+    h("div", {class: "cp-row"}, h("span", {class: "cp-lbl"}, "Custom" + (isCustom ? " ✓" : "")), picker, hex, use,
+      customWho.length ? h("span", {class: "cp-who"}, "also " + customWho.join(", ")) : null),
+    msg,
+  ].filter(Boolean);
+  if (!cp.el) {
+    cp.el = h("div", {class: "cp", role: "dialog", "aria-label": `Colour of ${name}`});
+    cp.el.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); cpClose(true); }
+    });
+    document.body.append(cp.el);
+  }
+  cp.el.replaceChildren(...body);
+  cpPlace();
+  const f = (focusKey && cp.el.querySelector(`[data-k="${focusKey}"]`)) || chart.querySelector('[tabindex="0"]');
+  if (f) f.focus();
+  idle();
+}
+// Make swatch i the chart's one tab stop and focus it.
+function cpFocusSwatch(chart, i) {
+  const btns = [...chart.querySelectorAll(".cp-sw")];
+  if (!btns[i]) return;
+  for (const b of btns) b.tabIndex = -1;
+  btns[i].tabIndex = 0;
+  btns[i].focus();
+}
+// Arrow keys move in two dimensions: left/right across the hue families,
+// up/down across the shades (base, deep, light, pale). Home/End go to the
+// ends of the row; with Ctrl or Cmd, to the first and last swatch.
+function cpGridKey(ev) {
+  const chart = ev.currentTarget, btns = [...chart.querySelectorAll(".cp-sw")];
+  const i = btns.indexOf(document.activeElement);
+  if (i < 0) return;
+  const F = SPEAKER_FAMILIES, n = btns.length, r = Math.floor(i / F), c = i % F;
+  const j = {
+    ArrowLeft: c > 0 ? i - 1 : i,
+    ArrowRight: c < F - 1 && i + 1 < n ? i + 1 : i,
+    ArrowUp: r > 0 ? i - F : i,
+    ArrowDown: i + F < n ? i + F : i,
+    Home: ev.ctrlKey || ev.metaKey ? 0 : r * F,
+    End: ev.ctrlKey || ev.metaKey ? n - 1 : Math.min(n - 1, r * F + F - 1),
+  }[ev.key];
+  if (j == null) return;
+  ev.preventDefault();
+  cpFocusSwatch(chart, j);
+}
+async function cpSave(value, focusKey) {
+  const name = cp.name;
+  if (!name || cp.busy) return;
+  if (value === (speakerColors[name] || "")) return cpRender(focusKey, "");
+  cp.busy = true;
+  for (const b of cp.el.querySelectorAll("button, input")) b.disabled = true;
+  const r = await api("PATCH", "/api/lab/profiles/" + encodeURIComponent(name), {color: value});
+  if (r.ok) {
+    const got = r.data && r.data.profile && "color" in r.data.profile ? r.data.profile.color : value;
+    const list = speakerProfiles.includes(name) ? speakerProfiles : [...speakerProfiles, name];
+    setSpeakerProfiles(list, {...speakerColors, [name]: got || ""});
+  }
+  cp.busy = false;
+  if (!cp.el || cp.name !== name) return;
+  if (r.ok) cpRender(focusKey, value ? "Saved" : "Saved: automatic");
+  else cpRender(focusKey, cpSaveError(r), "err");
+}
+document.addEventListener("pointerdown", (ev) => {
+  if (!cp.el || cp.el.contains(ev.target)) return;
+  const a = cpAnchor();
+  if (a && a.contains(ev.target)) return;   // the button's own click toggles it
+  cpClose(false);
+});
+window.addEventListener("scroll", cpPlace, true);
+window.addEventListener("resize", cpPlace);
+document.addEventListener("aw:route", (ev) => { if (!ev.detail || ev.detail.view !== "sessions") cpClose(false); });
+// A new profile list (another tab, a config edit) redraws an open popover.
+document.addEventListener("aw:speakers", () => {
+  if (!cp.el || cp.busy) return;
+  if (!speakerProfiles.includes(cp.name)) return cpClose(false);
+  const a = document.activeElement;
+  if (a && a.dataset && a.dataset.k === "hex" && cp.el.contains(a)) return;   // don't wipe what is being typed
+  cpRender(cp.el.contains(a) && a.dataset ? a.dataset.k : null, "");
+});
+// ---------- end speaker colour picker
 // ---------- player ----------
 // Every clip on this page plays through Web Audio, never an <audio> element:
 // a playing media element makes the browser the macOS "Now Playing" app, and
@@ -1542,6 +2103,7 @@ function detailHtml(d, id) {
   const acts = [
     typeof d.text === "string" && d.text ? `<button type="button" data-act="copy">Copy text</button>` : "",
     typeof d.text === "string" && d.text.trim() && d.kind !== "system" ? `<button type="button" data-act="replay" title="Queue this line again with the same voice">Speak again</button>` : "",
+    forkDetail(d) ? `<button type="button" data-act="fork" title="Put this line and its profile in the voice lab to tweak">Open in voice lab</button>` : "",
     dlUrl ? `<a class="btn" href="${esc(dlUrl)}" download="afterword-${esc(id)}.wav" title="Download the WAV">Download clip</a>` : "",
     rate != null ? `<span class="via">the clip plays at ${esc(rate)}× (the pace it was heard at)</span>` : "",
     d.error && !d.kind ? `<span class="warn">${esc(d.error)}</span>` : "",
@@ -1555,6 +2117,53 @@ function detailHtml(d, id) {
     <div><h3>Raw payload</h3><pre>${esc(JSON.stringify(d.payload, null, 2))}</pre></div>
   </div></div>`;
 }
+// ---------- fork to lab
+// "Open in voice lab" in a row's detail: what the lab needs from the event
+// (GET /api/events/{id}), the line, its profile and its language (the lang
+// attr, else the one language all of its segments were spoken in). The lab
+// takes it from there through the aw:fork-to-lab event.
+function forkDetail(d) {
+  if (!d || typeof d.text !== "string" || !d.text.trim() || d.kind === "system") return null;
+  const attrs = d.attrs && typeof d.attrs === "object" ? d.attrs : {};
+  const segs = d.timings && Array.isArray(d.timings.segments) ? d.timings.segments : [];
+  const langs = [...new Set(segs.map((g) => g && g.lang).filter((l) => typeof l === "string" && l))];
+  const tagged = typeof attrs.lang === "string" && attrs.lang.trim() && attrs.lang.trim().toLowerCase() !== "auto" ? attrs.lang.trim() : null;
+  return {
+    text: d.text.trim().slice(0, 1000),
+    profile: typeof d.profile === "string" && d.profile ? d.profile : null,
+    lang: tagged || (langs.length === 1 ? langs[0] : null),
+  };
+}
+// The builder settings that spoke a line: profile p (a GET /api/lab/catalog
+// profile) in language code, with that language's [profiles.x.langs.<code>]
+// fields over the profile's own, as the daemon's voice_for() does. A
+// language voice with its own `voice` does not inherit the profile's
+// ref_text (the transcript of another clip). Returns {settings, lang, override}:
+// lang is the code the builder should use (null: leave the profile's),
+// override the langs key that applied (null: none).
+function forkSettings(p, code) {
+  p = p && typeof p === "object" ? p : {};
+  const base = {voice: p.voice, ref_text: p.ref_text, lang: p.lang, pace: p.pace, style: p.style, mood: null,
+    seed: p.seed, temperature: p.temperature};
+  const c = typeof code === "string" ? code.trim().toLowerCase().replace(/_/g, "-") : "";
+  if (!c || c === "auto") return {settings: base, lang: null, override: null};
+  const langs = p.langs && typeof p.langs === "object" && !Array.isArray(p.langs) ? p.langs : {};
+  const keys = Object.keys(langs);
+  const key = keys.find((k) => k.toLowerCase() === c) || keys.find((k) => k.toLowerCase() === c.split("-")[0]) || null;
+  const lv = key && langs[key] && typeof langs[key] === "object" ? langs[key] : null;
+  if (!lv) return {settings: {...base, lang: c}, lang: c, override: null};
+  const has = (k) => lv[k] != null && lv[k] !== "";
+  return {
+    settings: {...base, lang: c,
+      voice: has("voice") ? lv.voice : base.voice,
+      ref_text: lv.ref_text != null ? lv.ref_text : (has("voice") ? "" : base.ref_text),
+      style: has("style") ? lv.style : base.style,
+      pace: has("pace") ? lv.pace : base.pace,
+      seed: has("seed") ? lv.seed : base.seed},
+    lang: c, override: key,
+  };
+}
+// ---------- end fork to lab
 function trFrom(html) {
   const t = document.createElement("template");
   t.innerHTML = html.trim();
@@ -1751,6 +2360,15 @@ $("rows").addEventListener("click", (ev) => {
   if (row && !String(window.getSelection ? window.getSelection() : "")) toggleDetail(Number(row.dataset.id));
 });
 for (const id of ["filter", "q", "hideSystem", "showHooks", "sessfilter"]) $(id).addEventListener("input", render);
+// "Open in voice lab" in a row's detail: the lab (aw:fork-to-lab) switches to #lab and loads it.
+$("rows").addEventListener("click", (ev) => {
+  const btn = ev.target.closest('[data-act="fork"]');
+  const holder = btn && btn.closest("[data-id]");
+  if (!holder) return;
+  const id = Number(holder.dataset.id);
+  const f = forkDetail(detailCache.get(id) || rowEvent(id));
+  if (f) document.dispatchEvent(new CustomEvent("aw:fork-to-lab", {detail: f}));
+});
 // "Speak again" in a row's detail: queue its line again (POST /api/events/{id}/replay).
 $("rows").addEventListener("click", async (ev) => {
   const btn = ev.target.closest('[data-act="replay"]');
@@ -1872,7 +2490,7 @@ function drawNow() {
     sig = JSON.stringify(["p", np.event_id, np.text, np.profile]);
     html = speakerTagHTML(np.profile) + `<span class="line">${esc(np.text)}</span>`;
   } else {
-    for (const c of [...bar.classList]) if (/^spk-\d$/.test(c)) bar.classList.remove(c);
+    for (const c of [...bar.classList]) if (SPEAKER_CLASS.test(c)) bar.classList.remove(c);
     delete bar.dataset.spk;
     tally.className = "tally";
     const last = !idleText && lastSpoken;
@@ -1947,7 +2565,7 @@ const MuteAll = (() => {
 async function loadStatus() {
   try {
     const s = await (await fetch("/api/status")).json();
-    setSpeakerProfiles(s.config.profiles);
+    setSpeakerProfiles(s.config.profiles, s.config.profile_colors);
     const meta = `v${s.version} · pid ${s.pid} · synth ${s.synth} · player ${s.player} · profiles: ${s.config.profiles.join(", ") || "none"}`;
     $("meta").textContent = meta; $("meta").title = meta; $("live").title = meta;
     $("cfgwarn").textContent = s.config.error ? `config.toml error (using last good config): ${s.config.error}` :
@@ -2265,7 +2883,7 @@ const Sessions = (() => {
       h("div", null, h("b", null, "No sessions yet."), " Sessions appear here after their first Claude Code hook call. Voice is off by default; turn it on in any of three ways:"),
       h("ol", {class: "steps"},
         h("li", null, "Launch with a profile: ", h("code", null, "AFTERWORD_VOICE=nova claude")),
-        h("li", null, "Inside a running session: ", h("code", null, "/voice nova"), " (", h("code", null, "/voice off"), " to stop)"),
+        h("li", null, "Inside a running session: ", h("code", null, "/afterword:voice nova"), ", or ", h("code", null, "/afterword:voice pick"), " to let Claude choose (", h("code", null, "/afterword:voice off"), " to stop)"),
         h("li", null, "Here: pick a profile in a session’s voice chip once it shows up.")),
       h("div", {class: "hint", style: "margin-top:8px"}, profiles.length ? `Profiles in config: ${profiles.join(", ")}.` : "No profiles configured yet: make one in the Voice lab."));
   }
@@ -2404,8 +3022,12 @@ const Sessions = (() => {
     const edit = h("button", {class: "small sx-quiet", "data-k": "edit", title: "Edit description"}, "Edit");
     edit.addEventListener("click", () => startEdit(name));
     const n = vnotes.get(name);
+    const color = h("button", {type: "button", class: "vx-color", "data-k": "color", "aria-haspopup": "dialog",
+      "aria-expanded": String(!!cp.el && cp.name === name),
+      title: `Colour: ${speakerColorLabel(name)}. Click to change`, "aria-label": `${name}: colour ${speakerColorLabel(name)}. Change colour`}, speakerTag(name));
+    color.addEventListener("click", () => cpToggle(color, name));
     return h("li", {class: "vx-row", "data-name": name},
-      h("div", {class: "vx-id"}, speakerTag(name),
+      h("div", {class: "vx-id"}, color,
         h("div", {class: "vx-voice"}, h("span", {class: "mono", title: "voice id"}, p.voice || "default voice"), lang ? ` · ${lang}` : "")),
       h("div", {class: "vx-main"}, h("div", {class: "vx-descwrap"}, desc), h("div", {class: "vx-use"}, usageLine(p), statsNote(p) ? " · " : null, statsNote(p))),
       h("div", {class: "vx-act"}, hear, edit, n ? h("span", {class: "msg " + n.kind}, n.text) : null));
@@ -2432,7 +3054,7 @@ const Sessions = (() => {
     for (const p of voices) {
       let r = vrows.get(p.name);
       if (r && editing === p.name && r.li.isConnected) { want.push(r.li); continue; }   // never rebuild the field being typed in
-      const sig = JSON.stringify([p, speakerProfiles, pv && pv.name === p.name ? pv.phase : rendering ? "other" : "",
+      const sig = JSON.stringify([p, speakerProfiles, speakerColors, pv && pv.name === p.name ? pv.phase : rendering ? "other" : "",
         saving.has(p.name) ? saving.get(p.name) : null, vnotes.get(p.name) || null]);
       if (!r || r.sig !== sig) {
         const li = vrow(p);
@@ -2695,7 +3317,7 @@ const Lab = (() => {
     try { return await fn((l) => { lbl = l; tick(); }); }
     finally { clearInterval(iv); busy = false; syncBusy(); note(msgId, ""); }
   }
-  function syncBusy() { for (const id of ["t-preview", "ml-go", "ab-go"]) $(id).disabled = busy; }
+  function syncBusy() { for (const id of ["t-preview", "ml-go", "ab-go", "en-go"]) $(id).disabled = busy; }
 
   // ---------- languages ----------
   function revCodes() {
@@ -2803,6 +3425,15 @@ const Lab = (() => {
     const parts = [s.voice, s.lang, clampPace(s.pace).toFixed(2) + "×", s.seed != null ? `seed ${s.seed}` : "random seed"];
     if (s.style || s.mood) parts.push("style “" + [s.style, s.mood].filter(Boolean).join(", ") + "”");
     $("pr-summary").textContent = "Saves: " + parts.join(" · ") + (s.mood ? " (mood is folded into style; profiles have no mood field)" : "");
+    const t = forkTarget();
+    if (t) $("pr-summary").append(h("br"), `Into ${t}; the base voice stays. `,
+      h("button", {type: "button", class: "small", onclick: () => { forkLang = null; syncSpec(); }}, "Save as the base voice instead"));
+  }
+  // "[profiles.nova.langs.zh]" while Save would write the builder into that
+  // language's table (the name field still holds that profile), else null.
+  function forkTarget() {
+    const name = ($("pr-name") && $("pr-name").value || "").trim();
+    return forkLang && forkLang.profile === name ? `[profiles.${name}.langs.${forkLang.lang}]` : null;
   }
   function readBuilder() {
     const src = srcValue();
@@ -2836,7 +3467,7 @@ const Lab = (() => {
     if (s.seed != null && (!Number.isFinite(s.seed) || s.seed < 0)) return "Seed must be a non-negative integer.";
     return null;
   }
-  function writeBuilder(s) {
+  function writeBuilder(s, opt = {}) {
     s = s || {};
     const spec = String(s.voice || "");
     const i = spec.indexOf(":");
@@ -2862,6 +3493,11 @@ const Lab = (() => {
     if (s.temperature != null && s.temperature !== "") { $("b-tempon").checked = true; $("b-temp").value = s.temperature; }
     else $("b-tempon").checked = false;
     syncSource();
+    // Whatever the builder held, it is these settings now; only a render of
+    // the forked voice saved as a profile (saveAsProfile) keeps the language target.
+    if (!opt.keepFork) forkLang = null;
+    syncSpec();        // the Save summary names where Save goes
+    enPaint();         // no change event fires: the Engines language and "builder's description" follow
   }
   function noteSeed(seed) {
     // Unlocked: show the seed the daemon picked so the user can lock it.
@@ -2873,12 +3509,13 @@ const Lab = (() => {
   const textOf = (id) => $(id).value.trim();
   // The stage's one shared text box: Preview, A/B and the seed explorer all read it.
   const labText = () => textOf("t-text");
-  function previewBody(text, s) {
+  // opt.profile false: leave out the builder's profile (the global list still applies).
+  function previewBody(text, s, opt = {}) {
     const body = {text};
     for (const k of ["voice", "ref_text", "lang", "pace", "style", "mood", "seed", "temperature"]) if (s[k] != null) body[k] = s[k];
     if (body.seed === undefined) body.seed = null;
     if ($("t-nopron").checked) body.skip_pronounce = true;
-    else if (builderProfile()) body.pronounce_profile = builderProfile();
+    else if (opt.profile !== false && builderProfile()) body.pronounce_profile = builderProfile();
     return body;
   }
   // The profile the builder holds (Load sets the name field): its own
@@ -2922,6 +3559,8 @@ const Lab = (() => {
              kv("pace", s.pace != null ? clampPace(s.pace).toFixed(2) + "×" : null));
     const tim = [kv("synth", num(res.synth_ms) != null ? num(res.synth_ms) + " ms" : null), kv("rtf", num(res.rtf, 2))];
     if (Number(res.load_ms) > 0) tim.push(h("span", {class: "load", title: "a model had to be loaded first"}, "load ", h("b", null, num(res.load_ms) + " ms")));
+    // compact (the Engines list): voice, synth, rtf, audio length, seed.
+    const meta = opt.compact ? [set[0], tim, kv("audio", num(res.audio_s, 2) != null ? num(res.audio_s, 2) + " s" : null), set[2]] : [set, tim];
     // One quiet meta line (voice, lang, seed, pace, synth, rtf); the rest of the settings in its tooltip.
     const extra = [["style", s.style], ["mood", s.mood], ["temp", s.temperature], ["ref", s.ref_text],
       ["audio", num(res.audio_s, 2) != null ? num(res.audio_s, 2) + " s" : null], ["model", res.model || res.backend], ["id", res.id]]
@@ -2929,15 +3568,15 @@ const Lab = (() => {
     // A card from a profile (an A/B profile slot, or a builder loaded from one) wears that speaker's colour.
     const prof = opt.profile !== undefined ? opt.profile : res.pronounce_profile;
     const who = [opt.tag ? h("span", {class: "tag"}, opt.tag) : null, prof && !opt.noSpeaker ? speakerTag(prof, {title: "profile " + prof}) : null].filter(Boolean);
-    const card = h("div", {class: "card" + (prof ? " spk-" + speakerSlot(prof) : ""), ...(prof ? {"data-spk": speakerName(prof)} : {})},
+    const card = h("div", {class: "card" + (opt.compact ? " compact" : "") + (prof ? " spk-" + speakerSlot(prof) : ""), ...(prof ? {"data-spk": speakerName(prof)} : {})},
       who.length ? h("div", {class: "card-top"}, who) : null,
       opt.hideText ? null : h("div", {class: "txt spk-rule"}, res.text || ""),
-      res.spoken_text ? h("div", {class: "hint", title: res.pronounce_profile ? `after the pronunciation list (global + ${res.pronounce_profile})` : "after the pronunciation list (global)"},
+      res.spoken_text && !opt.compact ? h("div", {class: "hint", title: res.pronounce_profile ? `after the pronunciation list (global + ${res.pronounce_profile})` : "after the pronunciation list (global)"},
         "spoken as: ", h("span", {class: "spoken-as"}, res.spoken_text)) : null,
       audio,
-      h("div", {class: "kv meta", title: extra || null}, set, tim),
+      h("div", {class: "kv meta", title: extra || null}, meta),
       h("div", {class: "actions"},
-        h("button", {onclick: () => { writeBuilder(s); note(msg, "Loaded into the builder.", "ok"); }}, "Load settings"),
+        h("button", {onclick: () => { writeBuilder(s); note(msg, "Loaded into the builder.", "ok"); }}, opt.loadLabel || "Load settings"),
         h("button", {title: "Save this render as a reference clip (stable voice for cloning)", onclick: () => freeze(res, msg)}, "Freeze as clip"),
         h("button", {onclick: () => saveAsProfile(res)}, "Save as profile"),
         msg));
@@ -2986,8 +3625,12 @@ const Lab = (() => {
   }
 
   function saveAsProfile(res) {
-    writeBuilder({...(res.settings || {}), seed: res.seed ?? (res.settings || {}).seed});
-    note("pr-msg", "Builder loaded with this render's settings and seed; name it and save.", "info");
+    // A take of the voice opened from the Transcript stays aimed at that
+    // profile's language table: Save must not quietly replace the base voice.
+    writeBuilder({...(res.settings || {}), seed: res.seed ?? (res.settings || {}).seed}, {keepFork: true});
+    note("pr-msg", forkTarget()
+      ? `Builder loaded with this render's settings and seed. Save puts them in ${forkTarget()}; the base voice is unchanged.`
+      : "Builder loaded with this render's settings and seed; name it and save.", "info");
     $("pr-name").scrollIntoView({block: "center", behavior: "smooth"});
     $("pr-name").focus();
   }
@@ -3126,6 +3769,261 @@ const Lab = (() => {
     const slots = [$("ab-slot-a"), $("ab-slot-b")];
     slots.forEach(s => s.classList.remove("playing"));
     playChain([a._audio, b._audio]);
+  }
+
+  // ---------- engines (pure)
+  // The Engines mode: one row per engine the catalog offers, with a voice
+  // for the text's language and the row's state. Pure (catalog in, rows out)
+  // so tests/test_ui_engines.py can run it in node.
+  const EN_KINDS = ["builtin", "design", "clone", "kokoro", "chatterbox", "apple", "say"];
+  const EN_LABEL = {builtin: "Qwen built-in", design: "Qwen design", clone: "Qwen clone", kokoro: "Kokoro",
+    chatterbox: "Chatterbox", apple: "Apple", say: "macOS say"};
+  const EN_MODEL = {builtin: "custom_voice", design: "voice_design", clone: "base", kokoro: "kokoro", chatterbox: "chatterbox"};
+  const EN_DESIGNS = [
+    {value: "A warm, low female voice in her forties, unhurried, close-mic radio narrator.", label: "Warm narrator, female"},
+    {value: "A calm, clear male voice in his thirties, friendly and evenly paced.", label: "Calm presenter, male"},
+    {value: "A bright, quick young voice, cheerful and crisp.", label: "Bright and quick"},
+  ];
+  const EN_PREFER = {kokoro: {en: "af_heart", zh: "zf_xiaobei", ja: "jf_alpha"}, say: {en: "Samantha", zh: "Tingting", ja: "Kyoko"}};
+  const EN_EMPTY = {builtin: "No built-in speakers listed.", clone: "No reference clips yet: add one under Reference clips.",
+    chatterbox: "No reference clips yet: add one under Reference clips.", kokoro: "No Kokoro voices in the download.",
+    say: "No macOS say voices found.", design: "No description.", apple: "No Apple voices."};
+  const enBase = (code) => String(code || "").toLowerCase().split(/[-_]/)[0];
+  // The text's language from its script, or null (Latin script: can't tell).
+  function enGuessLang(text) {
+    const s = String(text || "");
+    if (/[぀-ヿ]/.test(s)) return "ja";
+    if (/[가-힯ᄀ-ᇿ]/.test(s)) return "ko";
+    if (/[㐀-䶿一-鿿]/.test(s)) return "zh";
+    if (/[Ѐ-ӿ]/.test(s)) return "ru";
+    if (/[؀-ۿ]/.test(s)) return "ar";
+    if (/[ऀ-ॿ]/.test(s)) return "hi";
+    if (/[֐-׿]/.test(s)) return "he";
+    if (/[Ͱ-Ͽ]/.test(s)) return "el";
+    return null;
+  }
+  // The language the default voices are picked for: the builder's when set,
+  // else guessed from the text, else English. builderLang may be a name.
+  // send is the lang each render asks for: the builder's as it is; the
+  // text's when its script settles it (and the daemon knows the code), so
+  // Apple and Chatterbox are not left on their English default; else
+  // "auto" (Latin text: the engines detect it).
+  function enLang(builderLang, text, langCodes) {
+    const b = String(builderLang || "auto").toLowerCase();
+    if (b && b !== "auto") {
+      const code = Object.keys(langCodes || {}).find((k) => String(langCodes[k]).toLowerCase() === b);
+      return {lang: enBase(code || b), from: "builder", send: String(builderLang)};
+    }
+    const g = enGuessLang(text);
+    if (!g) return {lang: "en", from: "default", send: "auto"};
+    return {lang: g, from: "text", send: Object.prototype.hasOwnProperty.call(langCodes || {}, g) ? g : "auto"};
+  }
+  function enDefault(kind, options, lang) {
+    if (!options.length || kind === "apple") return "";   // Apple: the best installed voice for the language
+    const prefer = (EN_PREFER[kind] || {})[lang];
+    if (prefer && options.some((o) => o.value === prefer)) return prefer;
+    const m = options.filter((o) => o.match);
+    return ((kind === "builtin" && m.find((o) => o.plain)) || m[0] || options[0]).value;
+  }
+  // Rows: {kind, label, model, state, why, pull, options, def}. state: ready |
+  // cold (on disk, not loaded) | failed (last load failed) | missing (not
+  // downloaded; pull is the command) | unavailable. Only the first three render.
+  function enRows(cat, lang, opt = {}) {
+    cat = cat || {};
+    const eng = cat.engine || {}, models = eng.models || {};
+    const pull = eng.pull_command || "afterword models pull";
+    const name = String((cat.lang_codes || {})[lang] || "").toLowerCase();
+    const clips = (cat.clips || []).map((c) => ({value: c.name, label: c.name}));
+    const opts = {
+      builtin: (cat.speakers || []).map((s) => ({value: s.name, label: `${s.name} (${s.native || "?"}${s.dialect ? ", " + s.dialect : ""})`,
+        match: !!name && String(s.native || "").toLowerCase() === name, plain: !s.dialect})),
+      design: [...(opt.builderDesc ? [{value: opt.builderDesc, label: "The builder’s description"}] : []), ...EN_DESIGNS],
+      clone: clips,
+      kokoro: (cat.kokoro_voices || []).map((v) => ({value: v.name, label: `${v.name} (${v.lang}, ${v.gender})`, match: enBase(v.lang_code) === lang})),
+      chatterbox: clips,
+      apple: [{value: "", label: "Best installed voice for the language"},
+        ...(cat.apple_voices || []).filter((v) => !v.novelty).map((v) => ({value: v.id || v.name,
+          label: `${v.name}${v.quality && v.quality !== "default" ? ", " + v.quality : ""} (${v.lang})`, match: enBase(v.lang) === lang}))],
+      say: (cat.say_voices || []).map((v) => ({value: v.name, label: `${v.name}${v.locale ? " (" + v.locale + ")" : ""}`, match: enBase(v.locale) === lang})),
+    };
+    return EN_KINDS.map((kind) => {
+      const options = opts[kind];
+      const model = EN_MODEL[kind] || null;
+      const mi = model ? models[model] : null;
+      let state = "ready", why = "", cmd = null;
+      if (model) {
+        if (eng.available === false) { state = "unavailable"; why = `Local models unavailable${eng.error ? ": " + eng.error : "."}`; }
+        else if (!mi) { state = "unavailable"; why = "This daemon does not list the model."; }
+        else if (!mi.downloaded) { state = "missing"; cmd = `${pull} ${model}`; why = "Not downloaded."; }
+        else if (mi.error && !mi.loaded) { state = "failed"; why = `Last load failed: ${mi.error}`; }
+        else if (!mi.loaded) state = "cold";
+      } else if (kind === "apple" && (!cat.apple || cat.apple.available === false)) {
+        state = "unavailable"; why = (cat.apple && cat.apple.error) || "Apple voices are not available.";
+      }
+      if ((state === "ready" || state === "cold" || state === "failed") && !options.length) { state = "unavailable"; why = EN_EMPTY[kind]; }
+      return {kind, label: EN_LABEL[kind], model, state, why, pull: cmd,
+        options: options.map(({value, label}) => ({value, label})), def: enDefault(kind, options, lang)};
+    });
+  }
+  const enUsable = (row) => row.state === "ready" || row.state === "cold" || row.state === "failed";
+  // ---------- end engines (pure)
+
+  // ---------- engines ----------
+  // Ticks and voice choices are remembered per browser: {inc: {kind: bool}, voice: {"kind|lang": value}}.
+  const EN_KEY = "aw.lab.engines";
+  const enMem = (() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(EN_KEY) || "null");
+      if (v && typeof v === "object") return {inc: v.inc && typeof v.inc === "object" ? v.inc : {}, voice: v.voice && typeof v.voice === "object" ? v.voice : {}};
+    } catch { /* storage blocked or bad JSON */ }
+    return {inc: {}, voice: {}};
+  })();
+  const enSave = () => { try { localStorage.setItem(EN_KEY, JSON.stringify(enMem)); } catch { /* storage blocked */ } };
+  let enCur = [];          // painted rows: {row, chk, sel}
+  let enCancel = false;
+  // Each row's state cell (badge, Warm, its message) by kind: {key, node}. A
+  // repaint keeps the cell while the row's state is unchanged, so a running
+  // Warm (its timer writes into the cell) and its result or error survive.
+  let enSt = new Map();
+  // The language for the rows and the renders: enPaint and doEngines share it.
+  const enLangNow = () => enLang($("b-lang").value, labText(), (cat && cat.lang_codes) || {});
+  function enStateNode(row) {
+    const msg = h("span", {class: "msg"});
+    const kids = [];
+    if (row.state === "ready") kids.push(h("span", {class: "badge ok"}, "ready"));
+    else if (row.state === "cold" || row.state === "failed") {
+      kids.push(h("span", {class: "badge " + (row.state === "cold" ? "idle" : "no")}, row.state === "cold" ? "on disk, not loaded" : "load failed"));
+      const btn = h("button", {type: "button", title: "Load it now so the render is fast"}, "Warm");
+      btn.addEventListener("click", () => warm(row.model, btn, msg));
+      kids.push(btn);
+    } else kids.push(h("span", {class: "badge no"}, row.state === "missing" ? "not downloaded" : "unavailable"));
+    kids.push(msg);
+    return h("span", {class: "en-st"}, kids);
+  }
+  function enPaint() {
+    if (!cat) return;
+    const L = enLangNow();
+    const rows = enRows(cat, L.lang, {builderDesc: $("b-desc").value.trim()});
+    if (sameJSON("engines", [L, rows])) return;
+    const prevSt = enSt;
+    enSt = new Map();
+    $("en-lang").textContent = `Default voices for ${langName(L.lang)} (${{builder: "the builder’s language", text: "guessed from the text", default: "the builder has no language set"}[L.from]}).`;
+    enCur = rows.map((row) => {
+      const on = enUsable(row);
+      const key = row.kind + "|" + L.lang;
+      const val = row.options.some((o) => o.value === enMem.voice[key]) ? enMem.voice[key] : row.def;
+      const chk = h("input", {type: "checkbox", id: "en-on-" + row.kind, checked: on && enMem.inc[row.kind] !== false, disabled: !on});
+      const sel = h("select", {id: "en-v-" + row.kind, "aria-label": row.label + " voice", disabled: !on || !row.options.length},
+        row.options.length ? row.options.map((o) => h("option", {value: o.value}, o.label)) : h("option", {value: ""}, "—"));
+      sel.value = val;
+      chk.addEventListener("change", () => { enMem.inc[row.kind] = chk.checked; enSave(); });
+      sel.addEventListener("change", () => { enMem.voice[key] = sel.value; enSave(); });
+      const why = row.why || row.pull ? h("div", {class: "en-why"}, row.why, row.pull ? [" Run ", h("code", null, row.pull), "."] : null) : null;
+      const stKey = `${row.state}|${row.model || ""}`;
+      const old = prevSt.get(row.kind);
+      const st = old && old.key === stKey ? old.node : enStateNode(row);
+      enSt.set(row.kind, {key: stKey, node: st});
+      const node = h("div", {class: "en-row" + (on ? "" : " off"), "data-kind": row.kind},
+        h("label", {class: "chk en-nm", for: chk.id}, chk, row.label), sel, st, why);
+      return {row, chk, sel, node};
+    });
+    $("en-rows").replaceChildren(...enCur.map((r) => r.node));
+  }
+  async function doEngines() {
+    if (busy) return;
+    const text = labText();
+    if (!text) return note("en-msg", "Type some text in the box above first.", "err");
+    const picked = enCur.filter((r) => !r.chk.disabled && r.chk.checked).map((r) => ({row: r.row, voice: `${r.row.kind}:${r.sel.value}`}));
+    if (!picked.length) return note("en-msg", "Tick at least one engine that is ready.", "err");
+    const lang = enLangNow().send;
+    const cards = [];
+    const playAll = h("button", {class: "small", disabled: true, onclick: () => playChain(cards.map((c) => c._audio))}, "▶ Play all in turn");
+    const body = h("div", {class: "group-body"});
+    pushResult(h("div", {class: "group"},
+      h("div", {class: "group-h"}, h("b", null, "Engines"), h("span", {class: "mono muted"}, `lang ${lang}`), playAll),
+      h("div", {class: "en-txt", title: text}, text), body));
+    enCancel = false;
+    $("en-cancel").hidden = false;
+    const errors = [];
+    await withBusy("en-msg", "", async (setLabel) => {
+      for (let i = 0; i < picked.length; i++) {
+        if (enCancel) { errors.push("stopped"); break; }
+        const {row, voice} = picked[i];
+        setLabel(`${row.label} (${i + 1}/${picked.length})…`);
+        // No pronounce_profile: the comparison is of engines, not of whatever profile the builder last loaded.
+        const r = await preview(previewBody(text, {voice, lang}, {profile: false}));
+        if (!r.ok) {
+          errors.push(`${row.label}: ${r.error}`);
+          body.append(h("div", {class: "card compact"}, h("div", {class: "card-top"}, h("span", {class: "tag"}, row.label)),
+            h("span", {class: "mono muted", title: voice}, voice), h("span", {class: "msg err"}, r.error)));
+          if (r.status === 0) break;   // the daemon is gone: the rest would fail the same way
+          continue;
+        }
+        const card = resultCard(r.data, {tag: row.label, hideText: true, compact: true, loadLabel: "Use in builder", profile: null, noSpeaker: true});
+        cards.push(card);
+        body.append(card);
+        playAll.disabled = false;
+      }
+    });
+    $("en-cancel").hidden = true;
+    note("en-msg", errors.length ? errors.join(" · ") : `${cards.length} engine${cards.length === 1 ? "" : "s"} rendered.`, errors.length ? "err" : "ok");
+    refreshSoon();
+  }
+
+  // ---------- fork from the Transcript ----------
+  // "Open in voice lab" on a Transcript line sends aw:fork-to-lab {text, profile, lang}.
+  // The lab may not have been shown yet: the request waits for init and the catalog.
+  let forkPending = null;
+  // {profile, lang}: the builder holds that profile's voice for one language
+  // (its [profiles.x.langs.<lang>] table), not its base voice. Save profile
+  // asks first; any other builder load (writeBuilder) clears it.
+  let forkLang = null;
+  document.addEventListener("aw:fork-to-lab", (ev) => {
+    const d = (ev && ev.detail) || {};
+    if (typeof d.text !== "string" || !d.text.trim()) return;
+    forkPending = {text: d.text.trim().slice(0, 1000), profile: typeof d.profile === "string" && d.profile ? d.profile : null,
+      lang: typeof d.lang === "string" && d.lang ? d.lang : null};
+    if (location.hash !== "#lab") location.hash = "lab";   // route() shows the lab, and show() applies it
+    else if (started) applyFork();
+  });
+  async function applyFork() {
+    if (!forkPending || !started) return;
+    await refresh();   // the profiles as they are now
+    const f = forkPending;
+    forkPending = null;
+    if (!f) return;
+    setMode("preview");
+    $("t-text").value = f.text;
+    syncText();
+    let msg, kind = "info";
+    if (!f.profile) msg = "This line used the default voice: the builder is unchanged.";
+    else if (!cat) { msg = `The catalog did not load, so “${f.profile}” was not loaded: the builder is unchanged.`; kind = "err"; }
+    else if (!Object.prototype.hasOwnProperty.call(profilesMap(), f.profile)) { msg = `Profile “${f.profile}” no longer exists: the builder is unchanged.`; kind = "err"; }
+    else {
+      loadProfile(f.profile);
+      msg = `Loaded “${f.profile}” and the line. Preview to hear it, then tweak.`;
+      const lang = f.lang ? normLang(f.lang) : "auto";
+      // The line was spoken by the profile's voice for its language: its
+      // [profiles.x.langs.<lang>] table over the profile, as the daemon does.
+      const fs = forkSettings(profilesMap()[f.profile], lang);
+      if (fs.override) {
+        writeBuilder(fs.settings);
+        forkLang = {profile: f.profile, lang: fs.override};
+        syncSpec();   // the Save summary shows the language table it now targets
+        msg = `Loaded “${f.profile}” with its ${langName(fs.override)} voice ([profiles.${f.profile}.langs.${fs.override}]), which spoke the line. ` +
+          `Preview to hear it, then tweak; Save profile keeps the tweak as its ${langName(fs.override)} voice, the base voice unchanged.`;
+      } else if (fs.lang && fs.lang !== $("b-lang").value) {
+        setSelect($("b-lang"), fs.lang);
+        syncSpec();
+        msg = `Loaded “${f.profile}” and the line, spoken in ${langName(fs.lang)}. Preview to hear it, then tweak.`;
+      }
+    }
+    note("t-msg", msg, kind);
+    enPaint();
+    const ta = $("t-text");
+    ta.focus();
+    try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch { /* ignore */ }
+    ta.scrollIntoView({block: "center"});
   }
 
   // ---------- seed explorer (docs/lab-api.md, "Seed explorer") ----------
@@ -3520,9 +4418,9 @@ const Lab = (() => {
     }
     return null;
   }
-  function langsBody() {
+  function langsBody(rows = langRows) {
     const out = {};
-    for (const r of langRows) {
+    for (const r of rows) {
       const e = {};
       for (const k of ["voice", "say_voice", "ref_text", "style"]) if (r[k] != null && String(r[k]).trim() !== "") e[k] = String(r[k]).trim();
       if (r.pace != null && r.pace !== "") e.pace = Number(r.pace);
@@ -3599,11 +4497,34 @@ const Lab = (() => {
   async function saveProfile() {
     const name = $("pr-name").value.trim();
     if (!NAME_RE.test(name)) return note("pr-msg", "Name: letters, digits, _ . - (start with a letter or digit, max 64).", "err");
-    const s = readBuilder();
+    let s = readBuilder();
     const bad = builderProblem(s);
     if (bad) return note("pr-msg", bad, "err");
     const lp = langProblem();
     if (lp) return note("pr-msg", "Voice per language: " + lp, "err");
+    const desc = $("pr-desc").value.trim();
+    if (desc.length > 300) return note("pr-msg", "Description: at most 300 characters.", "err");
+    // The builder holds this profile's voice for one language (Open in voice
+    // lab): the save goes to that language's row; the base voice stays. The
+    // rows are folded into a copy: nothing changes until the save succeeds
+    // (a failed check or a cancelled overwrite leaves the table as it was).
+    let folded = null, rows = langRows;
+    const base = forkLang && forkLang.profile === name ? profilesMap()[name] : null;
+    if (base) {
+      folded = forkLang.lang;
+      rows = langRows.map((r) => ({...r}));
+      let row = rows.find((r) => r.lang === folded);
+      if (!row) rows.push(row = {lang: folded});
+      const style = [s.style, s.mood].filter(Boolean).join(", ");
+      row.voice = s.voice;
+      if (s.ref_text) row.ref_text = s.ref_text; else delete row.ref_text;
+      if (style && style !== (base.style || "")) row.style = style; else delete row.style;
+      if (s.pace !== clampPace(base.pace ?? 1)) row.pace = s.pace; else delete row.pace;
+      if (s.seed != null && s.seed !== base.seed) row.seed = s.seed; else delete row.seed;
+      // Language tables have no temperature: the base keeps its own.
+      s = {...s, voice: base.voice || s.voice, ref_text: base.ref_text || null, lang: base.lang || "auto", pace: clampPace(base.pace ?? 1),
+        style: base.style || null, mood: null, seed: base.seed ?? null, temperature: base.temperature ?? null};
+    }
     const max = parseInt($("pr-max").value, 10);
     const body = {
       name, voice: s.voice, ref_text: s.ref_text || "", lang: s.lang, pace: s.pace,
@@ -3612,12 +4533,10 @@ const Lab = (() => {
       say_voice: $("pr-sayv").value || "", seed: s.seed, temperature: s.temperature,
       overwrite: false,
     };
-    const sendLangs = langRowsEdited || langRowsFor !== null;
-    if (sendLangs) body.langs = langsBody();
+    const sendLangs = folded !== null || langRowsEdited || langRowsFor !== null;
+    if (sendLangs) body.langs = langsBody(rows);
     // description: sent when written; an emptied field clears the one loaded
     // from this profile; otherwise left out, so the server keeps what is there.
-    const desc = $("pr-desc").value.trim();
-    if (desc.length > 300) return note("pr-msg", "Description: at most 300 characters.", "err");
     if (desc) body.description = desc;
     else if (descFor === name) body.description = "";
     $("pr-save").disabled = true;
@@ -3632,9 +4551,11 @@ const Lab = (() => {
         r = await api("POST", "/api/lab/profiles", {...body, overwrite: true});
       }
       if (!r.ok) return note("pr-msg", r.error, "err");
+      if (folded !== null) { langRows = rows; paintLangs(); }
       if (sendLangs) { langRowsFor = name; langRowsEdited = false; }
       descFor = desc ? name : null;
-      note("pr-msg", `Saved “${name}”. The daemon reloads config.toml automatically.`, "ok");
+      note("pr-msg", folded ? `Saved “${name}”: the builder’s voice is its ${langName(folded)} voice ([profiles.${name}.langs.${folded}]); the base voice is unchanged. The daemon reloads config.toml automatically.`
+        : `Saved “${name}”. The daemon reloads config.toml automatically.`, "ok");
       await refresh();
     } finally { $("pr-save").disabled = false; }
   }
@@ -3965,12 +4886,13 @@ const Lab = (() => {
     renderClips();
     renderProfiles();
     syncSource();
+    enPaint();
   }
 
-  function syncText() { $("t-count").textContent = `${$("t-text").value.length} / 1000`; }
+  function syncText() { $("t-count").textContent = `${$("t-text").value.length} / 1000`; enPaint(); }
 
   // ---------- stage modes: one text box, the controls under it swap ----------
-  const MODES = ["preview", "langs", "ab", "explore"];
+  const MODES = ["preview", "langs", "ab", "explore", "engines"];
   const MODE_KEY = "aw.lab.mode";
   const modeRadios = () => [...document.querySelectorAll('input[name="lab-mode"]')];
   function labMode() { return (modeRadios().find(r => r.checked) || {}).value || "preview"; }
@@ -3986,6 +4908,7 @@ const Lab = (() => {
     for (const r of modeRadios()) r.checked = r.value === mode;
     for (const el of document.querySelectorAll("#view-lab [data-mode]")) el.hidden = el.dataset.mode !== mode;
     if (mode !== "explore") exSilence();
+    if (mode === "engines") enPaint();
     if (remember) try { localStorage.setItem(MODE_KEY, mode); } catch { /* storage blocked */ }
   }
 
@@ -4001,13 +4924,16 @@ const Lab = (() => {
     $("b-seedrand").addEventListener("click", () => { $("b-seed").value = Math.floor(Math.random() * 2147483647); $("b-seedlock").checked = true; syncSpec(); });
     $("t-text").addEventListener("input", syncText);
     // ⌘/Ctrl + Enter runs the chosen mode's main action.
-    const RUN = {preview: doPreview, langs: doEveryLanguage, ab: doAB, explore: exStart};
+    const RUN = {preview: doPreview, langs: doEveryLanguage, ab: doAB, explore: exStart, engines: doEngines};
     $("t-text").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); if (!busy) RUN[labMode()](); } });
     $("t-preview").addEventListener("click", doPreview);
     $("ml-go").addEventListener("click", doEveryLanguage);
     $("ml-cancel").addEventListener("click", () => { mlCancel = true; note("ml-msg", "stopping after the current render…", "run"); });
     $("ab-go").addEventListener("click", doAB);
     $("ab-play").addEventListener("click", abPlay);
+    $("en-go").addEventListener("click", doEngines);
+    $("en-cancel").addEventListener("click", () => { enCancel = true; note("en-msg", "stopping after the current render…", "run"); });
+    for (const id of ["b-lang", "b-desc"]) $(id).addEventListener("change", enPaint);
     $("r-clear").addEventListener("click", () => {
       for (const a of $("r-list").querySelectorAll("aw-audio")) a.pause();
       $("r-list").replaceChildren($("r-empty")); $("r-empty").hidden = false;
@@ -4015,6 +4941,7 @@ const Lab = (() => {
     $("pr-save").addEventListener("click", saveProfile);
     $("pr-addlang").addEventListener("click", () => { $("pr-langfold").open = true; addLang(); });
     $("pr-name").addEventListener("keydown", (e) => { if (e.key === "Enter") saveProfile(); });
+    $("pr-name").addEventListener("input", syncSpec);   // a new name means a new profile: the summary says so
     $("cl-upload").addEventListener("click", doUploadFile);
     $("cl-file").addEventListener("change", () => {
       const f = $("cl-file").files[0];
@@ -4050,7 +4977,7 @@ const Lab = (() => {
   }
 
   return {
-    show() { visible = true; if (!started) { started = true; init(); } refresh(); exLoad(); exLoadStars(); },
+    show() { visible = true; if (!started) { started = true; init(); } refresh(); exLoad(); exLoadStars(); if (forkPending) applyFork(); },
     engineStrip(box, eng, afterWarm) { renderEngine(eng, null, box, afterWarm); },
     hide() { visible = false; exSilence(); },
   };

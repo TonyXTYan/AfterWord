@@ -6,6 +6,7 @@ Speech is **off by default**, **set per session**, and **triggered only by a tag
 in Claude's reply. See [DESIGN.md](DESIGN.md) (v1) and
 [docs/design-v2.md](docs/design-v2.md) (pronunciations, a voice per language,
 streaming and early speaking, spoken alerts, the seed explorer).
+Where it goes next, phase by phase, is in [roadmaps/](roadmaps/README.md).
 
 ![The AfterWord GUI: the line being spoken in the subtitle bar, and the transcript of what each voice said, one colour per voice](docs/gui.png)
 
@@ -129,7 +130,19 @@ seed = 1234                  # optional: the same line always sounds the same
 max_chars = 400
 say_voice = "Samantha"       # macOS voice used if Qwen3-TTS is unavailable
 description = "calm narrator for long explanations"  # optional: for /afterword:voice pick
+color = "teal"               # optional: the GUI's colour for this voice
 ```
+
+`color` is one of the GUI's 64 speaker colours or a hex `"#RRGGBB"`. The
+64 are 16 families (`yellow`, `cyan`, `green`, `magenta`, `white`,
+`orange`, `blue`, `red`, `violet`, `lime`, `pink`, `brown`, `teal`, `grey`,
+`olive`, `sky`), each also as `<family>-deep`, `<family>-light` and
+`<family>-pale` (`"teal-deep"`, `"sky-pale"`). Voices without one get the
+palette colours no other voice has chosen, in order: every family first,
+then the deep, light and pale shades. You can also pick it in the GUI: on
+Sessions, click a voice's name under Voices for a chart of all 64 (the
+families across, the shades down), with the colours other voices use
+marked.
 
 | `voice` | Model | Notes |
 |---|---|---|
@@ -372,6 +385,19 @@ daemon restarts. "Stability check" renders a star's voice and seed on three
 other sentences (one in another language) and shows how far the pitch drifts;
 "Freeze & save" turns the star into a clip and saves a profile that clones it
 with the take's language, pace and seed.
+
+**Engines.** To hear the same line in every engine, pick "Engines": one row
+per engine (Qwen built-in, design and clone, Kokoro, Chatterbox, Apple, macOS
+say) with a voice picked for the text's language and its state (ready, on
+disk but not loaded with a Warm button, or not downloaded with the pull
+command). "Render all" renders the text once per ticked row, one after
+another; "Play all in turn" plays the results in order, and "Use in builder"
+loads a result's engine and voice into the builder. The ticks and voices are
+remembered in the browser.
+
+**From the Transcript.** Expand a line on the Transcript and press "Open in
+voice lab": the lab opens with the line in its text box and the line's
+profile loaded into the builder, ready to preview and tweak.
 
 Clone clips must be your own voice or a voice used with the speaker's consent;
 the lab asks you to confirm this for every upload or recording.

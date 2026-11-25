@@ -1330,6 +1330,7 @@ class Daemon:
                 "warnings": self.store.warnings,
                 "loaded_at": self.store.loaded_at,
                 "profiles": sorted(cfg.profiles),
+                "profile_colors": {n: cfg.profiles[n].color or None for n in sorted(cfg.profiles)},
                 "fallback": cfg.daemon.fallback,
                 "early_say": cfg.daemon.early_say,
                 "alerts": cfg.alerts.enabled,
