@@ -677,6 +677,23 @@
   .ex-star .res .txt { font: 13px/1.5 var(--serif); color: var(--slate); flex-basis: 100%; overflow-wrap: anywhere; }
   .drift-ok { color: var(--spoken); } .drift-warn { color: var(--queued); } .drift-bad { color: var(--error); }
   kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
+  /* keyboard shortcuts: help overlay; fix-a-word popover */
+  .tx .ev { scroll-margin-top: calc(var(--sticky-top) + 8px); scroll-margin-bottom: 12px; }
+  .kb-scrim { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 16px;
+              background: color-mix(in srgb, var(--ink) 35%, transparent); }
+  .kb { width: min(420px, 100%); max-height: 100%; overflow: auto; background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px;
+        padding: 14px 16px; box-shadow: 0 8px 28px rgba(0, 0, 0, .25); }
+  .kb h2 { margin: 0 0 8px; font-size: var(--h2-fs); }
+  .kb dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 14px; margin: 0 0 12px; font-size: var(--fs-sm); align-items: baseline; }
+  .kb dt { text-align: right; white-space: nowrap; } .kb dd { margin: 0; color: var(--slate); }
+  .fw { position: fixed; z-index: 15; width: min(360px, calc(100vw - 16px)); background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px;
+        padding: 8px 10px; box-shadow: 0 6px 20px rgba(0, 0, 0, .22); display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-sm); }
+  .fw label { display: flex; flex-direction: column; gap: 3px; color: var(--slate); }
+  .fw label b { font: 600 13px var(--serif); color: var(--ink); overflow-wrap: anywhere; }
+  .fw input { width: 100%; font-family: var(--serif); font-size: 14px; }
+  .fw .fw-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+  .fw select { flex: 1 1 140px; min-width: 0; }
+  .fw .msg { flex: 1 1 100%; }
 </style>
 </head>
 <body>
@@ -4541,6 +4558,250 @@ const Config = (() => {
     refresh() { if (visible) load(); },
   };
 })();
+
+// ---------- keys
+// One global keydown listener. keyAction() maps a key to an action name (pure;
+// ctx = {page, explorer, help, fix}); keyRun() does it by clicking the existing
+// controls. The seed explorer on the Voice lab page keeps its own keys (exKey).
+const KEYS_HELP = [
+  ["?", "Show this help"], ["/", "Search the transcript"], ["1 – 4", "Transcript, Sessions, Voice lab, Config"],
+  [".", "Stop all"], ["n", "Skip to the next line"], ["m", "Mute or unmute all"],
+  ["j / k", "Next or previous line (Transcript)"], ["Enter", "Expand or collapse the selected line"],
+  ["p", "Play or pause the selected line’s clip"], ["c", "Copy the selected line’s text"], ["Esc", "Close help or the pronunciation popover"],
+];
+const KEY_PAGES = ["log", "sessions", "lab", "config"];
+const KEY_HASH = ["transcript", "sessions", "lab", "config"];
+const KEY_EXPLORER = new Set([" ", "Spacebar", "j", "k", "s", "x"]);   // what exKey handles
+const KEY_BUTTONISH = /^(BUTTON|A|SUMMARY|AW-AUDIO)$/;
+function keyTyping(t) { return !!t && (!!t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)); }
+function keyAction(e, ctx) {
+  const k = e.key;
+  if (typeof k !== "string") return null;
+  if (k === "Escape") return ctx.fix ? "fix-close" : ctx.help ? "help-close" : null;
+  if (e.metaKey || e.ctrlKey || e.altKey || keyTyping(e.target)) return null;
+  if (ctx.help) return k === "?" ? "help-close" : null;
+  if (ctx.explorer && KEY_EXPLORER.has(k)) return null;
+  if (k === "?") return "help";
+  if (k === "/") return "search";
+  if (k.length === 1 && k >= "1" && k <= "4") return "page:" + (Number(k) - 1);
+  if (k === ".") return "stop";
+  if (k === "n") return "skip";
+  if (k === "m") return "mute";
+  if (ctx.page !== "log") return null;
+  if (k === "j") return "sel:1";
+  if (k === "k") return "sel:-1";
+  if (k === "Enter") return e.target && KEY_BUTTONISH.test(e.target.tagName) ? null : "toggle";
+  if (k === "p") return "play";
+  if (k === "c") return "copy";
+  return null;
+}
+const keyState = {sel: null, help: null, from: null, style: null};
+const keyRows = () => [...$("rows").querySelectorAll(".ev")];
+const keyRow = () => keyRows().find((r) => Number(r.dataset.id) === keyState.sel) || null;
+// The row element is replaced whenever it re-renders, so the outline is a rule keyed on the id.
+function keyPaintSel() {
+  keyState.style = keyState.style || document.head.appendChild(h("style"));
+  keyState.style.textContent = keyState.sel == null ? ""
+    : `.tx .ev[data-id="${Number(keyState.sel)}"] { background: var(--soft); outline: 2px solid var(--cue); outline-offset: -2px; }`;
+}
+function keyMove(dir) {
+  const rows = keyRows();
+  if (!rows.length) return;
+  const i = rows.findIndex((r) => Number(r.dataset.id) === keyState.sel);
+  const row = rows[i < 0 ? 0 : Math.min(rows.length - 1, Math.max(0, i + dir))];
+  keyState.sel = Number(row.dataset.id);
+  keyPaintSel();
+  row.scrollIntoView({block: "nearest"});
+}
+function keySearch() {
+  const go = () => { const q = $("q"); q.focus(); q.select(); };
+  if (document.body.classList.contains("tab-log")) return go();
+  window.addEventListener("hashchange", go, {once: true});   // route() has shown the page by then
+  location.hash = "#transcript";
+}
+function keyHelp(open) {
+  if (!open) {
+    if (!keyState.help) return;
+    keyState.help.remove(); keyState.help = null;
+    if (keyState.from && keyState.from.isConnected && keyState.from.focus) keyState.from.focus();
+    return;
+  }
+  if (keyState.help) return;
+  keyState.from = document.activeElement;
+  const close = h("button", {type: "button", onclick: () => keyHelp(false)}, "Close");
+  const scrim = h("div", {class: "kb-scrim", onclick: (ev) => { if (ev.target === scrim) keyHelp(false); },
+    onkeydown: (ev) => { if (ev.key === "Tab") { ev.preventDefault(); close.focus(); } }},
+    h("section", {class: "kb", role: "dialog", "aria-modal": "true", "aria-labelledby": "kb-h"},
+      h("h2", {id: "kb-h"}, "Keyboard shortcuts"),
+      h("dl", null, KEYS_HELP.map(([k, d]) => [h("dt", null, h("kbd", null, k)), h("dd", null, d)])),
+      h("div", {class: "hint"}, "Select a word in a spoken line to fix how it is pronounced."),
+      close));
+  document.body.append(scrim);
+  keyState.help = scrim;
+  close.focus();
+}
+function keyRun(act) {
+  if (act.startsWith("page:")) {
+    const i = Number(act.slice(5));
+    if (!document.body.classList.contains("tab-" + KEY_PAGES[i])) location.hash = "#" + KEY_HASH[i];
+    return;
+  }
+  if (act === "help") return keyHelp(true);
+  if (act === "help-close") return keyHelp(false);
+  if (act === "fix-close") return fwClose();
+  if (act === "search") return keySearch();
+  if (act === "stop") return $("stop").click();
+  if (act === "skip") return $("skip").click();
+  if (act === "mute") return $("muteall").click();
+  if (act.startsWith("sel:")) return keyMove(Number(act.slice(4)));
+  const row = keyRow();
+  if (!row) return;
+  const id = Number(row.dataset.id);
+  if (act === "toggle") return toggleDetail(id);
+  if (act === "play") {
+    const btn = row.querySelector('[data-act="play"]');
+    if (btn) btn.click(); else flashNote("tx-msg", "No clip kept for this line", "info", 2500);
+    return;
+  }
+  if (act === "copy") {
+    const line = row.querySelector(".line");
+    if (!line) return;
+    Promise.resolve().then(() => navigator.clipboard.writeText(line.textContent))
+      .then(() => flashNote("tx-msg", "Copied", "ok", 1500), () => flashNote("tx-msg", "Copy failed", "err", 3000));
+  }
+}
+function keyCtx() {
+  const page = KEY_PAGES.find((p) => document.body.classList.contains("tab-" + p)) || "log";
+  return {page, help: !!keyState.help, fix: !!(typeof fw !== "undefined" && fw.el),
+    explorer: page === "lab" && !$("ex-panel").hidden && !!$("ex-takes").querySelector(".ex-take:not(.pending)")};
+}
+document.addEventListener("keydown", (e) => {
+  if (e.isComposing) return;
+  const act = keyAction(e, keyCtx());
+  if (!act) return;
+  e.preventDefault();
+  keyRun(act);
+});
+// ---------- end keys
+
+// ---------- fix word
+// Select a word in a spoken line on the Transcript: a popover offers "Pronounce
+// “word” as …" and saves it through /api/pronounce (GET the table, add the
+// entry, POST the whole table back). One delegated listener on the list.
+const FW_MAX = 60, FW_VALUE_MAX = 300, FW_TEXT_MAX = 1000;
+const fw = {el: null, rect: null, player: null, down: false, timer: 0};
+function fwWord(text) {
+  const w = String(text == null ? "" : text).trim();
+  return w && w.length <= FW_MAX && !/[\r\n]/.test(w) ? w : null;
+}
+// The selection's text and row when it lies inside one spoken line of the list.
+function fwTarget(sel, rows) {
+  if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+  const word = fwWord(sel.toString());
+  if (!word) return null;
+  const range = sel.getRangeAt(0);
+  let n = range.commonAncestorContainer;
+  if (n && n.nodeType !== 1) n = n.parentElement;
+  const line = n && n.closest ? n.closest(".ev .line") : null;
+  if (!line || !rows.contains(line)) return null;
+  const ev = line.closest(".ev");
+  if (!ev || ev.classList.contains("err")) return null;
+  return {word, range, line, ev, id: Number(ev.dataset.id)};
+}
+// The POST body for adding word -> value to one table without dropping the others in it.
+function fwBody(data, scope, profile, word, value) {
+  const table = scope === "global" ? (data && data.global) : ((data && data.profiles) || {})[profile];
+  return {profile: scope === "global" ? null : profile, entries: {...(table || {}), [word]: value}};
+}
+function fwClose() {
+  if (!fw.el) return;
+  fw.el.remove(); fw.el = null;
+  if (fw.player) fw.player.pause();
+}
+function fwPlace() {
+  const el = fw.el, t = fw.t;
+  if (!el) return;
+  let r = null;
+  try { if (t.range.getClientRects().length) r = t.range.getBoundingClientRect(); } catch { /* range gone */ }
+  r = fw.rect = r || fw.rect;
+  if (!r) return;
+  const vw = document.documentElement.clientWidth, vh = window.innerHeight;
+  const left = Math.min(Math.max(8, r.left), Math.max(8, vw - el.offsetWidth - 8));
+  let top = r.bottom + 6;
+  if (top + el.offsetHeight > vh - 8) top = Math.max(8, r.top - el.offsetHeight - 6);
+  el.style.left = left + "px"; el.style.top = top + "px";
+}
+function fwOpen(t) {
+  fwClose();
+  const profile = (rowEvent(t.id) || {}).profile || null;
+  const lineText = (t.line.textContent || "").trim().slice(0, FW_TEXT_MAX);
+  const input = h("input", {type: "text", id: "fw-in", maxlength: FW_VALUE_MAX, autocomplete: "off", spellcheck: "false", value: t.word});
+  const scope = h("select", {"aria-label": "Scope"},
+    profile ? h("option", {value: "profile"}, `This voice (${speakerName(profile)})`) : null,
+    h("option", {value: "global"}, "Every voice"));
+  const msg = h("span", {class: "msg", role: "status"});
+  const save = h("button", {type: "button", class: "primary"}, "Save");
+  const hear = h("button", {type: "button"}, "Hear it");
+  hear.hidden = true;
+  let heardProfile = profile, busy = false;
+  const live = () => fw.el === el;
+  const el = h("div", {class: "fw", role: "dialog", "aria-label": "Fix a pronunciation"},
+    h("label", {for: "fw-in"}, h("span", null, "Pronounce “", h("b", null, t.word), "” as"), input),
+    h("div", {class: "fw-row"}, scope, save, hear, msg));
+  save.onclick = async () => {
+    if (busy) return;
+    const value = input.value.trim();
+    if (!value) return note(msg, "Type how it should sound", "err");
+    if (value.length > FW_VALUE_MAX) return note(msg, `At most ${FW_VALUE_MAX} characters`, "err");
+    busy = true; save.disabled = true; hear.hidden = true; note(msg, "Saving…", "run");
+    const g = await api("GET", "/api/pronounce");
+    let r = null;
+    if (g.ok && g.data) r = await api("POST", "/api/pronounce", fwBody(g.data, scope.value, profile, t.word, value));
+    busy = false; save.disabled = false;
+    if (!live()) return;
+    if (!r || !r.ok) return note(msg, `Save failed: ${(g.ok ? r && r.error : g.error) || "empty response"}`, "err");
+    heardProfile = profile || (r.data && r.data.default_profile) || (g.data && g.data.default_profile) || null;
+    note(msg, "Saved", "ok");
+    hear.hidden = false;
+  };
+  hear.onclick = async () => {
+    if (!heardProfile) return note(msg, "No voice to speak with", "err");
+    hear.disabled = true; note(msg, "Rendering…", "run");
+    const res = await api("POST", "/api/lab/preview", {text: lineText, profile: heardProfile});
+    hear.disabled = false;
+    if (!live()) return;
+    if (!res.ok || !res.data || typeof res.data.url !== "string" || !res.data.url.startsWith("/api/lab/")) return note(msg, res.error || "Render failed", "err");
+    note(msg, "Saved", "ok");
+    fw.player = fw.player || new AwAudio();
+    const rate = Math.min(2, Math.max(0.5, Number(res.data.pace) || 1));
+    fw.player.src = res.data.url;
+    fw.player.defaultPlaybackRate = rate; fw.player.playbackRate = rate;
+    fw.player.play().catch(() => note(msg, "The browser blocked playback; click again", "err"));
+  };
+  input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); save.click(); } });
+  fw.el = el; fw.t = t; fw.rect = null;
+  document.body.append(el);
+  fwPlace();
+  input.focus(); input.select();
+}
+function fwMaybe() {
+  if (fw.el) return;
+  const t = fwTarget(window.getSelection ? window.getSelection() : null, $("rows"));
+  if (t) fwOpen(t);
+}
+$("rows").addEventListener("pointerup", () => setTimeout(fwMaybe, 0));
+$("rows").addEventListener("keyup", (ev) => { if (ev.shiftKey) fwMaybe(); });
+// Touch selection and Shift+arrows end without a pointerup: settle, then look.
+document.addEventListener("pointerdown", (ev) => { fw.down = true; if (fw.el && !fw.el.contains(ev.target)) fwClose(); });
+for (const t of ["pointerup", "pointercancel"]) document.addEventListener(t, () => { fw.down = false; });
+document.addEventListener("selectionchange", () => {
+  clearTimeout(fw.timer);
+  if (fw.el) return;
+  fw.timer = setTimeout(() => { if (!fw.down) fwMaybe(); }, 400);
+});
+window.addEventListener("scroll", fwPlace, true);
+window.addEventListener("resize", fwPlace);
+// ---------- end fix word
 
 // Four pages; the keys are the element-id suffixes (view-<key>, tab-<key>,
 // body.tab-<key>). Old hashes still land: #log, #history and #queue show the
