@@ -49,11 +49,46 @@ func isNovelty(_ v: AVSpeechSynthesisVoice) -> Bool {
     return false
 }
 
-/// "zh" matches zh-CN, zh-TW, ...; "zh-TW" matches only zh-TW.
+struct Locale3 {
+    var lang = ""
+    var script: String? = nil
+    var region: String? = nil
+}
+
+func parseTag(_ tag: String) -> Locale3 {
+    var out = Locale3()
+    let parts = tag.replacingOccurrences(of: "_", with: "-").split(separator: "-").map(String.init)
+    if let first = parts.first { out.lang = first.lowercased() }
+    for part in parts.dropFirst() {
+        if part.count == 4, part.allSatisfy({ $0.isLetter }) { out.script = part.lowercased() }
+        else if (part.count == 2 && part.allSatisfy({ $0.isLetter })) || (part.count == 3 && part.allSatisfy({ $0.isNumber })) {
+            out.region = part.uppercased()
+        }
+    }
+    return out
+}
+
+/// Regions a script implies when a voice's locale has no script subtag.
+let scriptRegions: [String: Set<String>] = [
+    "hant": ["TW", "HK", "MO"],
+    "hans": ["CN", "SG"],
+]
+
+/// "zh" matches every zh voice; "zh-TW" only zh-TW; "zh-Hant-TW" matches a
+/// voice reporting zh-TW (voices rarely carry a script); "zh-Hant" matches
+/// zh-TW, zh-HK and zh-MO.
 func langMatches(_ voiceLang: String, _ want: String) -> Bool {
-    let a = voiceLang.lowercased().replacingOccurrences(of: "_", with: "-")
-    let b = want.lowercased().replacingOccurrences(of: "_", with: "-")
-    return a == b || a.hasPrefix(b + "-")
+    let v = parseTag(voiceLang), w = parseTag(want)
+    if v.lang != w.lang { return false }
+    if let ws = w.script {
+        if let vs = v.script {
+            if vs != ws { return false }
+        } else if w.region == nil, let regions = scriptRegions[ws] {
+            guard let vr = v.region, regions.contains(vr) else { return false }
+        }
+    }
+    if let wr = w.region, v.region != wr { return false }
+    return true
 }
 
 func pickVoice(_ spec: String, _ lang: String) -> AVSpeechSynthesisVoice? {
@@ -80,6 +115,7 @@ func pickVoice(_ spec: String, _ lang: String) -> AVSpeechSynthesisVoice? {
     if candidates.isEmpty { return nil }
     // The system's default region for the language first (zh -> zh-CN), then quality.
     let region = AVSpeechSynthesisVoice(language: lang)?.language
+        ?? AVSpeechSynthesisVoice(language: parseTag(lang).lang)?.language
     return candidates.max { a, b in
         let ra = (a.language == region ? 10 : 0) + rank(a)
         let rb = (b.language == region ? 10 : 0) + rank(b)

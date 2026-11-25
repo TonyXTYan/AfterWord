@@ -29,6 +29,7 @@ import logging
 import math
 import queue
 import random
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -78,9 +79,13 @@ TOKENS_PER_SECOND = 12.5
 SECONDS_BASE = 8.0
 SECONDS_PER_CHAR = 0.25
 
-# Chatterbox emits 25 speech tokens per second of audio (same cap rule).
+# Chatterbox emits 25 speech tokens per second of audio, at most 1000 per
+# call (about 40 s), and does not say when it stopped at the cap. Longer
+# text is rendered in pieces of at most CHATTERBOX_PIECE_S estimated seconds
+# (split at sentences, then clauses), so no piece comes near the cap.
 CHATTERBOX_TOKENS_PER_SECOND = 25.0
 CHATTERBOX_MAX_TOKENS = 1000
+CHATTERBOX_PIECE_S = 20.0
 
 # Files the mlx-audio loader needs, relative to the snapshot root.
 REQUIRED_FILES = (
@@ -98,6 +103,51 @@ REQUIRED_FILES_FOR = {
 }
 # Sentence ends: Kokoro renders (and so streams) one sentence at a time.
 SENTENCE_SPLIT = r"(?<=[.!?。！？])\s+|(?<=[。！？])"
+
+
+_CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\uf900-\ufaff]")
+_SENTENCE_END_RE = re.compile(r"(?<=[.!?。！？])\s*")
+_CLAUSE_END_RE = re.compile(r"(?<=[,;:，、；：])\s*")
+
+
+def speech_seconds(text: str) -> float:
+    """A rough spoken length: about 0.25 s per CJK character, 0.07 s per
+    other character (generous for both)."""
+    cjk = len(_CJK_RE.findall(text))
+    return 0.25 * cjk + 0.07 * (len(text) - cjk)
+
+
+def split_by_duration(text: str, max_s: float) -> list[str]:
+    """`text` in pieces of at most `max_s` estimated seconds: whole
+    sentences where they fit, else clauses, else words (or characters)."""
+    text = text.strip()
+    if not text or speech_seconds(text) <= max_s:
+        return [text] if text else []
+
+    def units(part: str, level: int) -> list[str]:
+        if speech_seconds(part) <= max_s:
+            return [part]
+        if level == 0:
+            pieces = [x for x in _SENTENCE_END_RE.split(part) if x.strip()]
+        elif level == 1:
+            pieces = [x for x in _CLAUSE_END_RE.split(part) if x.strip()]
+        elif level == 2:
+            pieces = part.split(" ") if " " in part.strip() else list(part)
+        else:
+            per = max(1, int(max_s / 0.25))
+            return [part[i:i + per] for i in range(0, len(part), per)]
+        if len(pieces) <= 1:
+            return units(part, level + 1)
+        return [u for x in pieces for u in units(x, level + 1)]
+
+    out: list[str] = []
+    for unit in units(text, 0):
+        sep = "" if (not out or _CJK_RE.match(unit[:1]) or out[-1].endswith(" ")) else " "
+        if out and speech_seconds(out[-1] + sep + unit) <= max_s:
+            out[-1] = out[-1] + sep + unit
+        else:
+            out.append(unit)
+    return [o.strip() for o in out if o.strip()]
 
 
 def required_files(kind_or_repo: str | None) -> tuple[str, ...]:
@@ -660,19 +710,28 @@ class QwenEngine:
         return conds
 
     def _chatterbox_generate(self, model, req: RenderRequest, stream: bool):
+        """One generator over the text's pieces (split_by_duration), each a
+        Chatterbox call with a token budget well inside its cap."""
         if req.ref_audio is None:
             raise voices.VoiceError(f"{req.voice} needs a reference clip")
-        kw: dict[str, Any] = dict(
-            text=req.text, lang_code=voices.chatterbox_lang(req.lang),
-            conds=self._chatterbox_conds(model, req.ref_audio),
-            max_new_tokens=min(CHATTERBOX_MAX_TOKENS, max_tokens_for(req.text, CHATTERBOX_TOKENS_PER_SECOND)),
-            verbose=False,
-        )
-        if req.temperature is not None:
-            kw["temperature"] = req.temperature
-        if stream:
-            kw.update(stream=True, streaming_interval=STREAMING_INTERVAL)
-        return model.generate(**kw)
+        lang = voices.chatterbox_lang(req.lang)
+        conds = self._chatterbox_conds(model, req.ref_audio)
+        pieces = split_by_duration(req.text, CHATTERBOX_PIECE_S) or [req.text]
+
+        def gen():
+            for piece in pieces:
+                budget = CHATTERBOX_TOKENS_PER_SECOND * (SECONDS_BASE + 2.0 * speech_seconds(piece))
+                kw: dict[str, Any] = dict(
+                    text=piece, lang_code=lang, conds=conds,
+                    max_new_tokens=int(min(CHATTERBOX_MAX_TOKENS, budget)), verbose=False,
+                )
+                if req.temperature is not None:
+                    kw["temperature"] = req.temperature
+                if stream:
+                    kw.update(stream=True, streaming_interval=STREAMING_INTERVAL)
+                yield from model.generate(**kw)
+
+        return gen()
 
     def _qwen_generate(self, model, req: RenderRequest, stream: bool):
         max_tokens = max_tokens_for(req.text)

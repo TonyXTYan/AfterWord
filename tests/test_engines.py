@@ -363,7 +363,14 @@ def test_real_helper_source_compiles_and_lists(tmp_path, monkeypatch):
     monkeypatch.setattr(apple, "_voice_cache", None)
     cmd = apple.helper_command()
     assert Path(cmd[0]).parent == tmp_path / "bin"
-    assert isinstance(apple.list_voices(refresh=True), list)
+    installed = {v["lang"] for v in apple.list_voices(refresh=True)}
+    # A script subtag matches voices that report only language-region.
+    import subprocess
+
+    for tag, need in [("zh-Hant-TW", "zh-TW"), ("zh-Hans-CN", "zh-CN"), ("zh-Hant", "zh-TW")]:
+        if need in installed:
+            proc = subprocess.run(cmd + ["--lang", tag], input="测试".encode(), capture_output=True, timeout=60)
+            assert proc.returncode == 0 and proc.stdout[:6] == apple.MAGIC, (tag, proc.stderr)
 
 
 # --------------------------------------------------------------------------- #
@@ -577,3 +584,37 @@ def test_language_names_reach_the_models(tmp_path):
                              mood=None, ref_text=None, seed=None, temperature=None)
     assert req.lang == "ar" and voices.chatterbox_lang(req.lang) == "ar"
     assert voices.kokoro_lang("af_heart", "hindi") == "h"
+
+
+def test_split_by_duration_bounds_every_piece():
+    long_en = "This is a sentence that goes on for a while. " * 40
+    pieces = qwen.split_by_duration(long_en, 20.0)
+    assert len(pieces) > 1 and all(qwen.speech_seconds(x) <= 20.0 for x in pieces)
+    assert "".join(pieces).replace(" ", "") == long_en.replace(" ", "")
+    zh = "重构已经完成了，所有测试现在都通过了。" * 12
+    pieces = qwen.split_by_duration(zh, 20.0)
+    assert "".join(pieces) == zh and all(qwen.speech_seconds(x) <= 20.0 for x in pieces)
+    assert all(len(x) <= 80 for x in qwen.split_by_duration("字" * 500, 20.0))  # no punctuation at all
+    assert qwen.split_by_duration("Short.", 20.0) == ["Short."] and qwen.split_by_duration("  ", 20.0) == []
+
+
+def test_long_chatterbox_text_renders_in_bounded_pieces(tmp_path):
+    clips = voices.ClipStore(tmp_path)
+    clips.add("me", voices.silence_wav(2.0, 24000))
+    eng = MultiEngine()
+    try:
+        text = "The build is green and the docs are updated. " * 60
+        chunks = []
+        res = eng.render(_req("chatterbox:me", clips, text=text), limit=False,
+                         on_chunk=lambda a, r: chunks.append(a.size), stream=True)
+        calls = [kw for kind, kw in eng.models_made["chatterbox"].calls]
+        assert len(calls) > 1 and len(chunks) == len(calls)
+        # Each piece's expected tokens are at most half its budget (and the budget the model's cap).
+        for kw in calls:
+            expected = qwen.CHATTERBOX_TOKENS_PER_SECOND * qwen.speech_seconds(kw["text"])
+            assert kw["max_new_tokens"] <= qwen.CHATTERBOX_MAX_TOKENS and expected * 2 <= kw["max_new_tokens"]
+        assert " ".join(kw["text"] for kw in calls).split() == text.split()
+        assert res.audio.size == sum(chunks)
+        assert len(eng.models_made["chatterbox"].prepared) == 1  # one conditioning for every piece
+    finally:
+        eng.shutdown()
