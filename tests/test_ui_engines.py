@@ -24,6 +24,7 @@ out.guess = ["Hello there", "重构已经完成了", "リファクタリング�
 out.lang = [
   E.enLang("auto", "重构", cat.lang_codes), E.enLang("auto", "Hello", cat.lang_codes),
   E.enLang("ja", "Hello", cat.lang_codes), E.enLang("chinese", "Hello", cat.lang_codes), E.enLang("en-gb", "", cat.lang_codes),
+  E.enLang("auto", "Привет", cat.lang_codes), E.enLang("", "重构", {}),
 ];
 out.rows = {};
 for (const [name, c, lang, opt] of calls) out.rows[name] = E.enRows(c === "cat" ? cat : c, lang, opt || {}).map((r) => ({...r, usable: E.enUsable(r)}));
@@ -88,9 +89,14 @@ def test_guess_language_from_script(out):
 
 
 def test_language_builder_first_then_text_then_english(out):
+    # send: what each render asks for. The builder's as set; the text's when its
+    # script settles it (so Apple and Chatterbox do not fall back to English);
+    # "auto" for Latin text, or a guess the daemon has no code for.
     assert out["lang"] == [
-        {"lang": "zh", "from": "text"}, {"lang": "en", "from": "default"},
-        {"lang": "ja", "from": "builder"}, {"lang": "zh", "from": "builder"}, {"lang": "en", "from": "builder"},
+        {"lang": "zh", "from": "text", "send": "zh"}, {"lang": "en", "from": "default", "send": "auto"},
+        {"lang": "ja", "from": "builder", "send": "ja"}, {"lang": "zh", "from": "builder", "send": "chinese"},
+        {"lang": "en", "from": "builder", "send": "en-gb"},
+        {"lang": "ru", "from": "text", "send": "auto"}, {"lang": "zh", "from": "text", "send": "auto"},
     ]
 
 
@@ -150,6 +156,20 @@ def test_wiring():
     lab = text[text.index("const Lab = (() => {"):text.index("const Pronounce = (() => {")]
     run = lab[lab.index("async function doEngines()"):]
     run = run[:run.index("\n  }\n")]
-    assert "playChain(" in run and "previewBody(text, {voice, lang})" in run and 'loadLabel: "Use in builder"' in run
+    assert "playChain(" in run and 'loadLabel: "Use in builder"' in run
     assert "enCancel" in run and "setLabel(" in run
+    # an engine comparison: no builder profile's pronunciations, tag or colour on the cards
+    assert "previewBody(text, {voice, lang}, {profile: false})" in run
+    assert "profile: null, noSpeaker: true" in run
+    # the language the rows were picked for is the one sent (one shared helper)
+    assert "const lang = enLangNow().send;" in run
+    paint = lab[lab.index("function enPaint()"):]
+    paint = paint[:paint.index("\n  }\n")]
+    assert "const L = enLangNow();" in paint
+    # a repaint keeps a row's state cell (a running Warm) while its state is unchanged
+    assert "old && old.key === stKey ? old.node : enStateNode(row)" in paint
+    # programmatic builder loads (Load, Use in builder, Open in voice lab) refresh the rows
+    wb = lab[lab.index("function writeBuilder(s)"):]
+    wb = wb[:wb.index("\n  }\n")]
+    assert "enPaint();" in wb
     assert 'const EN_KEY = "aw.lab.engines";' in lab and "localStorage.setItem(EN_KEY" in lab

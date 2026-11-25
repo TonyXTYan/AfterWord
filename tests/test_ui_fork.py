@@ -88,6 +88,59 @@ def test_bad_shapes_do_not_throw():
     assert f == {"text": "x", "profile": None, "lang": None}
 
 
+SETTINGS_HARNESS = r"""
+const src = require("fs").readFileSync(0, "utf8");
+const forkSettings = new Function(src + "\nreturn forkSettings;")();
+const cases = JSON.parse(process.argv[1]);
+console.log(JSON.stringify(cases.map(([p, code]) => forkSettings(p, code))));
+"""
+
+NOVA = {"voice": "builtin:Ryan", "ref_text": "", "lang": "en", "pace": 1.1, "style": "calm", "seed": 7, "temperature": 0.8,
+        "max_chars": 400, "say_voice": "Samantha", "description": "d", "color": None,
+        "langs": {"zh": {"voice": "builtin:Vivian", "pace": 0.9},
+                  "ja": {"style": "bright"},
+                  "ko": {"voice": "clone:me", "ref_text": "annyeong", "seed": 3}}}
+CLONE = {"voice": "clone:base", "ref_text": "the base clip's words", "lang": "en", "pace": 1, "style": "", "seed": None,
+         "temperature": None, "langs": {"zh": {"voice": "clone:zh"}, "ja": {"pace": 1.2}}}
+
+
+def _settings(cases: list) -> list:
+    proc = subprocess.run([NODE, "-e", SETTINGS_HARNESS, json.dumps(cases)], input=_block(),
+                          capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+@needs_node
+def test_language_override_is_loaded_over_the_profile():
+    zh, ja, ko, region = _settings([[NOVA, "zh"], [NOVA, "ja"], [NOVA, "ko"], [NOVA, "zh_CN"]])
+    assert zh["override"] == "zh" and zh["lang"] == "zh"
+    assert zh["settings"] == {"voice": "builtin:Vivian", "ref_text": "", "lang": "zh", "pace": 0.9, "style": "calm",
+                              "mood": None, "seed": 7, "temperature": 0.8}
+    # a table without its own voice keeps the profile's voice, takes the rest
+    assert ja["override"] == "ja" and ja["settings"]["voice"] == "builtin:Ryan" and ja["settings"]["style"] == "bright"
+    assert ko["settings"]["voice"] == "clone:me" and ko["settings"]["ref_text"] == "annyeong" and ko["settings"]["seed"] == 3
+    # a regional code finds the language's table; the builder gets the code as given
+    assert region["override"] == "zh" and region["settings"]["voice"] == "builtin:Vivian" and region["lang"] == "zh-cn"
+
+
+@needs_node
+def test_a_language_voice_does_not_inherit_the_profiles_transcript():
+    zh, ja = _settings([[CLONE, "zh"], [CLONE, "ja"]])
+    assert zh["settings"]["voice"] == "clone:zh" and zh["settings"]["ref_text"] == ""
+    assert ja["settings"]["voice"] == "clone:base" and ja["settings"]["ref_text"] == "the base clip's words"
+    assert ja["settings"]["pace"] == 1.2
+
+
+@needs_node
+def test_no_table_for_the_language_keeps_the_profile():
+    de, auto, none, bad = _settings([[NOVA, "de"], [NOVA, "auto"], [NOVA, None], [None, "zh"]])
+    assert de["override"] is None and de["lang"] == "de"
+    assert de["settings"]["voice"] == "builtin:Ryan" and de["settings"]["lang"] == "de" and de["settings"]["pace"] == 1.1
+    assert auto == none and auto["override"] is None and auto["lang"] is None and auto["settings"]["lang"] == "en"
+    assert bad["override"] is None and bad["settings"].get("voice") is None   # no profile: nothing to load (no throw)
+
+
 def test_wiring():
     text = _text()
     # the detail offers the button when there is something to fork
@@ -103,3 +156,10 @@ def test_wiring():
     apply = lab[lab.index("async function applyFork()"):]
     apply = apply[:apply.index("\n  }\n")]
     assert "loadProfile(f.profile)" in apply and 'setMode("preview")' in apply and "focus()" in apply
+    # the line's language table ([profiles.x.langs.<lang>]) is loaded over the profile
+    assert "forkSettings(profilesMap()[f.profile], lang)" in apply and "writeBuilder(fs.settings)" in apply
+    assert "forkLang = {profile: f.profile, lang: fs.override}" in apply
+    # Save profile then writes the builder to that language's row, not the base voice
+    save = lab[lab.index("async function saveProfile()"):]
+    save = save[:save.index("\n  }\n")]
+    assert "forkLang.profile === name" in save and "row.voice = s.voice" in save

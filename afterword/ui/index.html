@@ -1440,7 +1440,12 @@ function speakerTagHTML(profile) {
 // across hues (left, right) and shades (up, down); Home/End go to the ends
 // of a row, with Ctrl or Cmd to the ends of the chart. A pick saves through
 // PATCH /api/lab/profiles/{name} {"color"} and repaints every page at once.
-const cp = {el: null, tip: null, name: null, busy: false};
+const cp = {el: null, tip: null, name: null, busy: false, retip: null};
+// Did the last input come from the keyboard? Focus then shows a swatch's card;
+// focus from a mouse open or click does not (the pointer's hover does).
+let cpKeys = false;
+document.addEventListener("keydown", () => { cpKeys = true; }, true);
+document.addEventListener("pointerdown", () => { cpKeys = false; }, true);
 function cpAnchor() {
   if (!cp.name) return null;
   for (const li of document.querySelectorAll(".vx-row")) if (li.dataset.name === cp.name) return li.querySelector(".vx-color");
@@ -1449,13 +1454,17 @@ function cpAnchor() {
 function cpTipHide() { if (cp.tip) { cp.tip.remove(); cp.tip = null; } }
 function cpClose(focus) {
   cpTipHide();
+  cp.retip = null;
   if (!cp.el) return;
   cp.el.remove(); cp.el = null;
   const a = cpAnchor();
   if (a) { a.setAttribute("aria-expanded", "false"); if (focus) a.focus(); }
   cp.name = null;
 }
+// On scroll (the page, or the chart sideways) and resize: the hover card sits
+// at the old coordinates, so it goes; a keyboard-focused swatch gets it back.
 function cpPlace() {
+  cpTipHide();
   const el = cp.el, a = cpAnchor();
   if (!el || !a) return;
   const r = a.getBoundingClientRect();
@@ -1464,6 +1473,7 @@ function cpPlace() {
   let top = r.bottom + 6;
   if (top + el.offsetHeight > vh - 8) top = Math.max(8, r.top - el.offsetHeight - 6);
   el.style.left = left + "px"; el.style.top = top + "px";
+  if (cp.retip) cp.retip();
 }
 // The voices painted with each slot: slot -> [names].
 function cpUsers() {
@@ -1483,6 +1493,16 @@ function cpMarks(n) {
 }
 function cpCap(list, max = 12) {
   return list.length > max ? {shown: list.slice(0, max), rest: list.length - max} : {shown: list.slice(), rest: 0};
+}
+// A failed PATCH: the daemon's own words ("no profile named 'x'", a bad
+// colour) when it sent some; only a bare 404/405 (a route this daemon does
+// not have) reads as "can't set colours yet".
+function cpSaveError(r) {
+  r = r || {};
+  const err = typeof r.error === "string" ? r.error.trim() : "";
+  const bare = !err || /^(HTTP \d+|not found|method not allowed)$/i.test(err);
+  if (bare && (r.status === 404 || r.status === 405)) return "Couldn't save: this daemon can't set colours yet.";
+  return `Couldn't save: ${err || "no response"}`;
 }
 // ---------- end cp marks
 function cpToggle(anchor, name) {
@@ -1554,7 +1574,7 @@ function cpRender(focusKey, status, kind = "ok") {
         "aria-checked": String(on), tabindex: on || (!anyOn && i === 0) ? "0" : "-1", "data-k": "p" + i,
         "aria-label": label, style: `--cp-c:${sw};--cp-k:${cpCheckInk(sw)};--cp-r:${cpRingInk(sw)}`}, on ? "✓" : "", dots);
       b.addEventListener("click", () => cpSave(cname, "p" + i));
-      b.addEventListener("focus", () => { describe(i); showTip(b, i); });
+      b.addEventListener("focus", () => { describe(i); if (cpKeys) showTip(b, i); });
       b.addEventListener("pointerenter", () => { describe(i); showTip(b, i); });
       chart.append(b);
     }
@@ -1564,9 +1584,10 @@ function cpRender(focusKey, status, kind = "ok") {
   const tipIdle = () => {
     const a = document.activeElement;
     if (!chart.isConnected) return;   // a stale render: the popover was redrawn
-    if (cp.el && a && cp.el.contains(a) && a.classList && a.classList.contains("cp-sw")) showTip(a, Number(a.dataset.k.slice(1)));
+    if (cpKeys && cp.el && a && cp.el.contains(a) && a.classList && a.classList.contains("cp-sw")) showTip(a, Number(a.dataset.k.slice(1)));
     else cpTipHide();
   };
+  cp.retip = tipIdle;
   chart.addEventListener("pointerleave", () => { idle(); tipIdle(); });
   chart.addEventListener("focusout", () => setTimeout(() => { idle(); tipIdle(); }));
   const isCustom = cur.startsWith("#") && !anyOn;
@@ -1662,7 +1683,7 @@ async function cpSave(value, focusKey) {
   cp.busy = false;
   if (!cp.el || cp.name !== name) return;
   if (r.ok) cpRender(focusKey, value ? "Saved" : "Saved: automatic");
-  else cpRender(focusKey, r.status === 404 ? "Couldn't save: this daemon can't set colours yet." : `Couldn't save: ${r.error || "no response"}`, "err");
+  else cpRender(focusKey, cpSaveError(r), "err");
 }
 document.addEventListener("pointerdown", (ev) => {
   if (!cp.el || cp.el.contains(ev.target)) return;
@@ -2111,6 +2132,35 @@ function forkDetail(d) {
     text: d.text.trim().slice(0, 1000),
     profile: typeof d.profile === "string" && d.profile ? d.profile : null,
     lang: tagged || (langs.length === 1 ? langs[0] : null),
+  };
+}
+// The builder settings that spoke a line: profile p (a GET /api/lab/catalog
+// profile) in language code, with that language's [profiles.x.langs.<code>]
+// fields over the profile's own, as the daemon's voice_for() does. A
+// language voice with its own `voice` does not inherit the profile's
+// ref_text (the transcript of another clip). Returns {settings, lang, override}:
+// lang is the code the builder should use (null: leave the profile's),
+// override the langs key that applied (null: none).
+function forkSettings(p, code) {
+  p = p && typeof p === "object" ? p : {};
+  const base = {voice: p.voice, ref_text: p.ref_text, lang: p.lang, pace: p.pace, style: p.style, mood: null,
+    seed: p.seed, temperature: p.temperature};
+  const c = typeof code === "string" ? code.trim().toLowerCase().replace(/_/g, "-") : "";
+  if (!c || c === "auto") return {settings: base, lang: null, override: null};
+  const langs = p.langs && typeof p.langs === "object" && !Array.isArray(p.langs) ? p.langs : {};
+  const keys = Object.keys(langs);
+  const key = keys.find((k) => k.toLowerCase() === c) || keys.find((k) => k.toLowerCase() === c.split("-")[0]) || null;
+  const lv = key && langs[key] && typeof langs[key] === "object" ? langs[key] : null;
+  if (!lv) return {settings: {...base, lang: c}, lang: c, override: null};
+  const has = (k) => lv[k] != null && lv[k] !== "";
+  return {
+    settings: {...base, lang: c,
+      voice: has("voice") ? lv.voice : base.voice,
+      ref_text: lv.ref_text != null ? lv.ref_text : (has("voice") ? "" : base.ref_text),
+      style: has("style") ? lv.style : base.style,
+      pace: has("pace") ? lv.pace : base.pace,
+      seed: has("seed") ? lv.seed : base.seed},
+    lang: c, override: key,
   };
 }
 // ---------- end fork to lab
@@ -3434,6 +3484,8 @@ const Lab = (() => {
     if (s.temperature != null && s.temperature !== "") { $("b-tempon").checked = true; $("b-temp").value = s.temperature; }
     else $("b-tempon").checked = false;
     syncSource();
+    forkLang = null;   // whatever the builder held, it is these settings now
+    enPaint();         // no change event fires: the Engines language and "builder's description" follow
   }
   function noteSeed(seed) {
     // Unlocked: show the seed the daemon picked so the user can lock it.
@@ -3445,12 +3497,13 @@ const Lab = (() => {
   const textOf = (id) => $(id).value.trim();
   // The stage's one shared text box: Preview, A/B and the seed explorer all read it.
   const labText = () => textOf("t-text");
-  function previewBody(text, s) {
+  // opt.profile false: leave out the builder's profile (the global list still applies).
+  function previewBody(text, s, opt = {}) {
     const body = {text};
     for (const k of ["voice", "ref_text", "lang", "pace", "style", "mood", "seed", "temperature"]) if (s[k] != null) body[k] = s[k];
     if (body.seed === undefined) body.seed = null;
     if ($("t-nopron").checked) body.skip_pronounce = true;
-    else if (builderProfile()) body.pronounce_profile = builderProfile();
+    else if (opt.profile !== false && builderProfile()) body.pronounce_profile = builderProfile();
     return body;
   }
   // The profile the builder holds (Load sets the name field): its own
@@ -3735,14 +3788,19 @@ const Lab = (() => {
   }
   // The language the default voices are picked for: the builder's when set,
   // else guessed from the text, else English. builderLang may be a name.
+  // send is the lang each render asks for: the builder's as it is; the
+  // text's when its script settles it (and the daemon knows the code), so
+  // Apple and Chatterbox are not left on their English default; else
+  // "auto" (Latin text: the engines detect it).
   function enLang(builderLang, text, langCodes) {
     const b = String(builderLang || "auto").toLowerCase();
     if (b && b !== "auto") {
       const code = Object.keys(langCodes || {}).find((k) => String(langCodes[k]).toLowerCase() === b);
-      return {lang: enBase(code || b), from: "builder"};
+      return {lang: enBase(code || b), from: "builder", send: String(builderLang)};
     }
     const g = enGuessLang(text);
-    return g ? {lang: g, from: "text"} : {lang: "en", from: "default"};
+    if (!g) return {lang: "en", from: "default", send: "auto"};
+    return {lang: g, from: "text", send: Object.prototype.hasOwnProperty.call(langCodes || {}, g) ? g : "auto"};
   }
   function enDefault(kind, options, lang) {
     if (!options.length || kind === "apple") return "";   // Apple: the best installed voice for the language
@@ -3807,6 +3865,12 @@ const Lab = (() => {
   const enSave = () => { try { localStorage.setItem(EN_KEY, JSON.stringify(enMem)); } catch { /* storage blocked */ } };
   let enCur = [];          // painted rows: {row, chk, sel}
   let enCancel = false;
+  // Each row's state cell (badge, Warm, its message) by kind: {key, node}. A
+  // repaint keeps the cell while the row's state is unchanged, so a running
+  // Warm (its timer writes into the cell) and its result or error survive.
+  let enSt = new Map();
+  // The language for the rows and the renders: enPaint and doEngines share it.
+  const enLangNow = () => enLang($("b-lang").value, labText(), (cat && cat.lang_codes) || {});
   function enStateNode(row) {
     const msg = h("span", {class: "msg"});
     const kids = [];
@@ -3822,9 +3886,11 @@ const Lab = (() => {
   }
   function enPaint() {
     if (!cat) return;
-    const L = enLang($("b-lang").value, labText(), cat.lang_codes || {});
+    const L = enLangNow();
     const rows = enRows(cat, L.lang, {builderDesc: $("b-desc").value.trim()});
     if (sameJSON("engines", [L, rows])) return;
+    const prevSt = enSt;
+    enSt = new Map();
     $("en-lang").textContent = `Default voices for ${langName(L.lang)} (${{builder: "the builder’s language", text: "guessed from the text", default: "the builder has no language set"}[L.from]}).`;
     enCur = rows.map((row) => {
       const on = enUsable(row);
@@ -3837,8 +3903,12 @@ const Lab = (() => {
       chk.addEventListener("change", () => { enMem.inc[row.kind] = chk.checked; enSave(); });
       sel.addEventListener("change", () => { enMem.voice[key] = sel.value; enSave(); });
       const why = row.why || row.pull ? h("div", {class: "en-why"}, row.why, row.pull ? [" Run ", h("code", null, row.pull), "."] : null) : null;
+      const stKey = `${row.state}|${row.model || ""}`;
+      const old = prevSt.get(row.kind);
+      const st = old && old.key === stKey ? old.node : enStateNode(row);
+      enSt.set(row.kind, {key: stKey, node: st});
       const node = h("div", {class: "en-row" + (on ? "" : " off"), "data-kind": row.kind},
-        h("label", {class: "chk en-nm", for: chk.id}, chk, row.label), sel, enStateNode(row), why);
+        h("label", {class: "chk en-nm", for: chk.id}, chk, row.label), sel, st, why);
       return {row, chk, sel, node};
     });
     $("en-rows").replaceChildren(...enCur.map((r) => r.node));
@@ -3849,7 +3919,7 @@ const Lab = (() => {
     if (!text) return note("en-msg", "Type some text in the box above first.", "err");
     const picked = enCur.filter((r) => !r.chk.disabled && r.chk.checked).map((r) => ({row: r.row, voice: `${r.row.kind}:${r.sel.value}`}));
     if (!picked.length) return note("en-msg", "Tick at least one engine that is ready.", "err");
-    const lang = $("b-lang").value || "auto";
+    const lang = enLangNow().send;
     const cards = [];
     const playAll = h("button", {class: "small", disabled: true, onclick: () => playChain(cards.map((c) => c._audio))}, "▶ Play all in turn");
     const body = h("div", {class: "group-body"});
@@ -3864,7 +3934,8 @@ const Lab = (() => {
         if (enCancel) { errors.push("stopped"); break; }
         const {row, voice} = picked[i];
         setLabel(`${row.label} (${i + 1}/${picked.length})…`);
-        const r = await preview(previewBody(text, {voice, lang}));
+        // No pronounce_profile: the comparison is of engines, not of whatever profile the builder last loaded.
+        const r = await preview(previewBody(text, {voice, lang}, {profile: false}));
         if (!r.ok) {
           errors.push(`${row.label}: ${r.error}`);
           body.append(h("div", {class: "card compact"}, h("div", {class: "card-top"}, h("span", {class: "tag"}, row.label)),
@@ -3872,7 +3943,7 @@ const Lab = (() => {
           if (r.status === 0) break;   // the daemon is gone: the rest would fail the same way
           continue;
         }
-        const card = resultCard(r.data, {tag: row.label, hideText: true, compact: true, loadLabel: "Use in builder"});
+        const card = resultCard(r.data, {tag: row.label, hideText: true, compact: true, loadLabel: "Use in builder", profile: null, noSpeaker: true});
         cards.push(card);
         body.append(card);
         playAll.disabled = false;
@@ -3887,6 +3958,10 @@ const Lab = (() => {
   // "Open in voice lab" on a Transcript line sends aw:fork-to-lab {text, profile, lang}.
   // The lab may not have been shown yet: the request waits for init and the catalog.
   let forkPending = null;
+  // {profile, lang}: the builder holds that profile's voice for one language
+  // (its [profiles.x.langs.<lang>] table), not its base voice. Save profile
+  // asks first; any other builder load (writeBuilder) clears it.
+  let forkLang = null;
   document.addEventListener("aw:fork-to-lab", (ev) => {
     const d = (ev && ev.detail) || {};
     if (typeof d.text !== "string" || !d.text.trim()) return;
@@ -3911,11 +3986,19 @@ const Lab = (() => {
     else {
       loadProfile(f.profile);
       msg = `Loaded “${f.profile}” and the line. Preview to hear it, then tweak.`;
-      const lang = normLang(f.lang);
-      if (f.lang && lang !== "auto" && lang !== $("b-lang").value) {
-        setSelect($("b-lang"), lang);
+      const lang = f.lang ? normLang(f.lang) : "auto";
+      // The line was spoken by the profile's voice for its language: its
+      // [profiles.x.langs.<lang>] table over the profile, as the daemon does.
+      const fs = forkSettings(profilesMap()[f.profile], lang);
+      if (fs.override) {
+        writeBuilder(fs.settings);
+        forkLang = {profile: f.profile, lang: fs.override};
+        msg = `Loaded “${f.profile}” with its ${langName(fs.override)} voice ([profiles.${f.profile}.langs.${fs.override}]), which spoke the line. ` +
+          `Preview to hear it, then tweak; Save profile keeps the tweak as its ${langName(fs.override)} voice, the base voice unchanged.`;
+      } else if (fs.lang && fs.lang !== $("b-lang").value) {
+        setSelect($("b-lang"), fs.lang);
         syncSpec();
-        msg = `Loaded “${f.profile}” and the line, spoken in ${langName(lang)}. Preview to hear it, then tweak.`;
+        msg = `Loaded “${f.profile}” and the line, spoken in ${langName(fs.lang)}. Preview to hear it, then tweak.`;
       }
     }
     note("t-msg", msg, kind);
@@ -4397,11 +4480,30 @@ const Lab = (() => {
   async function saveProfile() {
     const name = $("pr-name").value.trim();
     if (!NAME_RE.test(name)) return note("pr-msg", "Name: letters, digits, _ . - (start with a letter or digit, max 64).", "err");
-    const s = readBuilder();
+    let s = readBuilder();
     const bad = builderProblem(s);
     if (bad) return note("pr-msg", bad, "err");
     const lp = langProblem();
     if (lp) return note("pr-msg", "Voice per language: " + lp, "err");
+    // The builder holds this profile's voice for one language (Open in voice
+    // lab): the save goes to that language's row; the base voice stays.
+    let folded = null;
+    const base = forkLang && forkLang.profile === name ? profilesMap()[name] : null;
+    if (base) {
+      folded = forkLang.lang;
+      let row = langRows.find((r) => r.lang === folded);
+      if (!row) langRows.push(row = {lang: folded});
+      const style = [s.style, s.mood].filter(Boolean).join(", ");
+      row.voice = s.voice;
+      if (s.ref_text) row.ref_text = s.ref_text; else delete row.ref_text;
+      if (style && style !== (base.style || "")) row.style = style; else delete row.style;
+      if (s.pace !== clampPace(base.pace ?? 1)) row.pace = s.pace; else delete row.pace;
+      if (s.seed != null && s.seed !== base.seed) row.seed = s.seed; else delete row.seed;
+      langsEdited();
+      paintLangs();
+      s = {...s, voice: base.voice || s.voice, ref_text: base.ref_text || null, lang: base.lang || "auto", pace: clampPace(base.pace ?? 1),
+        style: base.style || null, mood: null, seed: base.seed ?? null};
+    }
     const max = parseInt($("pr-max").value, 10);
     const body = {
       name, voice: s.voice, ref_text: s.ref_text || "", lang: s.lang, pace: s.pace,
@@ -4432,7 +4534,8 @@ const Lab = (() => {
       if (!r.ok) return note("pr-msg", r.error, "err");
       if (sendLangs) { langRowsFor = name; langRowsEdited = false; }
       descFor = desc ? name : null;
-      note("pr-msg", `Saved “${name}”. The daemon reloads config.toml automatically.`, "ok");
+      note("pr-msg", folded ? `Saved “${name}”: the builder’s voice is its ${langName(folded)} voice ([profiles.${name}.langs.${folded}]); the base voice is unchanged. The daemon reloads config.toml automatically.`
+        : `Saved “${name}”. The daemon reloads config.toml automatically.`, "ok");
       await refresh();
     } finally { $("pr-save").disabled = false; }
   }

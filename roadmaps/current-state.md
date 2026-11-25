@@ -2,7 +2,7 @@
 
 As of 2026-11-25. AfterWord is a voice-out daemon for Claude Code and Codex: replies tagged with `<say>` are spoken in a per-session voice, one at a time, with a local GUI that shows what was said and why anything wasn't. It is not a context bus yet.
 
-Test suite: 963 passed, 2 skipped, 132 s (`uv run pytest -q`), measured at commit 2fd720a. The working tree now collects 967 tests with the uncommitted `tests/test_ui_speakers.py` additions. CI runs on every push (`.github/workflows/tests.yml`).
+Test suite: 970 passed, 2 skipped, about 130 s (`uv run pytest -q`), on the PR #3 branch after its review fixes. CI runs on every push (`.github/workflows/tests.yml`).
 
 ## What has shipped
 
@@ -24,7 +24,7 @@ Test suite: 963 passed, 2 skipped, 132 s (`uv run pytest -q`), measured at commi
 |---|---|
 | #1 `claude/whats-next-7f655f` (merged) | Kokoro, Chatterbox Multilingual and Apple speech engines; language-name normalising; CI. |
 | #2 `claude/macos-media-keys-audio-e217ee` (merged) | GUI v2 (Transcript, Sessions, Voice lab, Config pages), Web Audio playback, least-used voice pick, `afterword voices`, export and per-voice stats, Speak and replay, keyboard shortcuts, fix-a-word popover. |
-| `claude/speaker-colours-engine-lab` (open, no PR yet) | 64 named speaker colours with a hue-by-shade picker, per-profile colour key, Voice lab Engines mode, "Open in voice lab" from the Transcript, Sessions empty-state wording. |
+| #3 `claude/speaker-colours-engine-lab` (open) | 64 named speaker colours with a hue-by-shade picker, per-profile colour key, Voice lab Engines mode, "Open in voice lab" from the Transcript, Sessions empty-state wording, and these roadmaps. |
 
 ## What P0 still lacks
 

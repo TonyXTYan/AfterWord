@@ -65,7 +65,7 @@ const plain = fakeEl(["spk-3"]);   // not a speaker element: no data-spk
 onPage.push(tag, row, plain);
 out.before = {tag: tag.classes(), row: row.classes(), tag_spk: tag.dataset.spk};
 
-// The configured order sets the slots (wrapping after six); the page repaints.
+// The configured order sets the slots (0, 1, 2, … in list order); the page repaints.
 const order = ["echo", "nova", "fable", "onyx", "alloy", "shimmer", "seventh"];
 lib.setSpeakerProfiles(order);
 out.ordered = order.map((n) => lib.speakerSlot(n));
@@ -115,8 +115,13 @@ out.colors_cleared = {slots: voices.map((n) => lib.speakerSlot(n)), stored: lib.
 // More voices than colours: the automatic ones wrap over the free colours.
 const many = Array.from({length: 20}, (_, i) => "v" + i);
 out.wrap = [...lib.speakerAssign(many, {v0: "sky", v1: "yellow"}).values()];
-const all16 = Object.fromEntries(lib.SPEAKER_PALETTE.map((p, i) => ["v" + i, p[0]]));
+// v0 … v15 choose the 16 base colours; v16 … v19 stay automatic.
+const all16 = Object.fromEntries(lib.SPEAKER_PALETTE.slice(0, 16).map((p, i) => ["v" + i, p[0]]));
 out.wrap_full = [...lib.speakerAssign(many, all16).values()].slice(16);
+// All 64 colours chosen: nothing is free, so the automatic voice wraps over the palette.
+const v65 = Array.from({length: 65}, (_, i) => "v" + i);
+const all64 = Object.fromEntries(lib.SPEAKER_PALETTE.map((p, i) => ["v" + i, p[0]]));
+out.full64 = [...lib.speakerAssign(v65, all64).values()];
 // Automatic order: base, deep, light, pale; explicit choices (names of any
 // row, or a palette hex) are skipped; past 64 the automatic voices wrap.
 const seventy = Array.from({length: 70}, (_, i) => "w" + i);
@@ -257,6 +262,11 @@ def test_more_voices_than_base_colours_take_the_deep_row(r):
     assert r["wrap_full"] == [16, 17, 18, 19]  # every base colour chosen: deep next
 
 
+def test_every_colour_chosen_the_automatic_voice_still_gets_one(r):
+    # v0 … v63 chose all 64; v64 is automatic with nothing free: it wraps to 0
+    assert r["full64"] == list(range(64)) + [0]
+
+
 def test_automatic_order_is_base_deep_light_pale_then_wraps(r):
     # nothing chosen: 0 … 63 in palette order (base, deep, light, pale), then again
     assert r["order_none"] == list(range(64)) + list(range(6))
@@ -318,12 +328,15 @@ def test_picker_marks_and_card_cap(tmp_path):
     harness = tmp_path / "marks.js"
     harness.write_text(
         'const src = require("fs").readFileSync(0, "utf8");\n'
-        'const lib = new Function(src + "\\nreturn {cpMarks, cpCap};")();\n'
+        'const lib = new Function(src + "\\nreturn {cpMarks, cpCap, cpSaveError};")();\n'
         "const names = Array.from({length: 15}, (_, i) => 'v' + i);\n"
         "process.stdout.write(JSON.stringify({\n"
         "  marks: [0, 1, 2, 3, 4, 9, -1, null, 'x', 2.7].map((n) => lib.cpMarks(n)),\n"
         "  cap_small: lib.cpCap(names.slice(0, 3)), cap_edge: lib.cpCap(names.slice(0, 12)).rest,\n"
         "  cap_big: lib.cpCap(names), cap_two: lib.cpCap(names, 2),\n"
+        "  save_err: [{status: 404, error: \"no profile named 'nova'\"}, {status: 404, error: 'HTTP 404'},\n"
+        "    {status: 405, error: 'Method Not Allowed'}, {status: 404, error: 'Not Found'}, {status: 400, error: 'color: not a colour'},\n"
+        "    {status: 0, error: 'Daemon unreachable.'}, {status: 500}, null].map((x) => lib.cpSaveError(x)),\n"
         "}));\n",
         encoding="utf-8",
     )
@@ -339,6 +352,12 @@ def test_picker_marks_and_card_cap(tmp_path):
     assert r["cap_small"] == {"shown": ["v0", "v1", "v2"], "rest": 0} and r["cap_edge"] == 0
     assert r["cap_big"]["shown"] == names12() and r["cap_big"]["rest"] == 3
     assert r["cap_two"] == {"shown": ["v0", "v1"], "rest": 13}
+    # a failed save: the daemon's own words; only a bare 404/405 is "can't set colours yet"
+    old = "Couldn't save: this daemon can't set colours yet."
+    assert r["save_err"] == [
+        "Couldn't save: no profile named 'nova'", old, old, old, "Couldn't save: color: not a colour",
+        "Couldn't save: Daemon unreachable.", "Couldn't save: no response", "Couldn't save: no response",
+    ]
 
 
 def names12():
@@ -350,3 +369,19 @@ def test_picker_has_no_legend_and_a_summary():
     block = src[src.index("// ---------- speaker colour picker"):src.index("// ---------- end speaker colour picker")]
     assert "cp-use" not in src and "In use" not in block.replace("colours in use", "").replace("colour in use", "")
     assert "cp-sum" in block and "cp-tip" in block
+
+
+def test_picker_card_goes_on_scroll_and_shows_on_keyboard_focus_only():
+    src = UI.read_text(encoding="utf-8")
+    block = src[src.index("// ---------- speaker colour picker"):src.index("// ---------- end speaker colour picker")]
+    place = block[block.index("function cpPlace()"):]
+    place = place[:place.index("\n}\n")]
+    # scroll (the page, or the chart sideways: the listener captures) and resize move the
+    # popover; the card would stay at the old coordinates, so it goes first
+    assert place.splitlines()[1].strip() == "cpTipHide();" and "cp.retip" in place
+    assert 'window.addEventListener("scroll", cpPlace, true);' in block
+    # focus shows the card only after keyboard input (a mouse open focuses the selected swatch)
+    assert 'b.addEventListener("focus", () => { describe(i); if (cpKeys) showTip(b, i); });' in block
+    assert 'document.addEventListener("keydown", () => { cpKeys = true; }, true);' in block
+    assert 'document.addEventListener("pointerdown", () => { cpKeys = false; }, true);' in block
+    assert "cpRender(focusKey, cpSaveError(r), \"err\")" in block
