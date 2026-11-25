@@ -381,6 +381,19 @@ other sentences (one in another language) and shows how far the pitch drifts;
 "Freeze & save" turns the star into a clip and saves a profile that clones it
 with the take's language, pace and seed.
 
+**Engines.** To hear the same line in every engine, pick "Engines": one row
+per engine (Qwen built-in, design and clone, Kokoro, Chatterbox, Apple, macOS
+say) with a voice picked for the text's language and its state (ready, on
+disk but not loaded with a Warm button, or not downloaded with the pull
+command). "Render all" renders the text once per ticked row, one after
+another; "Play all in turn" plays the results in order, and "Use in builder"
+loads a result's engine and voice into the builder. The ticks and voices are
+remembered in the browser.
+
+**From the Transcript.** Expand a line on the Transcript and press "Open in
+voice lab": the lab opens with the line in its text box and the line's
+profile loaded into the builder, ready to preview and tweak.
+
 Clone clips must be your own voice or a voice used with the speaker's consent;
 the lab asks you to confirm this for every upload or recording.
 

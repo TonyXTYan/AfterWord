@@ -646,6 +646,34 @@
   .ab .slot .card { border-top: 0; padding: 4px 0 0 6px; }
   .ab .slot .card aw-audio { min-width: 140px; max-width: none; }
   .ab .slot.playing { border-color: var(--spk-bar); box-shadow: 0 0 0 1px var(--spk-bar); }
+  /* Engines mode: one row per engine (tick, name, voice, state); its results are a compact list */
+  .en-rows { display: flex; flex-direction: column; margin: 8px 0 2px; max-width: 720px; }
+  .en-row { display: grid; grid-template-columns: minmax(8.5em, 10em) minmax(0, 1fr) minmax(7.5em, auto); gap: 3px 10px; align-items: center;
+            padding: 4px 0; border-top: 1px solid var(--rule); }
+  .en-row:first-child { border-top: 0; }
+  .en-row .en-nm { color: var(--ink); font-size: var(--fs); }
+  .en-row.off .en-nm { color: var(--slate); }
+  #view-lab .en-row select { width: 100%; }
+  .en-row .en-st { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: var(--fs-sm); }
+  .en-row .en-st button { background: none; border: 0; padding: 1px 0; font-size: 12px; color: var(--cue); font-weight: 600; }
+  .en-row .en-st button:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 2px; }
+  .en-row .en-why { grid-column: 2 / -1; font-size: var(--fs-sm); color: var(--slate); word-break: break-word; }
+  .en-row .en-why code { font-family: var(--mono); font-size: var(--fs-meta); }
+  .en-row .en-st .msg:empty { display: none; }
+  @media (max-width: 560px) {
+    .en-row { grid-template-columns: minmax(0, 1fr) auto; }
+    .en-row select { grid-column: 1 / -1; grid-row: 2; }
+    .en-row .en-why { grid-column: 1 / -1; }
+  }
+  .en-txt { font: var(--line-fs)/var(--line-lh) var(--serif); color: var(--ink); max-width: 72ch; margin: 0 0 4px;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+  .card.compact { display: grid; grid-template-columns: 8.5em minmax(0, 1fr); gap: 2px 10px; align-items: center; }
+  .card.compact > * { grid-column: 2; }
+  .card.compact > .card-top { grid-column: 1; grid-row: 1 / span 3; align-self: start; padding-top: 4px; }
+  @media (max-width: 560px) {
+    .card.compact { grid-template-columns: minmax(0, 1fr); }
+    .card.compact > *, .card.compact > .card-top { grid-column: 1; grid-row: auto; }
+  }
   .langs { display: inline-flex; gap: 8px; flex-wrap: wrap; }
   .samples { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
 
@@ -929,6 +957,7 @@
           <label><input type="radio" name="lab-mode" value="langs">Every language</label>
           <label><input type="radio" name="lab-mode" value="ab">A/B</label>
           <label><input type="radio" name="lab-mode" value="explore">Explore seeds</label>
+          <label><input type="radio" name="lab-mode" value="engines">Engines</label>
         </div>
 
         <div data-mode="preview">
@@ -988,6 +1017,16 @@
           <div class="ex-takes" id="ex-takes" role="listbox" aria-label="takes" tabindex="0"></div>
           <h3 class="sub">Starred <span class="hint" id="ex-starcount"></span></h3>
           <div class="list" id="ex-stars"><span class="hint">Star a take (<kbd>s</kbd>) to keep it; stars survive daemon restarts.</span></div>
+        </div>
+
+        <div data-mode="engines" hidden>
+          <div class="hint">Renders the text once with each ticked engine, one after another, so you can compare them. <span id="en-lang"></span></div>
+          <div class="en-rows" id="en-rows" role="group" aria-label="engines to compare"><span class="hint">Loading the catalog…</span></div>
+          <div class="bar">
+            <button id="en-go" class="primary">Render all</button>
+            <button id="en-cancel" hidden>Stop after this one</button>
+            <span class="msg" id="en-msg"></span>
+          </div>
         </div>
       </section>
 
@@ -1861,6 +1900,7 @@ function detailHtml(d, id) {
   const acts = [
     typeof d.text === "string" && d.text ? `<button type="button" data-act="copy">Copy text</button>` : "",
     typeof d.text === "string" && d.text.trim() && d.kind !== "system" ? `<button type="button" data-act="replay" title="Queue this line again with the same voice">Speak again</button>` : "",
+    forkDetail(d) ? `<button type="button" data-act="fork" title="Put this line and its profile in the voice lab to tweak">Open in voice lab</button>` : "",
     dlUrl ? `<a class="btn" href="${esc(dlUrl)}" download="afterword-${esc(id)}.wav" title="Download the WAV">Download clip</a>` : "",
     rate != null ? `<span class="via">the clip plays at ${esc(rate)}× (the pace it was heard at)</span>` : "",
     d.error && !d.kind ? `<span class="warn">${esc(d.error)}</span>` : "",
@@ -1874,6 +1914,24 @@ function detailHtml(d, id) {
     <div><h3>Raw payload</h3><pre>${esc(JSON.stringify(d.payload, null, 2))}</pre></div>
   </div></div>`;
 }
+// ---------- fork to lab
+// "Open in voice lab" in a row's detail: what the lab needs from the event
+// (GET /api/events/{id}), the line, its profile and its language (the lang
+// attr, else the one language all of its segments were spoken in). The lab
+// takes it from there through the aw:fork-to-lab event.
+function forkDetail(d) {
+  if (!d || typeof d.text !== "string" || !d.text.trim() || d.kind === "system") return null;
+  const attrs = d.attrs && typeof d.attrs === "object" ? d.attrs : {};
+  const segs = d.timings && Array.isArray(d.timings.segments) ? d.timings.segments : [];
+  const langs = [...new Set(segs.map((g) => g && g.lang).filter((l) => typeof l === "string" && l))];
+  const tagged = typeof attrs.lang === "string" && attrs.lang.trim() && attrs.lang.trim().toLowerCase() !== "auto" ? attrs.lang.trim() : null;
+  return {
+    text: d.text.trim().slice(0, 1000),
+    profile: typeof d.profile === "string" && d.profile ? d.profile : null,
+    lang: tagged || (langs.length === 1 ? langs[0] : null),
+  };
+}
+// ---------- end fork to lab
 function trFrom(html) {
   const t = document.createElement("template");
   t.innerHTML = html.trim();
@@ -2070,6 +2128,15 @@ $("rows").addEventListener("click", (ev) => {
   if (row && !String(window.getSelection ? window.getSelection() : "")) toggleDetail(Number(row.dataset.id));
 });
 for (const id of ["filter", "q", "hideSystem", "showHooks", "sessfilter"]) $(id).addEventListener("input", render);
+// "Open in voice lab" in a row's detail: the lab (aw:fork-to-lab) switches to #lab and loads it.
+$("rows").addEventListener("click", (ev) => {
+  const btn = ev.target.closest('[data-act="fork"]');
+  const holder = btn && btn.closest("[data-id]");
+  if (!holder) return;
+  const id = Number(holder.dataset.id);
+  const f = forkDetail(detailCache.get(id) || rowEvent(id));
+  if (f) document.dispatchEvent(new CustomEvent("aw:fork-to-lab", {detail: f}));
+});
 // "Speak again" in a row's detail: queue its line again (POST /api/events/{id}/replay).
 $("rows").addEventListener("click", async (ev) => {
   const btn = ev.target.closest('[data-act="replay"]');
@@ -3018,7 +3085,7 @@ const Lab = (() => {
     try { return await fn((l) => { lbl = l; tick(); }); }
     finally { clearInterval(iv); busy = false; syncBusy(); note(msgId, ""); }
   }
-  function syncBusy() { for (const id of ["t-preview", "ml-go", "ab-go"]) $(id).disabled = busy; }
+  function syncBusy() { for (const id of ["t-preview", "ml-go", "ab-go", "en-go"]) $(id).disabled = busy; }
 
   // ---------- languages ----------
   function revCodes() {
@@ -3245,6 +3312,8 @@ const Lab = (() => {
              kv("pace", s.pace != null ? clampPace(s.pace).toFixed(2) + "×" : null));
     const tim = [kv("synth", num(res.synth_ms) != null ? num(res.synth_ms) + " ms" : null), kv("rtf", num(res.rtf, 2))];
     if (Number(res.load_ms) > 0) tim.push(h("span", {class: "load", title: "a model had to be loaded first"}, "load ", h("b", null, num(res.load_ms) + " ms")));
+    // compact (the Engines list): voice, synth, rtf, audio length, seed.
+    const meta = opt.compact ? [set[0], tim, kv("audio", num(res.audio_s, 2) != null ? num(res.audio_s, 2) + " s" : null), set[2]] : [set, tim];
     // One quiet meta line (voice, lang, seed, pace, synth, rtf); the rest of the settings in its tooltip.
     const extra = [["style", s.style], ["mood", s.mood], ["temp", s.temperature], ["ref", s.ref_text],
       ["audio", num(res.audio_s, 2) != null ? num(res.audio_s, 2) + " s" : null], ["model", res.model || res.backend], ["id", res.id]]
@@ -3252,15 +3321,15 @@ const Lab = (() => {
     // A card from a profile (an A/B profile slot, or a builder loaded from one) wears that speaker's colour.
     const prof = opt.profile !== undefined ? opt.profile : res.pronounce_profile;
     const who = [opt.tag ? h("span", {class: "tag"}, opt.tag) : null, prof && !opt.noSpeaker ? speakerTag(prof, {title: "profile " + prof}) : null].filter(Boolean);
-    const card = h("div", {class: "card" + (prof ? " spk-" + speakerSlot(prof) : ""), ...(prof ? {"data-spk": speakerName(prof)} : {})},
+    const card = h("div", {class: "card" + (opt.compact ? " compact" : "") + (prof ? " spk-" + speakerSlot(prof) : ""), ...(prof ? {"data-spk": speakerName(prof)} : {})},
       who.length ? h("div", {class: "card-top"}, who) : null,
       opt.hideText ? null : h("div", {class: "txt spk-rule"}, res.text || ""),
-      res.spoken_text ? h("div", {class: "hint", title: res.pronounce_profile ? `after the pronunciation list (global + ${res.pronounce_profile})` : "after the pronunciation list (global)"},
+      res.spoken_text && !opt.compact ? h("div", {class: "hint", title: res.pronounce_profile ? `after the pronunciation list (global + ${res.pronounce_profile})` : "after the pronunciation list (global)"},
         "spoken as: ", h("span", {class: "spoken-as"}, res.spoken_text)) : null,
       audio,
-      h("div", {class: "kv meta", title: extra || null}, set, tim),
+      h("div", {class: "kv meta", title: extra || null}, meta),
       h("div", {class: "actions"},
-        h("button", {onclick: () => { writeBuilder(s); note(msg, "Loaded into the builder.", "ok"); }}, "Load settings"),
+        h("button", {onclick: () => { writeBuilder(s); note(msg, "Loaded into the builder.", "ok"); }}, opt.loadLabel || "Load settings"),
         h("button", {title: "Save this render as a reference clip (stable voice for cloning)", onclick: () => freeze(res, msg)}, "Freeze as clip"),
         h("button", {onclick: () => saveAsProfile(res)}, "Save as profile"),
         msg));
@@ -3449,6 +3518,230 @@ const Lab = (() => {
     const slots = [$("ab-slot-a"), $("ab-slot-b")];
     slots.forEach(s => s.classList.remove("playing"));
     playChain([a._audio, b._audio]);
+  }
+
+  // ---------- engines (pure)
+  // The Engines mode: one row per engine the catalog offers, with a voice
+  // for the text's language and the row's state. Pure (catalog in, rows out)
+  // so tests/test_ui_engines.py can run it in node.
+  const EN_KINDS = ["builtin", "design", "clone", "kokoro", "chatterbox", "apple", "say"];
+  const EN_LABEL = {builtin: "Qwen built-in", design: "Qwen design", clone: "Qwen clone", kokoro: "Kokoro",
+    chatterbox: "Chatterbox", apple: "Apple", say: "macOS say"};
+  const EN_MODEL = {builtin: "custom_voice", design: "voice_design", clone: "base", kokoro: "kokoro", chatterbox: "chatterbox"};
+  const EN_DESIGNS = [
+    {value: "A warm, low female voice in her forties, unhurried, close-mic radio narrator.", label: "Warm narrator, female"},
+    {value: "A calm, clear male voice in his thirties, friendly and evenly paced.", label: "Calm presenter, male"},
+    {value: "A bright, quick young voice, cheerful and crisp.", label: "Bright and quick"},
+  ];
+  const EN_PREFER = {kokoro: {en: "af_heart", zh: "zf_xiaobei", ja: "jf_alpha"}, say: {en: "Samantha", zh: "Tingting", ja: "Kyoko"}};
+  const EN_EMPTY = {builtin: "No built-in speakers listed.", clone: "No reference clips yet: add one under Reference clips.",
+    chatterbox: "No reference clips yet: add one under Reference clips.", kokoro: "No Kokoro voices in the download.",
+    say: "No macOS say voices found.", design: "No description.", apple: "No Apple voices."};
+  const enBase = (code) => String(code || "").toLowerCase().split(/[-_]/)[0];
+  // The text's language from its script, or null (Latin script: can't tell).
+  function enGuessLang(text) {
+    const s = String(text || "");
+    if (/[぀-ヿ]/.test(s)) return "ja";
+    if (/[가-힯ᄀ-ᇿ]/.test(s)) return "ko";
+    if (/[㐀-䶿一-鿿]/.test(s)) return "zh";
+    if (/[Ѐ-ӿ]/.test(s)) return "ru";
+    if (/[؀-ۿ]/.test(s)) return "ar";
+    if (/[ऀ-ॿ]/.test(s)) return "hi";
+    if (/[֐-׿]/.test(s)) return "he";
+    if (/[Ͱ-Ͽ]/.test(s)) return "el";
+    return null;
+  }
+  // The language the default voices are picked for: the builder's when set,
+  // else guessed from the text, else English. builderLang may be a name.
+  function enLang(builderLang, text, langCodes) {
+    const b = String(builderLang || "auto").toLowerCase();
+    if (b && b !== "auto") {
+      const code = Object.keys(langCodes || {}).find((k) => String(langCodes[k]).toLowerCase() === b);
+      return {lang: enBase(code || b), from: "builder"};
+    }
+    const g = enGuessLang(text);
+    return g ? {lang: g, from: "text"} : {lang: "en", from: "default"};
+  }
+  function enDefault(kind, options, lang) {
+    if (!options.length || kind === "apple") return "";   // Apple: the best installed voice for the language
+    const prefer = (EN_PREFER[kind] || {})[lang];
+    if (prefer && options.some((o) => o.value === prefer)) return prefer;
+    const m = options.filter((o) => o.match);
+    return ((kind === "builtin" && m.find((o) => o.plain)) || m[0] || options[0]).value;
+  }
+  // Rows: {kind, label, model, state, why, pull, options, def}. state: ready |
+  // cold (on disk, not loaded) | failed (last load failed) | missing (not
+  // downloaded; pull is the command) | unavailable. Only the first three render.
+  function enRows(cat, lang, opt = {}) {
+    cat = cat || {};
+    const eng = cat.engine || {}, models = eng.models || {};
+    const pull = eng.pull_command || "afterword models pull";
+    const name = String((cat.lang_codes || {})[lang] || "").toLowerCase();
+    const clips = (cat.clips || []).map((c) => ({value: c.name, label: c.name}));
+    const opts = {
+      builtin: (cat.speakers || []).map((s) => ({value: s.name, label: `${s.name} (${s.native || "?"}${s.dialect ? ", " + s.dialect : ""})`,
+        match: !!name && String(s.native || "").toLowerCase() === name, plain: !s.dialect})),
+      design: [...(opt.builderDesc ? [{value: opt.builderDesc, label: "The builder’s description"}] : []), ...EN_DESIGNS],
+      clone: clips,
+      kokoro: (cat.kokoro_voices || []).map((v) => ({value: v.name, label: `${v.name} (${v.lang}, ${v.gender})`, match: enBase(v.lang_code) === lang})),
+      chatterbox: clips,
+      apple: [{value: "", label: "Best installed voice for the language"},
+        ...(cat.apple_voices || []).filter((v) => !v.novelty).map((v) => ({value: v.id || v.name,
+          label: `${v.name}${v.quality && v.quality !== "default" ? ", " + v.quality : ""} (${v.lang})`, match: enBase(v.lang) === lang}))],
+      say: (cat.say_voices || []).map((v) => ({value: v.name, label: `${v.name}${v.locale ? " (" + v.locale + ")" : ""}`, match: enBase(v.locale) === lang})),
+    };
+    return EN_KINDS.map((kind) => {
+      const options = opts[kind];
+      const model = EN_MODEL[kind] || null;
+      const mi = model ? models[model] : null;
+      let state = "ready", why = "", cmd = null;
+      if (model) {
+        if (eng.available === false) { state = "unavailable"; why = `Local models unavailable${eng.error ? ": " + eng.error : "."}`; }
+        else if (!mi) { state = "unavailable"; why = "This daemon does not list the model."; }
+        else if (!mi.downloaded) { state = "missing"; cmd = `${pull} ${model}`; why = "Not downloaded."; }
+        else if (mi.error && !mi.loaded) { state = "failed"; why = `Last load failed: ${mi.error}`; }
+        else if (!mi.loaded) state = "cold";
+      } else if (kind === "apple" && (!cat.apple || cat.apple.available === false)) {
+        state = "unavailable"; why = (cat.apple && cat.apple.error) || "Apple voices are not available.";
+      }
+      if ((state === "ready" || state === "cold" || state === "failed") && !options.length) { state = "unavailable"; why = EN_EMPTY[kind]; }
+      return {kind, label: EN_LABEL[kind], model, state, why, pull: cmd,
+        options: options.map(({value, label}) => ({value, label})), def: enDefault(kind, options, lang)};
+    });
+  }
+  const enUsable = (row) => row.state === "ready" || row.state === "cold" || row.state === "failed";
+  // ---------- end engines (pure)
+
+  // ---------- engines ----------
+  // Ticks and voice choices are remembered per browser: {inc: {kind: bool}, voice: {"kind|lang": value}}.
+  const EN_KEY = "aw.lab.engines";
+  const enMem = (() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(EN_KEY) || "null");
+      if (v && typeof v === "object") return {inc: v.inc && typeof v.inc === "object" ? v.inc : {}, voice: v.voice && typeof v.voice === "object" ? v.voice : {}};
+    } catch { /* storage blocked or bad JSON */ }
+    return {inc: {}, voice: {}};
+  })();
+  const enSave = () => { try { localStorage.setItem(EN_KEY, JSON.stringify(enMem)); } catch { /* storage blocked */ } };
+  let enCur = [];          // painted rows: {row, chk, sel}
+  let enCancel = false;
+  function enStateNode(row) {
+    const msg = h("span", {class: "msg"});
+    const kids = [];
+    if (row.state === "ready") kids.push(h("span", {class: "badge ok"}, "ready"));
+    else if (row.state === "cold" || row.state === "failed") {
+      kids.push(h("span", {class: "badge " + (row.state === "cold" ? "idle" : "no")}, row.state === "cold" ? "on disk, not loaded" : "load failed"));
+      const btn = h("button", {type: "button", title: "Load it now so the render is fast"}, "Warm");
+      btn.addEventListener("click", () => warm(row.model, btn, msg));
+      kids.push(btn);
+    } else kids.push(h("span", {class: "badge no"}, row.state === "missing" ? "not downloaded" : "unavailable"));
+    kids.push(msg);
+    return h("span", {class: "en-st"}, kids);
+  }
+  function enPaint() {
+    if (!cat) return;
+    const L = enLang($("b-lang").value, labText(), cat.lang_codes || {});
+    const rows = enRows(cat, L.lang, {builderDesc: $("b-desc").value.trim()});
+    if (sameJSON("engines", [L, rows])) return;
+    $("en-lang").textContent = `Default voices for ${langName(L.lang)} (${{builder: "the builder’s language", text: "guessed from the text", default: "the builder has no language set"}[L.from]}).`;
+    enCur = rows.map((row) => {
+      const on = enUsable(row);
+      const key = row.kind + "|" + L.lang;
+      const val = row.options.some((o) => o.value === enMem.voice[key]) ? enMem.voice[key] : row.def;
+      const chk = h("input", {type: "checkbox", id: "en-on-" + row.kind, checked: on && enMem.inc[row.kind] !== false, disabled: !on});
+      const sel = h("select", {id: "en-v-" + row.kind, "aria-label": row.label + " voice", disabled: !on || !row.options.length},
+        row.options.length ? row.options.map((o) => h("option", {value: o.value}, o.label)) : h("option", {value: ""}, "—"));
+      sel.value = val;
+      chk.addEventListener("change", () => { enMem.inc[row.kind] = chk.checked; enSave(); });
+      sel.addEventListener("change", () => { enMem.voice[key] = sel.value; enSave(); });
+      const why = row.why || row.pull ? h("div", {class: "en-why"}, row.why, row.pull ? [" Run ", h("code", null, row.pull), "."] : null) : null;
+      const node = h("div", {class: "en-row" + (on ? "" : " off"), "data-kind": row.kind},
+        h("label", {class: "chk en-nm", for: chk.id}, chk, row.label), sel, enStateNode(row), why);
+      return {row, chk, sel, node};
+    });
+    $("en-rows").replaceChildren(...enCur.map((r) => r.node));
+  }
+  async function doEngines() {
+    if (busy) return;
+    const text = labText();
+    if (!text) return note("en-msg", "Type some text in the box above first.", "err");
+    const picked = enCur.filter((r) => !r.chk.disabled && r.chk.checked).map((r) => ({row: r.row, voice: `${r.row.kind}:${r.sel.value}`}));
+    if (!picked.length) return note("en-msg", "Tick at least one engine that is ready.", "err");
+    const lang = $("b-lang").value || "auto";
+    const cards = [];
+    const playAll = h("button", {class: "small", disabled: true, onclick: () => playChain(cards.map((c) => c._audio))}, "▶ Play all in turn");
+    const body = h("div", {class: "group-body"});
+    pushResult(h("div", {class: "group"},
+      h("div", {class: "group-h"}, h("b", null, "Engines"), h("span", {class: "mono muted"}, `lang ${lang}`), playAll),
+      h("div", {class: "en-txt", title: text}, text), body));
+    enCancel = false;
+    $("en-cancel").hidden = false;
+    const errors = [];
+    await withBusy("en-msg", "", async (setLabel) => {
+      for (let i = 0; i < picked.length; i++) {
+        if (enCancel) { errors.push("stopped"); break; }
+        const {row, voice} = picked[i];
+        setLabel(`${row.label} (${i + 1}/${picked.length})…`);
+        const r = await preview(previewBody(text, {voice, lang}));
+        if (!r.ok) {
+          errors.push(`${row.label}: ${r.error}`);
+          body.append(h("div", {class: "card compact"}, h("div", {class: "card-top"}, h("span", {class: "tag"}, row.label)),
+            h("span", {class: "mono muted", title: voice}, voice), h("span", {class: "msg err"}, r.error)));
+          if (r.status === 0) break;   // the daemon is gone: the rest would fail the same way
+          continue;
+        }
+        const card = resultCard(r.data, {tag: row.label, hideText: true, compact: true, loadLabel: "Use in builder"});
+        cards.push(card);
+        body.append(card);
+        playAll.disabled = false;
+      }
+    });
+    $("en-cancel").hidden = true;
+    note("en-msg", errors.length ? errors.join(" · ") : `${cards.length} engine${cards.length === 1 ? "" : "s"} rendered.`, errors.length ? "err" : "ok");
+    refreshSoon();
+  }
+
+  // ---------- fork from the Transcript ----------
+  // "Open in voice lab" on a Transcript line sends aw:fork-to-lab {text, profile, lang}.
+  // The lab may not have been shown yet: the request waits for init and the catalog.
+  let forkPending = null;
+  document.addEventListener("aw:fork-to-lab", (ev) => {
+    const d = (ev && ev.detail) || {};
+    if (typeof d.text !== "string" || !d.text.trim()) return;
+    forkPending = {text: d.text.trim().slice(0, 1000), profile: typeof d.profile === "string" && d.profile ? d.profile : null,
+      lang: typeof d.lang === "string" && d.lang ? d.lang : null};
+    if (location.hash !== "#lab") location.hash = "lab";   // route() shows the lab, and show() applies it
+    else if (started) applyFork();
+  });
+  async function applyFork() {
+    if (!forkPending || !started) return;
+    await refresh();   // the profiles as they are now
+    const f = forkPending;
+    forkPending = null;
+    if (!f) return;
+    setMode("preview");
+    $("t-text").value = f.text;
+    syncText();
+    let msg, kind = "info";
+    if (!f.profile) msg = "This line used the default voice: the builder is unchanged.";
+    else if (!cat) { msg = `The catalog did not load, so “${f.profile}” was not loaded: the builder is unchanged.`; kind = "err"; }
+    else if (!Object.prototype.hasOwnProperty.call(profilesMap(), f.profile)) { msg = `Profile “${f.profile}” no longer exists: the builder is unchanged.`; kind = "err"; }
+    else {
+      loadProfile(f.profile);
+      msg = `Loaded “${f.profile}” and the line. Preview to hear it, then tweak.`;
+      const lang = normLang(f.lang);
+      if (f.lang && lang !== "auto" && lang !== $("b-lang").value) {
+        setSelect($("b-lang"), lang);
+        syncSpec();
+        msg = `Loaded “${f.profile}” and the line, spoken in ${langName(lang)}. Preview to hear it, then tweak.`;
+      }
+    }
+    note("t-msg", msg, kind);
+    enPaint();
+    const ta = $("t-text");
+    ta.focus();
+    try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch { /* ignore */ }
+    ta.scrollIntoView({block: "center"});
   }
 
   // ---------- seed explorer (docs/lab-api.md, "Seed explorer") ----------
@@ -4288,12 +4581,13 @@ const Lab = (() => {
     renderClips();
     renderProfiles();
     syncSource();
+    enPaint();
   }
 
-  function syncText() { $("t-count").textContent = `${$("t-text").value.length} / 1000`; }
+  function syncText() { $("t-count").textContent = `${$("t-text").value.length} / 1000`; enPaint(); }
 
   // ---------- stage modes: one text box, the controls under it swap ----------
-  const MODES = ["preview", "langs", "ab", "explore"];
+  const MODES = ["preview", "langs", "ab", "explore", "engines"];
   const MODE_KEY = "aw.lab.mode";
   const modeRadios = () => [...document.querySelectorAll('input[name="lab-mode"]')];
   function labMode() { return (modeRadios().find(r => r.checked) || {}).value || "preview"; }
@@ -4309,6 +4603,7 @@ const Lab = (() => {
     for (const r of modeRadios()) r.checked = r.value === mode;
     for (const el of document.querySelectorAll("#view-lab [data-mode]")) el.hidden = el.dataset.mode !== mode;
     if (mode !== "explore") exSilence();
+    if (mode === "engines") enPaint();
     if (remember) try { localStorage.setItem(MODE_KEY, mode); } catch { /* storage blocked */ }
   }
 
@@ -4324,13 +4619,16 @@ const Lab = (() => {
     $("b-seedrand").addEventListener("click", () => { $("b-seed").value = Math.floor(Math.random() * 2147483647); $("b-seedlock").checked = true; syncSpec(); });
     $("t-text").addEventListener("input", syncText);
     // ⌘/Ctrl + Enter runs the chosen mode's main action.
-    const RUN = {preview: doPreview, langs: doEveryLanguage, ab: doAB, explore: exStart};
+    const RUN = {preview: doPreview, langs: doEveryLanguage, ab: doAB, explore: exStart, engines: doEngines};
     $("t-text").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); if (!busy) RUN[labMode()](); } });
     $("t-preview").addEventListener("click", doPreview);
     $("ml-go").addEventListener("click", doEveryLanguage);
     $("ml-cancel").addEventListener("click", () => { mlCancel = true; note("ml-msg", "stopping after the current render…", "run"); });
     $("ab-go").addEventListener("click", doAB);
     $("ab-play").addEventListener("click", abPlay);
+    $("en-go").addEventListener("click", doEngines);
+    $("en-cancel").addEventListener("click", () => { enCancel = true; note("en-msg", "stopping after the current render…", "run"); });
+    for (const id of ["b-lang", "b-desc"]) $(id).addEventListener("change", enPaint);
     $("r-clear").addEventListener("click", () => {
       for (const a of $("r-list").querySelectorAll("aw-audio")) a.pause();
       $("r-list").replaceChildren($("r-empty")); $("r-empty").hidden = false;
@@ -4373,7 +4671,7 @@ const Lab = (() => {
   }
 
   return {
-    show() { visible = true; if (!started) { started = true; init(); } refresh(); exLoad(); exLoadStars(); },
+    show() { visible = true; if (!started) { started = true; init(); } refresh(); exLoad(); exLoadStars(); if (forkPending) applyFork(); },
     engineStrip(box, eng, afterWarm) { renderEngine(eng, null, box, afterWarm); },
     hide() { visible = false; exSilence(); },
   };
