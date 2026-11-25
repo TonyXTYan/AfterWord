@@ -58,6 +58,10 @@ Turn the voice on for a session:
   profiles, the ones no other session is using and the least recently used
   first, each with its `description` (else its `persona`, else its `style`),
   and answers with a `<voice set="..."/>` tag and a line in the new voice.
+  Fill the descriptions with `/afterword:describe-voices` (Claude proposes a
+  line per profile, you approve, then it writes them), or by hand with
+  `afterword voices describe nova "calm British narrator"`; `afterword voices`
+  lists the profiles and how they are used (add `--json` for scripts).
   Which profile each session uses, and when each was last used, is kept in
   `~/.afterword/voices.json`;
 - in the GUI's Sessions page.
@@ -395,7 +399,7 @@ claude --plugin-dir /path/to/AfterWord
 ```
 
 **Or with settings.json.** `install-hooks` writes the same six hooks into a
-settings file and an `/afterword-voice` command next to it (not for
+settings file and the `/afterword-voice` and `/afterword-describe-voices` commands next to it (not for
 `--scope local`). Preview the change first;
 `--scope user` (default) edits `~/.claude/settings.json`, and `project` and
 `local` edit `./.claude/`. A backup is written next to the file, and other hooks
