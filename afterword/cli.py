@@ -1,5 +1,5 @@
 """afterword serve | status | test "text" | models | alerts | voices | install-hooks
-| install-service | start | stop | restart | uninstall-service | login"""
+| install-service | start | stop | restart | uninstall-service | login | update"""
 
 from __future__ import annotations
 
@@ -71,6 +71,11 @@ def _request(message: dict, timeout: float = 2.0) -> dict:
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
+    from afterword import update
+
+    # Under launchd with an update pending: count this start, and go back to
+    # the previous release after too many (before the daemon is imported).
+    update.startup_check()
     from afterword.daemon.server import main as serve_main
 
     return serve_main(port=args.port, http=not args.no_http, verbose=args.verbose)
@@ -91,8 +96,11 @@ def cmd_status(args: argparse.Namespace) -> int:
         if args.json:
             print(json.dumps({"error": error, "service": svc.as_dict()}, indent=2))
         else:
+            from afterword import update
+
             print(error)
             print(f"  service   {svc.summary()}")
+            print(f"  update    {update.summary(update.local_updater().view())}")
         return 1
     st = reply.get("status", {})
     if args.json:
@@ -104,6 +112,10 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"  UI        {st.get('http') or '(disabled)'}")
     print(f"  socket    {st.get('socket')}")
     print(f"  service   {svc.summary()}")
+    if isinstance(st.get("update"), dict):
+        from afterword import update
+
+        print(f"  update    {update.summary(st['update'])}")
     print(f"  synth     {st.get('synth')}   player {st.get('player')}")
     cfg = st.get("config", {})
     print(f"  config    {cfg.get('path')}  profiles: {', '.join(cfg.get('profiles') or []) or 'none'}")
@@ -527,9 +539,169 @@ def cmd_install_hooks(args: argparse.Namespace) -> int:
 
 
 def cmd_install_service(args: argparse.Namespace) -> int:
-    from afterword import service
+    from afterword import service, update
 
-    return service.install(dry_run=args.dry_run, start=not args.no_start)
+    if args.dev:
+        code = service.install(dry_run=args.dry_run, start=not args.no_start)
+        if code == 0 and not args.dry_run:
+            update.note_dev_install()
+        return code
+    return update.install_managed(dry_run=args.dry_run, start=not args.no_start)
+
+
+def _http(base: str, method: str, path: str, body: dict | None = None, timeout: float = 120.0) -> tuple[int, dict]:
+    """One request to the daemon's HTTP API (POSTs carry X-AfterWord)."""
+    import urllib.error
+    import urllib.request
+
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(base + path, data=data, method=method)
+    if method != "GET":
+        req.add_header("X-AfterWord", "1")
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as exc:
+        try:
+            return exc.code, json.loads(exc.read() or b"{}")
+        except ValueError:
+            return exc.code, {"error": f"HTTP {exc.code}"}
+
+
+def _daemon_status() -> dict | None:
+    """The daemon's status when one answers, else None."""
+    try:
+        return _request({"type": "ping"}).get("status") or {}
+    except (OSError, ValueError, DaemonUnreachable):
+        return None
+
+
+def cmd_update(args: argparse.Namespace) -> int:
+    """`afterword update`: status; --check checks now; --now installs the
+    newest release now (through the daemon when one runs)."""
+    from afterword import update
+
+    st = _daemon_status()
+    if st is None:
+        return _update_local(args)
+    base = st.get("http")
+    if not base:
+        if args.check or args.now:
+            print("afterwordd runs without its HTTP UI (--no-http): restart it with the UI to check or update",
+                  file=sys.stderr)
+            return 1
+        view = st.get("update") or {}
+        print(json.dumps(view, indent=2) if args.json else "\n".join(update.describe(view)))
+        return 0
+    try:
+        if args.check or args.now:
+            code, view = _http(base, "POST", "/api/update/check")
+        else:
+            code, view = _http(base, "GET", "/api/update")
+        if code == 404:
+            print(f"the running afterwordd ({st.get('version')}) has no updater: `afterword install-service` "
+                  "sets up the managed install", file=sys.stderr)
+            return 1
+        if code != 200:
+            print(f"afterwordd answered {code}: {view.get('error')}", file=sys.stderr)
+            return 1
+        if args.json and not args.now:
+            print(json.dumps(view, indent=2))
+            return 0
+        if not args.now:
+            print("\n".join(update.describe(view)))
+            return 1 if args.check and view.get("last_error") else 0
+        if view.get("last_error"):
+            print(f"check failed: {view['last_error']}", file=sys.stderr)
+            return 1
+        if not view.get("available"):
+            print(f"already up to date ({view.get('running')})")
+            return 0
+        code, ack = _http(base, "POST", "/api/update/apply", {"force": args.force, "wait_s": args.wait})
+    except OSError as exc:
+        print(f"afterwordd did not answer: {exc}", file=sys.stderr)
+        return 1
+    if code != 202:
+        print(f"not updated: {ack.get('error')}", file=sys.stderr)
+        return 1
+    return _follow_update(base, st.get("pid"), ack.get("tag") or view.get("latest"), args)
+
+
+def _follow_update(base: str, old_pid, tag, args) -> int:
+    """Print the daemon's update phases until it restarts on the new release
+    (or stops trying)."""
+    from afterword import update
+
+    print(f"updating to {tag}: preparing (the first time can take a few minutes)…", flush=True)
+    seen = "preparing"
+    end = time.time() + update.UV_TIMEOUT_S + (0 if args.force else args.wait) + 120
+    while time.time() < end:
+        time.sleep(2)
+        try:
+            _, view = _http(base, "GET", "/api/update", timeout=10)
+        except OSError:
+            break  # down for the restart
+        phase = view.get("phase")
+        if phase == seen:
+            continue
+        seen = phase
+        if phase == "waiting":
+            print(f"prepared; waiting up to {args.wait:.0f} s for a moment with nothing to say…", flush=True)
+        elif phase in ("switching", "restarting"):
+            print(f"{phase}…", flush=True)
+        elif phase == "idle":
+            print(view.get("last_result") or "stopped", file=sys.stderr)
+            if view.get("last_error"):
+                print(view["last_error"], file=sys.stderr)
+            return 1
+    # launchd starts it again, no sooner than 10 s after its last launch.
+    end = time.time() + 90
+    while time.time() < end:
+        time.sleep(2)
+        st = _daemon_status()
+        if st and st.get("pid") != old_pid:
+            print(f"afterwordd {st.get('version')} is running, pid {st.get('pid')}; it confirms the update "
+                  f"after {update.CONFIRM_AFTER_S:.0f} s")
+            return 0
+    print("afterwordd did not come back within 90 s: see `afterword status` and service.log", file=sys.stderr)
+    return 1
+
+
+def _update_local(args: argparse.Namespace) -> int:
+    """`afterword update` with no daemon answering: works on update.json and
+    the managed install directly (it never restarts anything)."""
+    from afterword import update
+
+    up = update.local_updater()
+    view = up.check() if (args.check or args.now) else up.view()
+    if args.json and not args.now:
+        print(json.dumps(view, indent=2))
+        return 0
+    if not args.now:
+        print("afterwordd is not running")
+        print("\n".join(update.describe(view)))
+        return 1 if args.check and view.get("last_error") else 0
+    if view.get("last_error"):
+        print(f"check failed: {view['last_error']}", file=sys.stderr)
+        return 1
+    if view.get("install") != "managed":
+        print("the service is not a managed install (`afterword install-service` sets one up); "
+              "nothing to update", file=sys.stderr)
+        return 1
+    if not view.get("available"):
+        print(f"already up to date ({view.get('current') or view.get('running')})")
+        return 0
+    tag = view["latest"]
+    print(f"preparing {tag} (the daemon is not running)…", flush=True)
+    try:
+        up.prepare(tag)
+        old = up.switch(tag, pending=True)
+    except update.UpdateError as exc:
+        print(f"not updated: {exc}", file=sys.stderr)
+        return 1
+    print(f"switched from {old} to {tag}; `afterword start` runs it")
+    return 0
 
 
 def cmd_service(args: argparse.Namespace) -> int:
@@ -547,14 +719,20 @@ def cmd_login(args: argparse.Namespace) -> int:
 
 SERVICE_HELP = """\
 The service is a per-user LaunchAgent, io.github.tonyxtyan.afterword, in
-~/Library/LaunchAgents. It runs `afterword serve` with this interpreter,
-starts at login, and is restarted after a crash (not after a clean exit).
+~/Library/LaunchAgents. It runs `afterword serve` from AfterWord's managed
+install (app/current in AfterWord's home: a release tag, which the daemon
+and `afterword update` keep up to date), or with --dev with this checkout's
+interpreter. It starts at login, and is restarted after a crash (not after
+a clean exit).
 Its stdout and stderr go to service.log in AfterWord's home (~/.afterword,
 or $AFTERWORD_HOME); the daemon's own log is afterwordd.log next to it.
 
-  install-service    write the plist and load it; a daemon already running
-                     outside launchd is stopped first (SIGTERM). Running it
-                     again rewrites the plist and reloads it.
+  install-service    set up the managed install at this code's release (or
+                     the newest release) and test it, before anything else
+                     changes; then write the plist and load it. A daemon
+                     already running outside launchd is stopped first
+                     (SIGTERM). Running it again refreshes both. With --dev
+                     it runs this checkout (updates are only reported).
   start              load the service (launchctl bootstrap), or start its
                      daemon if it is loaded (launchctl kickstart)
   stop               unload it (launchctl bootout): it stays stopped, even
@@ -627,6 +805,9 @@ def build_parser() -> argparse.ArgumentParser:
                        description=SERVICE_HELP, formatter_class=fmt)
     s.add_argument("--dry-run", action="store_true", help="print the plist and the launchctl commands, write nothing")
     s.add_argument("--no-start", action="store_true", help="write the plist but do not load it")
+    s.add_argument("--dev", action="store_true",
+                   help="run this checkout's interpreter instead of the managed install (for development: "
+                        "updates are then reported, never applied)")
     s.set_defaults(func=cmd_install_service)
     for name, text in (
         ("start", "start the service (bootstrap it, or kickstart it if loaded)"),
@@ -640,6 +821,19 @@ def build_parser() -> argparse.ArgumentParser:
                        description=SERVICE_HELP, formatter_class=fmt)
     s.add_argument("state", nargs="?", choices=("on", "off"), help="omit to print the current setting")
     s.set_defaults(func=cmd_login)
+
+    s = sub.add_parser("update", help="show update status; check for or install a new release",
+                       description="Releases are the repository's vX.Y.Z tags. [update] mode in config.toml: "
+                                   "auto (the daemon installs a new release when nothing is being said), "
+                                   "notify (it only reports it), off.")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--check", action="store_true", help="check for a new release now")
+    g.add_argument("--now", action="store_true", help="install the newest release now")
+    s.add_argument("--wait", type=float, default=600.0, metavar="S",
+                   help="with --now: wait up to S seconds for nothing to be said (default 600)")
+    s.add_argument("--force", action="store_true", help="with --now: switch without waiting (cuts off speech)")
+    s.add_argument("--json", action="store_true", help="the status as JSON (GET /api/update)")
+    s.set_defaults(func=cmd_update)
     return p
 
 

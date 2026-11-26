@@ -236,14 +236,14 @@ def manual_daemon(aw_home):
 
 def test_plist_content(launchd, aw_home, tmp_path, monkeypatch):
     monkeypatch.setenv("LANG", "en_AU.UTF-8")
-    assert cli.main(["install-service", "--no-start"]) == 0
+    assert cli.main(["install-service", "--dev", "--no-start"]) == 0
     path = tmp_path / "LaunchAgents" / "io.github.tonyxtyan.afterword.plist"
     assert service.plist_path() == path
     assert oct(path.stat().st_mode & 0o777) == "0o644"
     plist = plistlib.loads(path.read_bytes())
     py = os.path.abspath(sys.executable)
     assert plist["Label"] == "io.github.tonyxtyan.afterword"
-    assert plist["ProgramArguments"] == [py, "-m", "afterword.cli", "serve"]
+    assert plist["ProgramArguments"] == [py, "-P", "-m", "afterword.cli", "serve"]
     assert plist["RunAtLoad"] is True
     assert plist["KeepAlive"] == {"SuccessfulExit": False}
     assert plist["ThrottleInterval"] == 10
@@ -287,7 +287,7 @@ def test_python_m_cli_runs():
 
 def test_dry_run_writes_nothing(launchd, aw_home, tmp_path, capsys):
     before = sorted(p.name for p in aw_home.iterdir())
-    assert cli.main(["install-service", "--dry-run"]) == 0
+    assert cli.main(["install-service", "--dev", "--dry-run"]) == 0
     out = capsys.readouterr().out
     assert not (tmp_path / "LaunchAgents").exists()
     assert sorted(p.name for p in aw_home.iterdir()) == before
@@ -301,7 +301,7 @@ def test_dry_run_when_loaded_shows_the_reload(launchd, capsys):
     install_plist()
     launchd.loaded = True
     launchd.spawn()
-    assert cli.main(["install-service", "--dry-run"]) == 0
+    assert cli.main(["install-service", "--dev", "--dry-run"]) == 0
     out = capsys.readouterr().out
     assert f"launchctl bootout gui/{os.getuid()}/io.github.tonyxtyan.afterword" in out
     assert launchd.mutations() == []
@@ -313,17 +313,17 @@ def test_dry_run_when_loaded_shows_the_reload(launchd, capsys):
 
 
 def test_install_loads_the_agent(launchd, capsys):
-    assert cli.main(["install-service"]) == 0
+    assert cli.main(["install-service", "--dev"]) == 0
     assert launchd.mutations() == [("bootstrap", service.domain(), str(service.plist_path()))]
     out = capsys.readouterr().out
     assert "service started, pid 4321" in out and "service.log" in out
 
 
 def test_install_again_rewrites_and_reloads(launchd, capsys):
-    assert cli.main(["install-service"]) == 0
+    assert cli.main(["install-service", "--dev"]) == 0
     service.plist_path().write_text("stale")
     launchd.calls.clear()
-    assert cli.main(["install-service"]) == 0
+    assert cli.main(["install-service", "--dev"]) == 0
     assert [c[0] for c in launchd.mutations()] == ["bootout", "bootstrap"]
     assert plistlib.loads(service.plist_path().read_bytes())["Label"] == service.LABEL
     assert "service reloaded, pid 4322" in capsys.readouterr().out
@@ -333,7 +333,7 @@ def test_install_stops_a_manual_daemon_first(launchd, manual_daemon, capsys):
     proc = manual_daemon()
     seen = {}
     launchd.on_call = lambda args: args[0] == "bootstrap" and seen.setdefault("exited", proc.poll())
-    assert cli.main(["install-service"]) == 0
+    assert cli.main(["install-service", "--dev"]) == 0
     assert seen["exited"] == -signal.SIGTERM  # stopped before launchd started its own
     out = capsys.readouterr().out
     assert f"stopping afterwordd pid {proc.pid}, which was started outside launchd" in out
@@ -343,7 +343,7 @@ def test_install_stops_a_manual_daemon_first(launchd, manual_daemon, capsys):
 def test_install_gives_up_if_the_manual_daemon_does_not_stop(launchd, manual_daemon, monkeypatch, capsys):
     monkeypatch.setattr(service, "STOP_WAIT_S", 0.5)
     proc = manual_daemon("ignore")
-    assert cli.main(["install-service"]) == 1
+    assert cli.main(["install-service", "--dev"]) == 1
     assert proc.poll() is None
     assert launchd.mutations() == []
     assert service.plist_path().is_file()
@@ -353,7 +353,7 @@ def test_install_gives_up_if_the_manual_daemon_does_not_stop(launchd, manual_dae
 
 def test_install_reports_bootstrap_failure(launchd, capsys):
     launchd.fail["bootstrap"] = service.Result(5, "", "Bootstrap failed: 5: Input/output error\n")
-    assert cli.main(["install-service"]) == 1
+    assert cli.main(["install-service", "--dev"]) == 1
     assert "Bootstrap failed: 5: Input/output error" in capsys.readouterr().err
 
 
@@ -495,7 +495,7 @@ def test_restart_when_not_loaded_starts(launchd, capsys):
 
 
 def test_uninstall_boots_out_and_deletes(launchd, capsys):
-    assert cli.main(["install-service"]) == 0
+    assert cli.main(["install-service", "--dev"]) == 0
     launchd.calls.clear()
     assert cli.main(["uninstall-service"]) == 0
     assert launchd.mutations() == [("bootout", service.target())]
@@ -507,13 +507,13 @@ def test_uninstall_and_install_refuse_when_launchctl_gives_no_answer(launchd, ca
     """If launchctl print fails, the agent may still be loaded: deleting or
     rewriting its plist would leave a loaded job beside a missing or
     different plist."""
-    assert cli.main(["install-service"]) == 0
+    assert cli.main(["install-service", "--dev"]) == 0
     before = service.plist_path().read_bytes()
     launchd.calls.clear()
     launchd.fail["print"] = service.Result(1, "", "launchctl print: some transient error\n")
     assert cli.main(["uninstall-service"]) == 1
     assert service.plist_path().read_bytes() == before
-    assert cli.main(["install-service"]) == 1
+    assert cli.main(["install-service", "--dev"]) == 1
     assert service.plist_path().read_bytes() == before
     assert launchd.mutations() == []
     err = capsys.readouterr().err
@@ -808,7 +808,7 @@ def test_start_kickstart_on_a_disabled_loaded_service(launchd, capsys):
 
 def test_install_on_a_disabled_service_keeps_login_off(launchd, capsys):
     launchd.disabled = True
-    assert cli.main(["install-service"]) == 0
+    assert cli.main(["install-service", "--dev"]) == 0
     assert launchd.mutations() == _enable_bootstrap_disable()
     assert launchd.disabled is True
     out = capsys.readouterr().out
@@ -818,7 +818,7 @@ def test_install_on_a_disabled_service_keeps_login_off(launchd, capsys):
 
 def test_install_dry_run_on_a_disabled_service_shows_the_enable(launchd, capsys):
     launchd.disabled = True
-    assert cli.main(["install-service", "--dry-run"]) == 0
+    assert cli.main(["install-service", "--dev", "--dry-run"]) == 0
     out = capsys.readouterr().out
     lines = [l for l in out.splitlines() if l.startswith("# would run:")]
     assert [l.split()[4] for l in lines] == ["enable", "bootstrap", "disable"]

@@ -13,6 +13,7 @@ from typing import Any
 from afterword.hooks import common
 from afterword.hooks import pronounce as _pron
 from afterword.hooks import scriptsplit as _split
+from afterword.update import DEFAULT_REPO, MODES as UPDATE_MODES, UpdateSettings
 
 log = logging.getLogger("afterword.config")
 
@@ -123,6 +124,16 @@ pace = 1.05
 style = "warm, brisk"
 max_chars = 400
 say_voice = "Daniel"
+
+[update]
+# Updates to new AfterWord releases (tags vX.Y.Z of the repository), for the
+# service's managed install (`afterword install-service`; a --dev install
+# from a checkout only reports them). See `afterword update`.
+mode = "auto"             # "auto": install a new release when nothing is being said (it is
+                          # tested first, and rolled back if it does not stay up);
+                          # "notify": only show that one is available; "off": never check
+check_every_h = 6         # hours between checks (at least 1); the first is 5 min after start
+repo = "https://github.com/TonyXTYan/AfterWord.git"
 
 [pronounce]
 # Pronunciations: words rewritten before they are spoken (also editable on the
@@ -256,6 +267,7 @@ class Config:
     daemon: DaemonSettings = field(default_factory=DaemonSettings)
     qwen: QwenSettings = field(default_factory=QwenSettings)
     alerts: AlertSettings = field(default_factory=AlertSettings)
+    update: UpdateSettings = field(default_factory=UpdateSettings)
     profiles: dict[str, Profile] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
     pronounce: _pron.Pairs = ()  # global [pronounce] table
@@ -448,7 +460,31 @@ def build_config(raw: dict[str, Any]) -> tuple[Config, list[str]]:
     )
     glob = _pron.clean_table(raw.get("pronounce"), errors, "pronounce")
     alerts = _alerts(raw.get("alerts"), profiles, errors)
-    return Config(daemon=daemon, qwen=qwen, alerts=alerts, profiles=profiles, raw=raw, pronounce=glob), errors
+    update = _update(raw.get("update"), errors)
+    return Config(daemon=daemon, qwen=qwen, alerts=alerts, update=update, profiles=profiles, raw=raw,
+                  pronounce=glob), errors
+
+
+def _update(raw: Any, errors: list[str]) -> UpdateSettings:
+    """Validate [update]. A bad value is the default, with a warning."""
+    d = UpdateSettings()
+    if raw is None:
+        return d
+    if not isinstance(raw, dict):
+        errors.append("update: expected a table")
+        return d
+    for extra in sorted(set(raw) - {"mode", "check_every_h", "repo"}):
+        errors.append(f"update.{extra}: unknown field ignored")
+    mode = _str(raw.get("mode"), d.mode, "update.mode", errors)
+    if mode not in UPDATE_MODES:
+        errors.append(f"update.mode: {mode!r} is not one of {', '.join(UPDATE_MODES)}; using {d.mode!r}")
+        mode = d.mode
+    repo = _str(raw.get("repo"), d.repo, "update.repo", errors).strip()
+    if not repo or repo.startswith("-") or any(c.isspace() for c in repo):
+        errors.append(f"update.repo: {repo!r} is not a git URL; using {DEFAULT_REPO}")
+        repo = DEFAULT_REPO
+    every = _num(raw.get("check_every_h"), float, d.check_every_h, 1, 24 * 30, "update.check_every_h", errors)
+    return UpdateSettings(mode=mode, check_every_h=float(every), repo=repo)
 
 
 def _alerts(raw: Any, profiles: dict[str, Profile], errors: list[str]) -> AlertSettings:

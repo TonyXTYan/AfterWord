@@ -453,6 +453,32 @@ def build_app(daemon: "Daemon", port: int) -> FastAPI:
             raise LabError(500, f"could not read {path.name}: {exc.strerror or exc}") from None
         return {"name": name, **body}
 
+    # -- updates (contract: docs/gui-api.md, "Updates"; afterword/update.py) --
+
+    @app.get("/api/update")
+    async def update_get():
+        return await asyncio.to_thread(daemon.updater.view)
+
+    @app.post("/api/update/check")
+    async def update_check():
+        return await daemon.updater.check_now()
+
+    @app.post("/api/update/apply")
+    async def update_apply(request: Request):
+        from afterword.update import UpdateError
+
+        can_queue()  # 503 while stopping
+        body = await json_body(request) if (await request.body()).strip() else {}
+        if not isinstance(body, dict) or not isinstance(body.get("force", False), bool) or \
+                not isinstance(body.get("wait_s", 0), (int, float)) or isinstance(body.get("wait_s"), bool):
+            raise LabError(400, "send {\"force\": true|false, \"wait_s\": seconds} (both optional)")
+        try:
+            tag = daemon.updater.start_apply(force=body.get("force", False), wait_s=body.get("wait_s"))
+        except UpdateError as exc:
+            raise LabError(409, str(exc)) from None
+        return JSONResponse({"started": True, "tag": tag, "pid": os.getpid(), "update": daemon.updater.view()},
+                            status_code=202)
+
     @app.get("/api/queue")
     async def queue():
         return daemon.queue.snapshot()

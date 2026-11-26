@@ -125,3 +125,21 @@ def hook_log(home):
 
 def make_unwritable(path):
     path.chmod(stat.S_IRUSR | stat.S_IXUSR)
+
+
+@pytest.fixture(autouse=True)
+def no_real_updates(monkeypatch, tmp_path):
+    """No test runs the updater's programs for real (git, uv, a release's
+    python, claude, codex): every run fails the test, and no tool is found,
+    so the updater stops with "git was not found" first. tests/test_update.py
+    installs its own fakes. The Claude Code and Codex plugin records are
+    looked up in empty temp directories, never in ~/.claude or ~/.codex."""
+    from afterword import update
+
+    def refuse(argv, *args, **kwargs):
+        raise AssertionError(f"a test ran {argv!r} for real; replace update.run_cmd")
+
+    monkeypatch.setattr(update, "run_cmd", refuse)
+    monkeypatch.setattr(update, "which", lambda name: None)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "no-claude-config"))
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "no-codex-home"))

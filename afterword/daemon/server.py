@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from afterword import __version__
+from afterword import update as updating
 from afterword.hooks import common, scriptsplit, tags
 
 from . import alerts as alerting
@@ -277,6 +278,7 @@ class Daemon:
         self._said: dict[tuple[str, str], _TurnSaid] = {}  # (session, turn) -> blocks spoken
         self._uvicorn = None
         self._stop_event = asyncio.Event()
+        self.updater = updating.for_daemon(self)  # releases: check, switch when idle, confirm (update.py)
 
     # ------------------------------------------------------------------ #
     # Socket ingest                                                      #
@@ -1369,6 +1371,7 @@ class Daemon:
             "queue": self.queue.snapshot(),
             "muted_all": self.muted_all,
             "events": self.events.count(),
+            "update": self.updater.view(),
         }
 
     async def spool_poller(self) -> None:
@@ -1473,6 +1476,7 @@ async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) 
         tasks.append(asyncio.create_task(daemon.spool_poller(), name="spool"))
         tasks.append(asyncio.create_task(daemon.warm_models(), name="warm"))
         tasks.append(asyncio.create_task(daemon.retention_loop(), name="retention"))
+        tasks.append(asyncio.create_task(daemon.updater.run_loop(), name="update"))
 
         # Our own SIGINT/SIGTERM handling in both modes, so shutdown always
         # runs the cleanup below (uvicorn's own capture re-raises the signal

@@ -472,6 +472,11 @@
   .dm-loghead { display: flex; align-items: center; gap: 8px; margin-top: 8px; min-width: 0; }
   .dm-loghead > span:first-child { min-width: 0; overflow-wrap: anywhere; }
   pre.dm-log { margin-top: 4px; max-height: 320px; white-space: pre; word-break: normal; }
+  .dm-upd { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--rule); min-width: 0; }
+  .dm-upd > h3 { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--ink); }
+  .dm-upd > h3 .msg { font-weight: 400; }
+  .dm-upd summary { cursor: pointer; font-size: 12px; color: var(--slate); margin-top: 8px; }
+  pre.up-notes { max-height: 260px; white-space: pre-wrap; overflow-wrap: anywhere; }
   ul.warnings { margin: 0; padding-left: 18px; font-size: 12px; color: var(--queued); }
   ul.warnings li { word-break: break-word; }
   .toml { display: flex; border: 1px solid var(--rule); border-radius: 6px; overflow: auto; max-height: 70vh; background: var(--panel); }
@@ -1112,6 +1117,16 @@
       <div class="hint dm-loghead"><span id="dm-logpath"></span><span class="grow"></span>
         <button class="small" id="dm-logrefresh">Refresh</button><button class="small" id="dm-logclose">Hide</button></div>
       <pre class="dm-log" id="dm-log" tabindex="0"></pre>
+    </div>
+    <div class="dm-upd" id="dm-update" aria-label="updates">
+      <h3>Updates <span class="grow"></span><span class="msg" id="up-msg" role="status"></span></h3>
+      <dl class="cfg-meta" id="up-meta"><dd class="hint">Loading…</dd></dl>
+      <div class="bar">
+        <button id="up-check" title="Ask the repository for release tags now (git ls-remote)">Check now</button>
+        <button id="up-apply" disabled>Update now</button>
+      </div>
+      <div class="hint cfg-note">Only release tags are installed, tested before the switch, and rolled back if they do not stay up. After an update the Claude Code and Codex plugins are refreshed too; open Claude Code sessions load the new hooks once restarted. Set <code>[update] mode</code> in config.toml: auto, notify or off.</div>
+      <details id="up-notesbox" hidden><summary>What’s new in <span id="up-notestag"></span></summary><pre class="dm-log up-notes" id="up-notes" tabindex="0"></pre></details>
     </div>
   </section>
   <section class="panel cfg-sec" id="cfg-file" aria-label="config file">
@@ -5601,6 +5616,59 @@ function dmStatusText(d) {
   return lines.join("\n") + "\n";
 }
 const dmRestarted = (oldPid, pid) => Number.isInteger(pid) && pid > 0 && pid !== oldPid;
+// Updates (GET /api/update, POST /api/update/check, /apply; docs/gui-api.md, "Updates").
+const UP_FOLLOW_MS = 70 * 60 * 1000;   // a first uv sync can take a while; then the restart
+const UP_MODES = {
+  auto: "auto: a new release is installed when nothing is being said",
+  notify: "notify: new releases are shown here, not installed",
+  off: "off: no checks",
+};
+const UP_PHASES = {checking: "checking", preparing: "preparing", waiting: "ready, waiting for a moment with nothing to say for",
+  switching: "switching to", restarting: "restarting on"};
+function upInstallLine(u) {
+  if (u.install === "managed") {
+    const cur = u.current || `v${u.running}`;
+    return `managed install, ${cur}${u.previous ? ` (previous ${u.previous}, kept for rollback)` : ""}`;
+  }
+  return "development checkout: updates are shown, never installed (afterword install-service moves the service to the managed install)";
+}
+function upModeLine(u) {
+  return u.mode === "off" ? UP_MODES.off : `${UP_MODES[u.mode] || u.mode}; checked every ${u.check_every_h} h`;
+}
+function upLatestLine(u) {
+  if (u.available) return `${u.latest} is available (running ${u.running})`;
+  if (u.latest) return `up to date (newest release ${u.latest})`;
+  return u.last_check ? "no release found" : "not checked yet";
+}
+function upPhaseLine(u) {
+  if (!u.phase || u.phase === "idle") return null;
+  return `${UP_PHASES[u.phase] || u.phase}${u.phase_tag ? " " + u.phase_tag : ""}`;
+}
+// Update now: only a managed install under launchd, with a newer release and nothing under way.
+function upApply(u) {
+  if (u.apply_blocked) return {enabled: false, title: u.apply_blocked};
+  if (u.phase && u.phase !== "idle") return {enabled: false, title: `An update step is under way: ${upPhaseLine(u)}`};
+  if (!u.available) return {enabled: false, title: u.latest ? `Up to date (${u.latest})` : "Check for a release first"};
+  const again = u.rolled_back && u.rolled_back === u.latest ? ` It was rolled back before (${u.rollback_reason || "it did not stay up"}).` : "";
+  return {enabled: true, title: `Install ${u.latest} now: it is prepared and tested, then the daemon waits for a moment with nothing to say (up to 10 min) and restarts on it.${again}`};
+}
+function upPluginsLine(u) {
+  const p = u.plugins;
+  if (!p || typeof p !== "object") return null;
+  const names = {claude: "Claude Code", codex: "Codex"};
+  const parts = Object.keys(names).filter(t => p[t] && p[t].message).map(t => `${names[t]}: ${p[t].message}`);
+  return parts.length ? parts.join("; ") : null;
+}
+// While Update now runs: GET /api/status's answer (null while the daemon is down) -> what to show.
+function upFollow(oldPid, s) {
+  if (!s) return {done: false, ok: false, kind: "run", text: "restarting…"};
+  if (Number.isInteger(s.pid) && s.pid > 0 && s.pid !== oldPid)
+    return {done: true, ok: true, kind: "ok", text: `Updated: running ${s.version} (pid ${s.pid}); it is confirmed after a minute.`};
+  const u = s.update || {};
+  if (!u.phase || u.phase === "idle")
+    return {done: true, ok: false, kind: "err", text: u.last_error ? `${u.last_result || "Update failed"}: ${u.last_error}` : (u.last_result || "The update stopped.")};
+  return {done: false, ok: false, kind: "run", text: `${upPhaseLine(u)}…`};
+}
 // ---------- end daemon section
 const DaemonPanel = (() => {
   let data = null, loading = false, restarting = null, pollTimer = null, logName = null, logSeq = 0;
@@ -5739,6 +5807,91 @@ const DaemonPanel = (() => {
   sse.on("open", () => { if (restarting) poll(); });
   return {load, restarting: () => !!restarting};
 })();
+// The Daemon section's Updates part.
+const UpdatePanel = (() => {
+  let data = null, loading = false, busy = false, follow = null, timer = null;
+  function render(u) {
+    data = u;
+    const rows = [
+      ["install", upInstallLine(u)],
+      ["mode", upModeLine(u)],
+      ["latest", upLatestLine(u)],
+      ["checked", h("span", null, u.last_check ? relSpan(u.last_check) : "never",
+        u.last_result ? h("span", {class: "muted"}, ` · ${u.last_result}`) : null)],
+    ];
+    if (u.last_error) rows.push(["error", h("span", {class: "warn"}, u.last_error)]);
+    const ph = upPhaseLine(u);
+    if (ph) rows.push(["now", ph]);
+    if (u.pending) rows.push(["pending", `switched to ${u.current}; confirmed after a minute of running (rolled back if it keeps failing)`]);
+    if (u.rolled_back) rows.push(["rolled back", h("span", {class: "warn"}, `${u.rolled_back}: ${u.rollback_reason || "it did not stay up"} (not retried automatically; Update now retries it)`)]);
+    const pl = upPluginsLine(u);
+    if (pl) rows.push(["plugins", pl]);
+    $("up-meta").replaceChildren(...rows.flatMap(([k, v]) => [h("dt", {class: "lbl"}, k), h("dd", null, v)]));
+    const ap = upApply(u), b = $("up-apply");
+    b.disabled = busy || !!follow || !ap.enabled;
+    b.title = ap.title;
+    b.textContent = u.available ? `Update to ${u.latest}` : "Update now";
+    $("up-check").disabled = busy || !!follow || !!(u.phase && u.phase !== "idle");
+    $("up-notesbox").hidden = !u.notes;
+    if (u.notes) { $("up-notestag").textContent = u.notes_tag || ""; $("up-notes").textContent = u.notes; }
+  }
+  async function load() {
+    if (loading || follow) return;
+    loading = true;
+    const r = await api("GET", "/api/update");
+    loading = false;
+    if (!r.ok || !r.data) return note("up-msg", `update status unavailable: ${r.error || "empty response"}`, "err");
+    if ($("up-msg").classList.contains("err")) note("up-msg", "");
+    render(r.data);
+  }
+  async function check() {
+    busy = true;
+    if (data) render(data);
+    note("up-msg", "checking…", "run");
+    const r = await api("POST", "/api/update/check");
+    busy = false;
+    if (!r.ok || !r.data) { if (data) render(data); return flashNote("up-msg", `Check failed: ${r.error || "empty response"}`, "err", 8000); }
+    render(r.data);
+    if (r.data.last_error) flashNote("up-msg", "Check failed: see error.", "err", 8000);
+    else flashNote("up-msg", r.data.available ? `${r.data.latest} is available.` : "Up to date.", "ok", 5000);
+  }
+  function schedule(ms) { clearTimeout(timer); timer = setTimeout(poll, ms); }
+  async function poll() {
+    clearTimeout(timer);
+    if (!follow) return;
+    let s = null;
+    try { const res = await fetch("/api/status", {cache: "no-store"}); if (res.ok) s = await res.json(); } catch { /* down for the restart */ }
+    if (!follow) return;
+    const f = upFollow(follow.pid, s);
+    if (f.done || Date.now() >= follow.until) {
+      follow = null;
+      if (f.done) note("up-msg", f.text, f.kind);
+      else note("up-msg", "The update did not finish in time: see afterwordd.log and service.log.", "err");
+      if (s && s.update) render(s.update); else load();
+      return;   // the Daemon rows catch up with the new pid at the page's next refresh
+    }
+    note("up-msg", f.text, f.kind);
+    if (s && s.update) render(s.update);
+    schedule(2000);
+  }
+  async function apply() {
+    if (!data || !data.available || follow) return;
+    if (!confirm(`Install ${data.latest} now? It is prepared and tested first; then, once nothing is being said, the daemon restarts on it.`)) return;
+    busy = true;
+    render(data);
+    const r = await api("POST", "/api/update/apply", {});
+    busy = false;
+    if (!r.ok || !r.data) { render(data); return flashNote("up-msg", `Update failed: ${r.error || "empty response"}`, "err", 8000); }
+    follow = {pid: r.data.pid, until: Date.now() + UP_FOLLOW_MS};
+    if (r.data.update) render(r.data.update);
+    note("up-msg", `updating to ${r.data.tag || data.latest}…`, "run");
+    schedule(1500);
+  }
+  $("up-check").addEventListener("click", check);
+  $("up-apply").addEventListener("click", apply);
+  sse.on("open", () => { if (follow) poll(); });
+  return {load};
+})();
 
 // ===================================================================
 // Config (#config): GET /api/config, POST /api/config/reload
@@ -5858,10 +6011,10 @@ const Config = (() => {
   });
   return {
     show() {
-      visible = true; DaemonPanel.load(); load(); Pronounce.load(); Alerts.load();
+      visible = true; DaemonPanel.load(); UpdatePanel.load(); load(); Pronounce.load(); Alerts.load();
       requestAnimationFrame(() => Alerts.fit());
       // Pick up hot reloads while the page is open (unchanged text is not re-rendered).
-      if (!timer) timer = setInterval(() => { if (visible && document.visibilityState === "visible") { DaemonPanel.load(); load(); Pronounce.load(); Alerts.load(); } }, 10000);
+      if (!timer) timer = setInterval(() => { if (visible && document.visibilityState === "visible") { DaemonPanel.load(); UpdatePanel.load(); load(); Pronounce.load(); Alerts.load(); } }, 10000);
     },
     hide() { visible = false; },
     refresh() { if (visible) load(); },
