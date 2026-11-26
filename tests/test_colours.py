@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from afterword.daemon.config import SPEAKER_COLORS, SPEAKER_FAMILIES, build_config, parse_color
-from test_gui_api import H, _write_cfg, gui  # noqa: F401  (the fixture)
+from test_gui_api import H, _write_cfg
 
 UI = Path(__file__).resolve().parent.parent / "afterword" / "ui" / "index.html"
 PAPERS = {"light": ("#E8EBEE", "#F7F8F9"), "dark": ("#121417", "#1A1D21")}  # --paper, --sheet

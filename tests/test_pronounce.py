@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from afterword.daemon.config import DEFAULT_CONFIG_TOML, build_config
 from afterword.hooks import common, pronounce
 from conftest import TIME_SCALE, ROOT, run_hook, stop_payload, wait_for
-from test_lab import FakeEngine, _daemon, make_lab, home  # noqa: F401  (fixtures)
+from test_lab import FakeEngine, _daemon
 
 H = {"X-AfterWord": "1"}
 SYSTEM_PYTHON = "/usr/bin/python3"

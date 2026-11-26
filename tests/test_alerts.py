@@ -3,7 +3,6 @@ PermissionRequest / Notification hooks, pending permissions, "done" at Stop,
 queue rules, phrase pools and picking, the `say` fallback, `afterword alerts
 generate` (with a fake runner: claude is never called here) and the HTTP API."""
 
-import asyncio
 import json
 import os
 import random
@@ -234,7 +233,7 @@ def test_small_pool_still_varies(tmp_path):
     (tmp_path / "alerts.json").write_text(json.dumps({"en": {"idle": ["one {project}", "two {project}"]}}))
     p = alerts.AlertPhrases(tmp_path / "alerts.json")
     got = [p.pick("idle", "en", {"project": "x"})[1] for _ in range(6)]
-    assert all(a != b for a, b in zip(got, got[1:]))
+    assert all(a != b for a, b in zip(got, got[1:], strict=False))
 
 
 def test_file_pools_override_builtin_and_bad_entries_are_dropped(tmp_path):

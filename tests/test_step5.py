@@ -5,7 +5,6 @@ import json
 import os
 import re
 import time
-from pathlib import Path
 
 import pytest
 
@@ -620,7 +619,6 @@ def test_long_voice_argument_is_not_echoed(home):
 def test_repeated_prompt_without_prompt_id_is_not_dropped(home):
     # No prompt_id: only near-simultaneous duplicates are merged.
     run_hook({"session_id": "r1", "prompt": "/afterword:voice off"}, args=("user-prompt-submit",))
-    import hashlib
 
     for p in (home / "seen").iterdir():
         os.utime(p, (time.time() - 20,) * 2)  # older than the no-id window

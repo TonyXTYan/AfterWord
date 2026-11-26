@@ -13,8 +13,8 @@ import tomllib
 import numpy as np
 import pytest
 
-from afterword.daemon.config import ConfigStore, LangVoice, Profile, build_config, lang_code
-from afterword.daemon.stream import SAMPLE_RATE, NullStreamPlayer
+from afterword.daemon.config import LangVoice, build_config, lang_code
+from afterword.daemon.stream import SAMPLE_RATE
 from afterword.daemon.synth import NullSynth, StreamResult
 from afterword.hooks import scriptsplit, tags
 from afterword.hooks.scriptsplit import split
@@ -123,7 +123,7 @@ def test_split_parts_are_substrings_in_order_and_never_raise():
         parts = split(text, rng.choice(["en", "zh", None, "auto"]), rng.choice([None, "en"]))
         assert len(parts) <= scriptsplit.MAX_PARTS
         pos = 0
-        for lang, part in parts:
+        for _lang, part in parts:
             assert part and part == part.strip()
             i = text.find(part, pos)
             assert i >= 0, (text, parts)
@@ -761,7 +761,7 @@ def test_hook_never_fails_on_odd_langs_config(aw_home, say_stub):
 # Voice lab: profiles with langs                                               #
 # --------------------------------------------------------------------------- #
 
-from test_lab import FakeEngine, home, make_lab  # noqa: E402,F401  (fixtures)
+from test_lab import FakeEngine  # noqa: E402
 
 
 def test_catalog_lists_langs(make_lab):

@@ -8,7 +8,6 @@ import json
 import sys
 import threading
 import time
-import wave
 from pathlib import Path
 
 import numpy as np
@@ -19,7 +18,7 @@ from afterword.daemon import pitch, qwen, voices
 from afterword.daemon.config import ConfigStore
 from afterword.daemon.lab import Lab, LabError
 
-from test_lab import SR, FakeEngine, FakeModel, _daemon, home, make_lab, run  # noqa: F401  (fixtures)
+from test_lab import SR, FakeEngine, FakeModel, _daemon, run
 from conftest import TIME_SCALE
 
 
@@ -83,6 +82,15 @@ class ToneEngine(FakeEngine):
 
 
 DESIGN = {"text": "Hello there.", "voice": "design:A calm narrator.", "lang": "en", "pace": 1.1}
+
+
+@pytest.fixture
+def short_live_quiet(monkeypatch):
+    """The explorer waits LIVE_QUIET_S after live speech; shrink it so tests
+    that cross that wait do not sleep a second each time. Tests using it keep
+    their gaps between live segments well under this value."""
+    monkeypatch.setattr(exploremod, "LIVE_QUIET_S", 0.2)
+    return 0.2
 
 
 def make(home, engine=None, events=None):
@@ -159,7 +167,7 @@ def _req(text, kind="design"):
 
 
 def test_live_render_preempts_a_preemptible_lab_render():
-    eng = ToneEngine(chunks=100, delay=0.05)  # ~5 s if it ran to the end
+    eng = ToneEngine(chunks=24, delay=0.05)  # ~1.2 s if it ran to the end
     lab = eng.submit_render(_req("explore"), limit=False, stream=True, preemptible=True)
     assert lab.result is not None
     end = time.time() + 5
@@ -170,10 +178,10 @@ def test_live_render_preempts_a_preemptible_lab_render():
     live = eng.submit_render(_req("live", "builtin"), limit=False, priority=qwen.LIVE)
     with pytest.raises(qwen.RenderPreempted) as info:
         lab.result(5)
-    assert time.monotonic() - t0 < 0.3 * TIME_SCALE  # at its next chunk, not after the ~4.9 s it had left
+    assert time.monotonic() - t0 < 0.3 * TIME_SCALE  # at its next chunk, not after the ~1.1 s it had left
     assert isinstance(info.value, qwen.RenderCancelled)
     assert info.value.partial.seed == 7  # its timings are kept, as for a skip
-    live.result(15)  # the live render itself is ~5 s here
+    live.result(15)  # the live render itself is ~1.2 s here
     assert eng.preemptions == 1
     eng.shutdown()
 
@@ -449,10 +457,10 @@ def test_explorer_reports_a_render_error(home):
     assert "unknown speaker" in st["reason"] and st["count"] == 0
 
 
-def test_live_speech_preempts_the_explorer(home, monkeypatch):
+def test_live_speech_preempts_the_explorer(home, monkeypatch, short_live_quiet):
     """A line the daemon speaks while the explorer renders stops that render
     at its next chunk; the seed is rendered again afterwards."""
-    eng = ToneEngine(chunks=12, chunk_s=0.2, delay=0.05)  # ~0.6 s per take
+    eng = ToneEngine(chunks=8, chunk_s=0.1, delay=0.04)  # ~0.3 s per take, 0.8 s of audio
 
     async def main():
         d = _daemon(home, monkeypatch, eng)
@@ -460,7 +468,7 @@ def test_live_speech_preempts_the_explorer(home, monkeypatch):
         await d.lab.explore_start({"settings": DESIGN, "start_seed": 1, "ahead": 3})
         x = d.lab.explorer.x
         await until(lambda: x.count >= 1 and x.rendering is not None and eng._busy)
-        await asyncio.sleep(0.12)  # inside a take's render
+        await asyncio.sleep(0.1)  # inside a take's render
         seed = x.rendering
         t0 = time.time()
         ack = d.dispatch(json.dumps({"type": "test", "text": "hi", "profile": "ember"}).encode(), t0)
@@ -501,17 +509,17 @@ def test_explorer_holds_back_while_live_speech_is_busy(home):
     assert after["count"] == 3 and after["reason"] != exploremod.LIVE_HOLD
 
 
-def test_explorer_does_not_start_a_take_between_live_segments(home):
+def test_explorer_does_not_start_a_take_between_live_segments(home, short_live_quiet):
     """A reply's segments reach the engine one at a time. Before this, the
     pre-empted take was queued again at once, started in the gap after each
     segment and was pre-empted again by the next one (a model load and a
     first chunk in front of every segment)."""
-    eng = ToneEngine(chunks=20, chunk_s=0.1, delay=0.05)
+    eng = ToneEngine(chunks=6, chunk_s=0.1, delay=0.04)
 
     async def main():
         lab = make(home, engine=eng)
         await asyncio.wrap_future(eng.submit_render(_req("warm", "builtin"), limit=False, priority=qwen.LIVE))
-        await asyncio.sleep(exploremod.LIVE_QUIET_S + 0.1)
+        await asyncio.sleep(short_live_quiet + 0.1)
         await lab.explore_start({"settings": DESIGN, "start_seed": 1, "ahead": 5})
         x = lab.explorer.x
         await until(lambda: x.rendering is not None and eng._busy)

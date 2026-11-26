@@ -58,6 +58,45 @@ def aw_home(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def home(aw_home):
+    return aw_home
+
+
+@pytest.fixture
+def make_lab(home):
+    """A voice Lab over a fake engine; shared by the lab, explorer, langs and
+    pronounce tests."""
+    from test_lab import FakeEngine
+
+    from afterword.daemon import voices
+    from afterword.daemon.config import ConfigStore
+    from afterword.daemon.lab import Lab
+
+    def make(engine=None, config_text=None):
+        if config_text is not None:
+            (home / "config.toml").write_text(config_text)
+        store = ConfigStore()
+        store.ensure_default_file()
+        return Lab(home, store, engine or FakeEngine(), voices.ClipStore(home / "voices"))
+
+    return make
+
+
+@pytest.fixture
+def gui(aw_home, monkeypatch):
+    """(daemon, TestClient) over a fake engine; files that need a different
+    setup define their own `gui`."""
+    from fastapi.testclient import TestClient
+    from test_lab import FakeEngine, _daemon
+
+    from afterword.daemon.web import build_app
+
+    d = _daemon(aw_home, monkeypatch, FakeEngine())
+    client = TestClient(build_app(d, 47800), base_url="http://127.0.0.1:47800", raise_server_exceptions=False)
+    return d, client
+
+
+@pytest.fixture
 def say_stub(tmp_path, monkeypatch):
     """Replace /usr/bin/say with a script that records what it was asked to
     speak. Returns the path of the record file."""

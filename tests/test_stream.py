@@ -3,6 +3,7 @@ the stream players, engine priority and cancel, and the daemon's streaming
 path with its clip, timings and afplay fallback. No audio device is used."""
 
 import asyncio
+import itertools
 import json
 import logging
 import sys
@@ -99,7 +100,7 @@ def test_null_player_records_chunks_in_order_and_plays_them_out():
         pb.write(c)
     pb.finish()
     assert pb.wait(5) and pb.completed
-    assert len(pb.fed) == 5 and all(a is b for a, b in zip(pb.fed, chunks))
+    assert len(pb.fed) == 5 and all(a is b for a, b in zip(pb.fed, chunks, strict=True))
     assert np.array_equal(np.concatenate(pb.played), np.concatenate(chunks))  # rate 1.0: no stretch
     assert pb.played_samples == 5 * 2400 and first and pb.first_audio_at
 
@@ -546,7 +547,7 @@ def test_streamed_item_feeds_every_chunk_in_order_and_clip_matches(aw_home, monk
     ev = run(play_one(d))
     assert ev["status"] == "spoken", ev
     fed = d.stream_player.last.fed
-    assert len(fed) == len(chunks) and all(np.array_equal(a, b) for a, b in zip(fed, chunks))
+    assert len(fed) == len(chunks) and all(np.array_equal(a, b) for a, b in zip(fed, chunks, strict=True))
     clip = read_wav(ev["clip"])
     assert np.allclose(clip, np.concatenate(chunks), atol=1 / 16000)
     t = ev["timings"]
@@ -855,9 +856,13 @@ def test_status_follows_a_hot_reloaded_stream_setting_while_idle(aw_home, monkey
     assert st["stream"]["enabled"] is True and st["stream"]["active"] is True and st["player"] == "null"
 
 
-def os_utime_bump(path, step=[0]):
+_utime_steps = itertools.count(1)
+
+
+def os_utime_bump(path):
+    """Push the file's mtime a little further into the future each call, so
+    the config store sees a change even within one filesystem timestamp tick."""
     import os
 
-    step[0] += 1
-    t = time.time() + step[0]
+    t = time.time() + next(_utime_steps)
     os.utime(path, (t, t))
