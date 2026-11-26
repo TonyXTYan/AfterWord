@@ -5,7 +5,7 @@
     {
       "name": "afterword",
       "source": "./",
-      "version": "0.3.3",
+      "version": "0.3.4",
       "description": "Spoken replies for Claude Code and Codex with local Qwen3-TTS."
     }
   ]

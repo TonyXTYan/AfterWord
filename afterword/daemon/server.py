@@ -253,6 +253,7 @@ class Daemon:
         self.alerts = alerting.AlertPhrases(home / alerting.FILE_NAME)
         self.alert_runner = None  # `claude -p` runner for Generate (tests inject a fake)
         self._stopping = False
+        self.exit_code = 0  # main() exits with it; request_restart sets service.RESTART_EXIT
         self.muted_all = self._load_daemon_state().get("muted_all") is True
         # [qwen] edits apply on every reload, not just when a message plays.
         store.on_reload(lambda c: self.engine.configure(c.qwen.repos(), c.qwen.keep_loaded))
@@ -1384,6 +1385,16 @@ class Daemon:
             except Exception:
                 log.exception("state prune failed")
 
+    def request_restart(self) -> None:
+        """Shut down as for SIGTERM, then exit non-zero: under launchd,
+        KeepAlive (SuccessfulExit = false) launches the daemon again."""
+        from afterword import service
+
+        log.info("restart asked for in the GUI: exiting %d for launchd to start the daemon again",
+                 service.RESTART_EXIT)
+        self.exit_code = service.RESTART_EXIT
+        self.request_shutdown()
+
     def request_shutdown(self) -> None:
         self._stopping = True
         self._stop_event.set()
@@ -1427,7 +1438,9 @@ def _clear_stale_socket(path: Path) -> None:
     raise AlreadyRunning(f"something is already listening on {path}")
 
 
-async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) -> None:
+async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) -> int:
+    """Run until stopped; returns the exit status (0, or RESTART_EXIT after
+    a restart asked for in the GUI)."""
     import signal
 
     os.umask(0o077)  # events.db, clips, logs: owner-only
@@ -1561,6 +1574,7 @@ async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) 
             events.close()
         lock.close()
         log.info("stopped")
+    return daemon.exit_code if daemon is not None else 0
 
 
 def main(port: int | None = None, http: bool = True, verbose: bool = False) -> int:
@@ -1579,7 +1593,7 @@ def main(port: int | None = None, http: bool = True, verbose: bool = False) -> i
     if trimmed:
         log.info("trimmed %s to its last %d bytes", home / service.LOG_NAME, service.LOG_KEEP)
     try:
-        asyncio.run(run_daemon(port=port, http=http))
+        return asyncio.run(run_daemon(port=port, http=http))
     except AlreadyRunning as exc:
         if as_service:
             # A non-zero exit would make launchd (KeepAlive SuccessfulExit =

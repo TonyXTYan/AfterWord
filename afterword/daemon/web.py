@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -19,13 +20,16 @@ from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from starlette.background import BackgroundTask
 
+from afterword import __version__, service
 from afterword.hooks import common
 
 from . import alerts as alerting
 from . import state
 from .config import lang_code
 from .lab import LabError, pronounce_view, save_pronounce
+from .log import LOG_FILE
 from .voices import CLIP_MAX_BYTES
 
 if TYPE_CHECKING:
@@ -37,6 +41,10 @@ ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 SPEAK_MAX_CHARS = 2000  # POST /api/speak, after trimming
 SPEAK_SESSION = "gui"  # the session id of lines typed in the GUI
 REPLAY_KEY_CHARS = 40  # characters of a block's preview used to find it again
+SERVICE_CACHE_S = 3.0  # GET /api/service reuses launchctl's answers this long (the Config page polls)
+RESTART_DELAY_S = 0.1  # after the 202 is sent, before the restart begins
+INSTALL_COMMAND = "afterword install-service"
+MANUAL_RESTART = "started by hand: restart it in its terminal, or run afterword install-service"
 
 
 def render_export(lines: list[dict], fmt: str, one_session: bool) -> str:
@@ -307,6 +315,143 @@ def build_app(daemon: "Daemon", port: int) -> FastAPI:
             preview["lang"] = used
         res = await daemon.lab.preview(preview)
         return {**res, "phrase": phrase, "alert_text": text, "event": event, "alert_profile": name}
+
+    # -- the daemon itself (contract: docs/gui-api.md, "Daemon") ---------
+
+    probe_lock = asyncio.Lock()
+    probed: dict = {"at": 0.0, "info": None}
+
+    async def service_probe(force: bool = False) -> service.ServiceInfo:
+        """launchctl's answers about the agent (with start at login), from a
+        thread and reused for SERVICE_CACHE_S, so a polling page does not run
+        launchctl every time; concurrent requests share one probe."""
+        async with probe_lock:
+            info = probed["info"]
+            if force or info is None or time.monotonic() - probed["at"] >= SERVICE_CACHE_S:
+                info = await asyncio.to_thread(service.service_info, True)
+                probed.update(at=time.monotonic(), info=info)
+            return info
+
+    def storage_view() -> dict:
+        cfg = daemon.store.get().daemon
+        db = Path(daemon.events.db_path)
+        db_bytes = 0
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                db_bytes += os.stat(f"{db}{suffix}").st_size
+            except OSError:
+                pass
+        clips, clip_bytes = 0, 0
+        try:
+            with os.scandir(daemon.clips_dir) as it:
+                for entry in it:
+                    if entry.name.endswith(".wav") and entry.is_file(follow_symlinks=False):
+                        clips += 1
+                        clip_bytes += entry.stat(follow_symlinks=False).st_size
+        except OSError:
+            pass
+        return {
+            "db_path": str(db), "db_bytes": db_bytes, "events": daemon.events.count(),
+            "clips_dir": str(daemon.clips_dir), "clips": clips, "clips_bytes": clip_bytes,
+            "keep_days": cfg.keep_days, "history": cfg.history, "config": str(daemon.store.path),
+        }
+
+    def log_paths() -> dict[str, Path]:
+        return {"daemon": daemon.home / LOG_FILE, "service": daemon.home / service.LOG_NAME}
+
+    async def service_view(force: bool = False) -> dict:
+        info = await service_probe(force)
+        svc_home = await asyncio.to_thread(service.plist_home) if info.installed else None
+        storage = await asyncio.to_thread(storage_view)
+        return {
+            "label": service.LABEL,
+            "installed": info.installed,
+            "plist": info.plist,
+            "loaded": info.loaded,
+            "running": info.running,
+            "state": info.state,
+            "service_pid": info.pid,
+            "last_exit": info.last_exit,
+            "error": info.error,
+            "login": info.login,
+            "summary": info.summary(),
+            "mode": service.daemon_mode(info),
+            "service_home": svc_home,
+            "other_home": bool(svc_home) and not service.same_home(svc_home, daemon.home),
+            "install_command": INSTALL_COMMAND,
+            "restart_exit": service.RESTART_EXIT,
+            "logs": {k: str(v) for k, v in log_paths().items()},
+            "version": __version__,
+            "pid": os.getpid(),
+            "started_at": daemon.started_at,
+            "uptime_s": round(time.time() - daemon.started_at, 1),
+            "home": str(daemon.home),
+            "storage": storage,
+        }
+
+    @app.get("/api/service")
+    async def service_get():
+        return await service_view()
+
+    @app.post("/api/service")
+    async def service_set(request: Request):
+        body = await json_body(request)
+        if not isinstance(body, dict) or not isinstance(body.get("login"), bool):
+            raise LabError(400, "send {\"login\": true|false}")
+        info = await service_probe(force=True)
+        if not info.installed:
+            raise LabError(409, f"the service is not installed: run `{INSTALL_COMMAND}` first")
+        svc_home = await asyncio.to_thread(service.plist_home)
+        if svc_home and not service.same_home(svc_home, daemon.home):
+            raise LabError(409, f"the installed service runs AfterWord home {svc_home}, not this daemon's "
+                                f"{daemon.home}; change it from that daemon or with `afterword login`")
+        r = await asyncio.to_thread(service.set_login, body["login"])
+        if not r.ok:
+            verb = "enable" if body["login"] else "disable"
+            raise LabError(502, f"launchctl {verb} failed: {r.error()}")
+        return await service_view(force=True)
+
+    @app.post("/api/service/restart")
+    async def service_restart():
+        can_queue()  # 503 while already stopping
+        info = await service_probe(force=True)
+        mode = service.daemon_mode(info)
+        if mode == "manual":
+            raise LabError(409, MANUAL_RESTART)
+        if mode != "service":
+            raise LabError(409, f"cannot tell whether launchd started this daemon ({info.error}); "
+                                "restart it with `afterword restart`")
+
+        async def later():
+            await asyncio.sleep(RESTART_DELAY_S)
+            daemon.request_restart()
+
+        # The answer goes out first; the shutdown starts once it is sent.
+        return JSONResponse({"restarting": True, "pid": os.getpid(), "exit_code": service.RESTART_EXIT},
+                            status_code=202, background=BackgroundTask(later))
+
+    @app.post("/api/service/prune")
+    async def service_prune():
+        pruned = await asyncio.to_thread(daemon.prune_events)
+        return {"pruned": pruned, "storage": await asyncio.to_thread(storage_view)}
+
+    @app.post("/api/service/reveal")
+    async def service_reveal():
+        r = await asyncio.to_thread(service.reveal, daemon.home)  # a fixed path, never one from the request
+        if not r.ok:
+            raise LabError(502, f"open -R failed: {r.error()}")
+        return {"revealed": str(daemon.home)}
+
+    @app.get("/api/logs/{name}")
+    async def logs(name: str, lines: int = 200):
+        path = log_paths().get(name)
+        if path is None:
+            raise LabError(404, "no such log (daemon or service)")
+        try:
+            body = await asyncio.to_thread(service.tail, path, lines)
+        except OSError as exc:
+            raise LabError(500, f"could not read {path.name}: {exc.strerror or exc}") from None
+        return {"name": name, **body}
 
     @app.get("/api/queue")
     async def queue():
