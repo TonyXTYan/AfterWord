@@ -2202,7 +2202,7 @@ function detailHtml(d, id) {
        reason: d.reason, profile: d.profile, delivery: d.delivery, error: d.error, attrs: d.attrs}, null, 2))}</pre>
        <h3 class="next">Timings</h3><dl class="timings">${dl}</dl></div>
     <div><h3>Parsed tags</h3><pre>${esc(JSON.stringify(d.parsed, null, 2))}</pre></div>
-    <div><h3>Raw payload</h3><pre>${esc(JSON.stringify(d.payload, null, 2))}</pre></div>
+    <div><h3>Hook payload</h3><pre>${esc(JSON.stringify(d.payload, null, 2))}</pre>${d.kind === "hook" || d.kind === "alert" ? `<p class="via">prompts, replies and tool text are kept as their length only (<code>…_len</code>)</p>` : ""}</div>
   </div></div>`;
 }
 // ---------- fork to lab

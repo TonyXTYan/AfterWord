@@ -110,7 +110,10 @@ def test_hook_event_is_spoken_and_logged(daemon, aw_home, say_stub):
     for key in ("hook_ms", "hook_to_daemon_ms", "queue_wait_ms", "synth_ms", "audio_s", "rtf", "first_audio_ms"):
         assert key in ev["timings"], key
     full = daemon.get(f"/api/events/{ev['id']}")
-    assert full["payload"]["last_assistant_message"].startswith("<voice")
+    # The stored payload is the projection: the reply's length, not its text.
+    assert "last_assistant_message" not in full["payload"]
+    assert full["payload"]["last_assistant_message_len"] == len('<voice set="nova"/><say mood="dry">Through the daemon.</say>')
+    assert full["payload"]["transcript_path"] == "transcript.jsonl"
     assert full["parsed"]["voice"] == {"set": "nova"}
     time.sleep(0.2)
     assert not say_stub.exists()  # the daemon spoke, not the fallback

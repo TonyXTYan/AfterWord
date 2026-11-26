@@ -534,7 +534,8 @@ it shows the last line. **Mute all** sits in the header.
 - **Transcript**: every spoken line, newest first, by voice and folder, with
   a play button where the clip is kept (replayed at the pace it was spoken).
   Filter by text, status, voice, session or "Has audio". Click a line for
-  its raw payload, parsed tags, decision and reason (`session off`,
+  its hook payload (as stored: see [Files](#files)), parsed tags, decision
+  and reason (`session off`,
   `no <say> tag`, `daemon busy`, `duplicate`, …) and timings (hook, hook to
   daemon, synthesis, real-time factor, first chunk, first audio, and whether
   it was streamed); "Timings" shows p50/p95 stats. Prompt and session hooks
@@ -563,7 +564,7 @@ it shows the last line. **Mute all** sits in the header.
 | `~/.afterword/lab/` | voice lab previews and seed-explorer takes (cleared when the daemon restarts) |
 | `~/.afterword/lab/starred/`, `lab/starred.json` | starred takes (kept) |
 | `~/.afterword/state/` | per-session voice state (written by the hook; with alerts on, also the turn's start time and pending permissions). A file with no voice, mute or earlier voice in it is removed after 7 days without changes |
-| `~/.afterword/events.db` | event log (SQLite) shown in the UI; lines older than `[daemon] keep_days` (7 by default, 0 = keep all) are deleted hourly, with their clips |
+| `~/.afterword/events.db` | event log (SQLite) shown in the UI; lines older than `[daemon] keep_days` (7 by default, 0 = keep all) are deleted hourly, with their clips. Each row keeps the spoken text and, of the hook payload, only small fields (session id, hook event, cwd, prompt id, model, permission mode, tool name, notification type, transcript file name, flags and numbers): the prompt, the reply, notification messages and tool input and output are stored as their length (`prompt_len`, …), plus the keys of `tool_input` / `tool_response`, never their text (rows from before 0.3.5 are rewritten this way once, on start). A file SQLite cannot read is moved to `events.db.corrupt-<UTC time>` (with its `-wal` / `-shm`) and a new log is started |
 | `~/.afterword/clips/` | the last `[daemon] history` spoken clips (50 by default), replayable from the log, and none older than `keep_days` |
 | `~/.afterword/afterwordd.log` | daemon text log (rotating) |
 | `~/.afterword/hook.log` | hook log (JSON lines; errors land here, never in Claude Code) |

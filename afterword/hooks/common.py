@@ -763,7 +763,7 @@ def append_jsonl(path: Path, record: Dict[str, Any], max_bytes: int, rotate: boo
 
 
 def cap_strings(obj: Any, limit: int = 64 * 1024, _depth: int = 0) -> Any:
-    """Copy of `obj` with long strings truncated, for logging raw payloads."""
+    """Copy of `obj` with long strings truncated, for logging what a hook sent."""
     if _depth > 20:
         return "<too deep>"
     if isinstance(obj, str):
@@ -777,3 +777,61 @@ def cap_strings(obj: Any, limit: int = 64 * 1024, _depth: int = 0) -> Any:
     if obj is None or isinstance(obj, (bool, int, float)):
         return obj
     return repr(obj)[:200]
+
+
+# What of a hook payload is kept in events.db and the spool. Prompts,
+# replies, tool commands and tool output are free text: only their length is
+# kept, and for tool_input / tool_response their keys. The spoken <say> text
+# is stored on its own (the event's `text` and `parsed`), not through here.
+PAYLOAD_KEEP = {
+    # field: longest string kept
+    "session_id": 256, "hook_event_name": 64, "cwd": 4096, "prompt_id": 256, "turn_id": 256,
+    "model": 128, "permission_mode": 64, "tool_name": 128, "tool_use_id": 256,
+    "notification_type": 64, "source": 64, "reason": 64, "trigger": 64, "message_id": 256,
+    "agent_id": 256, "agent_type": 128,
+}
+PAYLOAD_KEYS_OF = ("tool_input", "tool_response")  # dicts whose keys are kept as well
+_TRUNCATED = re.compile(r"…\[truncated (\d+) chars\]$")
+
+
+def _payload_len(value: Any) -> int:
+    """Length of a free-text value: the characters of a string (counting what
+    an older cap_strings cut off), else of its compact JSON."""
+    if isinstance(value, str):
+        m = _TRUNCATED.search(value)
+        return len(value) - len(m.group(0)) + int(m.group(1)) if m else len(value)
+    try:
+        return len(json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str))
+    except (TypeError, ValueError, RecursionError):
+        return 0
+
+
+def project_payload(d: Any) -> Optional[Dict[str, Any]]:
+    """The allow-listed projection of a raw hook payload, which is what gets
+    stored. The small identifying fields of PAYLOAD_KEEP stay (capped);
+    numbers and booleans stay (they carry no text); transcript_path becomes
+    its file name; any other string, list or dict becomes `<key>_len`, plus
+    `<key>_keys` for tool_input and tool_response. Idempotent: projecting a
+    projection gives it back, so the daemon can project again what a hook
+    already projected, and the startup scrub can run over either kind of row.
+    Not a dict: None."""
+    if not isinstance(d, dict):
+        return None
+    out = {}  # type: Dict[str, Any]
+    # At most 100 fields in, so at most 102 out: a second pass sees them all.
+    for key, value in list(d.items())[:100]:
+        if not isinstance(key, str) or not key or len(key) > 64:
+            continue
+        if value is None or isinstance(value, (bool, int, float)):
+            out[key] = value
+        elif key in PAYLOAD_KEEP and isinstance(value, str):
+            out[key] = value[:PAYLOAD_KEEP[key]]
+        elif key == "transcript_path" and isinstance(value, str):
+            out[key] = os.path.basename(value)[:256]
+        elif key.endswith("_keys") and key[:-5] in PAYLOAD_KEYS_OF and isinstance(value, list):
+            out[key] = [k[:64] for k in value[:50] if isinstance(k, str)]
+        elif len(key) <= 59:  # room for the suffix, so a second pass keeps the key
+            out[key + "_len"] = _payload_len(value)
+            if key in PAYLOAD_KEYS_OF and isinstance(value, dict):
+                out[key + "_keys"] = sorted(str(k)[:64] for k in list(value)[:50])
+    return out
