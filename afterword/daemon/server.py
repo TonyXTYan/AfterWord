@@ -7,6 +7,7 @@ import asyncio
 import concurrent.futures
 import contextlib
 import fcntl
+import io
 import json
 import logging
 import os
@@ -24,7 +25,7 @@ from . import alerts as alerting
 from . import apple
 from .config import ConfigStore, Profile, lang_code
 from .log import EventLog, ingest_spool, setup_text_logging
-from .player import make_player
+from .player import PlaybackTimeout, make_player, play_timeout_s
 from .queue import PlaybackQueue, QueueItem
 from .lab import Lab
 from .qwen import LIVE as QWEN_LIVE, EngineStopped, QwenEngine, RenderCancelled, mlx_audio_available
@@ -133,6 +134,16 @@ class _Feed:
     def _emit(self, chunk) -> None:
         self.clip.append(chunk)
         self.playback.write(chunk)
+
+    def play_seconds(self) -> float:
+        """How long the stream takes to play everything fed so far: each
+        span's samples at its pace (gaps in real time)."""
+        total = 0.0
+        ends = [start for _, start in self.spans[1:]] + [len(self.clip)]
+        for (pace, start), end in zip(self.spans, ends):
+            n = sum(len(c) for c in self.clip[start:end])
+            total += n / SAMPLE_RATE / (pace or 1.0)
+        return total
 
     def audio(self):
         import numpy as np
@@ -277,6 +288,9 @@ class Daemon:
         self._said: dict[tuple[str, str], _TurnSaid] = {}  # (session, turn) -> blocks spoken
         self._uvicorn = None
         self._stop_event = asyncio.Event()
+        self.supervisor: TaskSupervisor | None = None  # run_daemon's; None in tests that drive worker() directly
+        self._afplay_next = False  # a stream timed out: the next line plays with afplay
+        self._stuck_stream = None  # that stream's Playback, until its thread ends
 
     # ------------------------------------------------------------------ #
     # Socket ingest                                                      #
@@ -650,21 +664,34 @@ class Daemon:
             item = await self.queue.get()
             self.queue.now_playing = item
             self._skip_current = False
-            self._publish_queue()
+            self._guarded("publish the queue", self._publish_queue)
             try:
                 await self._play_item(item)
             except asyncio.CancelledError:
-                self.events.update(item.event_id, status="skipped", reason="daemon shutting down")
+                self._guarded(f"mark event {item.event_id} skipped", self.events.update,
+                              item.event_id, status="skipped", reason="daemon shutting down")
                 raise
             except Exception as exc:
                 if self._stopping:
-                    self.events.update(item.event_id, status="skipped", reason="daemon shutting down")
+                    self._guarded(f"mark event {item.event_id} skipped", self.events.update,
+                                  item.event_id, status="skipped", reason="daemon shutting down")
                     continue
                 log.exception("playback of event %s failed", item.event_id)
-                self.events.update(item.event_id, status="error", reason="error", error=f"{type(exc).__name__}: {exc}")
+                self._guarded(f"mark event {item.event_id} failed", self.events.update,
+                              item.event_id, status="error", reason="error", error=f"{type(exc).__name__}: {exc}")
             finally:
                 self.queue.now_playing = None
-                self._publish_queue()
+                self._guarded("publish the queue", self._publish_queue)
+
+    @staticmethod
+    def _guarded(what: str, fn, *args, **kwargs) -> None:
+        """Bookkeeping on the worker's error and cleanup paths: a failure
+        here (a locked or full events.db, say) is logged, never allowed to
+        end the worker, which would leave every later line queued forever."""
+        try:
+            fn(*args, **kwargs)
+        except Exception:
+            log.exception("could not %s", what)
 
     def _live_busy(self) -> bool:
         """A line is being said or waits to be (Qwen only: `say` does not
@@ -838,10 +865,25 @@ class Daemon:
         if not segments:
             self.events.update(item.event_id, status="skipped", reason="nothing to speak")
             return
-        if self.stream_player is not None:
+        if self.stream_player is not None and self._streaming_allowed():
             if await self._play_streaming(item, cfg, segments):
                 return
         await self._play_whole(item, cfg, segments)
+
+    def _streaming_allowed(self) -> bool:
+        """False for the line after a stream timed out, and for as long as
+        that stream's thread is still stuck (in PortAudio, typically): those
+        lines play whole clips with afplay."""
+        if self._afplay_next:
+            self._afplay_next = False
+            return False
+        stuck = self._stuck_stream
+        if stuck is not None:
+            if not stuck.done.is_set():
+                return False
+            self._stuck_stream = None
+            log.info("the timed-out audio stream has ended; streaming again")
+        return True
 
     async def _play_whole(self, item: QueueItem, cfg, segments: list[Segment]) -> None:
         """The v1 path: render the whole item to a WAV, then afplay it.
@@ -876,18 +918,28 @@ class Daemon:
             self.events.update(item.event_id, status="skipped", reason=reason, clip=str(out), merge_timings=timings)
             self._prune_clips(cfg.daemon.history)
             return
+        await self._play_clip(item, out, rate, timings, note)
+        self._prune_clips(cfg.daemon.history)
+
+    async def _play_clip(self, item: QueueItem, out: Path, rate: float, timings: dict[str, Any],
+                         note: str | None) -> None:
+        """Play a rendered WAV with self.player (afplay) and log the outcome."""
         t_play = time.time()
-        origin = item.t_hook or item.enqueued_at
-        timings["first_audio_ms"] = round((t_play - origin) * 1000, 1)
+        timings["first_audio_ms"] = round((t_play - (item.t_hook or item.enqueued_at)) * 1000, 1)
         self.events.update(item.event_id, status="playing", clip=str(out), merge_timings=timings, reason=note)
-        finished = await self.player.play(out, rate)
+        try:
+            finished = await self.player.play(out, rate)
+        except PlaybackTimeout as exc:
+            log.error("event %s: %s", item.event_id, exc)
+            self.events.update(item.event_id, status="error", reason="playback timed out", error=str(exc),
+                               merge_timings={"play_s": round(time.time() - t_play, 3)})
+            return
         done = {"play_s": round(time.time() - t_play, 3)}
         if finished and not self._skip_current:
             self.events.update(item.event_id, status="spoken", reason=note, merge_timings=done)
         else:
             reason, self._skip_reason = self._skip_reason or "stopped by user", None
             self.events.update(item.event_id, status="skipped", reason=reason, merge_timings=done)
-        self._prune_clips(cfg.daemon.history)
 
     async def _render_joined(self, item: QueueItem, segments: list[Segment], out: Path):
         """v1 path, several segments: render each to a WAV (with its own
@@ -1024,6 +1076,7 @@ class Daemon:
         rendered = []  # per-segment StreamResults, partial ones included
         notes: list[str] = []
         failure: Exception | None = None
+        timed_out: float | None = None
         try:
             for i, seg in enumerate(segments):
                 if cancel.is_set():
@@ -1056,7 +1109,16 @@ class Daemon:
                 playback.abort()
             else:
                 playback.finish()
-            await done.wait()
+            # Everything is rendered: the stream ends within the clip's
+            # length (at its paces) unless the device or its thread is
+            # stuck. Then give up on it rather than block the queue.
+            bound = play_timeout_s(feed.play_seconds())
+            try:
+                await asyncio.wait_for(done.wait(), bound)
+            except asyncio.TimeoutError:
+                timed_out = bound
+                cancel.set()
+                playback.abort()
         except BaseException:
             cancel.set()
             playback.abort()
@@ -1101,23 +1163,33 @@ class Daemon:
             timings["underruns"] = playback.underruns
         clip = str(out) if audio.size else None
         note = "; ".join(notes) or None
-        skipped = self._skip_current or cancel.is_set()
+        skipped = self._skip_current
+
+        if timed_out is not None:
+            # The line after this one plays with afplay, and so does every
+            # line while this stream's thread stays stuck.
+            self._afplay_next = True
+            self._stuck_stream = playback
+            why = f"the audio stream did not finish within {timed_out:.1f} s"
+            log.error("event %s: %s; aborted it", item.event_id, why)
+            self._stream_unavailable(why)
+            if skipped:
+                reason, self._skip_reason = self._skip_reason or "stopped by user", None
+                self.events.update(item.event_id, status="skipped", reason=reason, clip=clip, merge_timings=timings)
+            else:
+                self.events.update(item.event_id, status="error", reason="playback timed out", error=why,
+                                   clip=clip, merge_timings=timings)
+            self._prune_clips(cfg.daemon.history)
+            return True
+
+        skipped = skipped or cancel.is_set()
 
         if not skipped and playback.error and playback.played_samples == 0 and failure is None and clip:
             # The device failed before anything was heard: play the clip the
             # v1 way.
             self._stream_unavailable(f"the audio stream failed: {playback.error}")
             timings["stream"] = False
-            t_play = time.time()
-            timings["first_audio_ms"] = round((t_play - (item.t_hook or item.enqueued_at)) * 1000, 1)
-            self.events.update(item.event_id, status="playing", clip=clip, merge_timings=timings, reason=note)
-            finished = await self.player.play(out, rate)
-            done_t = {"play_s": round(time.time() - t_play, 3)}
-            if finished and not self._skip_current:
-                self.events.update(item.event_id, status="spoken", reason=note, merge_timings=done_t)
-            else:
-                reason, self._skip_reason = self._skip_reason or "stopped by user", None
-                self.events.update(item.event_id, status="skipped", reason=reason, merge_timings=done_t)
+            await self._play_clip(item, out, rate, timings, note)
             self._prune_clips(cfg.daemon.history)
             return True
 
@@ -1369,6 +1441,7 @@ class Daemon:
             "queue": self.queue.snapshot(),
             "muted_all": self.muted_all,
             "events": self.events.count(),
+            "tasks": self.supervisor.snapshot() if self.supervisor is not None else {},
         }
 
     async def spool_poller(self) -> None:
@@ -1407,6 +1480,141 @@ class Daemon:
 # ---------------------------------------------------------------------- #
 # Process lifecycle                                                      #
 # ---------------------------------------------------------------------- #
+
+
+class TaskSupervisor:
+    """Keeps the daemon's background tasks (worker, spool poller, retention
+    loop, model warm-up) running. A task that ends while the daemon is not
+    stopping is logged, recorded as a system row and started again after a
+    backoff (RESTART_FIRST_S doubling to RESTART_MAX_S). One that keeps
+    failing within STABLE_S of being started is given up on after
+    MAX_RAPID_FAILURES. A one-shot task (warm-up) is restarted only when it
+    raised."""
+
+    RESTART_FIRST_S = 1.0
+    RESTART_MAX_S = 60.0
+    STABLE_S = 120.0  # a task that ran this long before failing starts the backoff afresh
+    MAX_RAPID_FAILURES = 8
+
+    def __init__(self, stopping, events=None):
+        self._stopping = stopping  # () -> bool
+        self.events = events
+        self.tasks: dict[str, asyncio.Task] = {}
+        self._factories: dict[str, Any] = {}
+        self._oneshot: set[str] = set()
+        self._started_at: dict[str, float] = {}
+        self._failures: dict[str, int] = {}
+        self._pending: dict[str, asyncio.TimerHandle] = {}
+        self.restarts: dict[str, int] = {}
+        self.given_up: set[str] = set()
+        self._closed = False
+
+    def start(self, name: str, factory, oneshot: bool = False) -> asyncio.Task:
+        """Run `factory()` (a coroutine function) as task `name`."""
+        self._factories[name] = factory
+        if oneshot:
+            self._oneshot.add(name)
+        return self._spawn(name)
+
+    def _spawn(self, name: str) -> asyncio.Task:
+        self._pending.pop(name, None)
+        task = asyncio.get_running_loop().create_task(self._factories[name](), name=name)
+        self._started_at[name] = time.monotonic()
+        self.tasks[name] = task
+        task.add_done_callback(lambda t, n=name: self._done(n, t))
+        return task
+
+    def _done(self, name: str, task: asyncio.Task) -> None:
+        # Retrieve the outcome first, so asyncio never reports "exception
+        # was never retrieved" for a task we handle here.
+        exc = None if task.cancelled() else task.exception()
+        if self._closed or self._stopping() or self.tasks.get(name) is not task:
+            return
+        if exc is None and name in self._oneshot and not task.cancelled():
+            return  # finished its job
+        what = ("was cancelled" if task.cancelled() else
+                f"failed: {type(exc).__name__}: {str(exc)[:300]}" if exc is not None else "ended")
+        ran = time.monotonic() - self._started_at.get(name, 0.0)
+        failures = 1 if ran >= self.STABLE_S else self._failures.get(name, 0) + 1
+        self._failures[name] = failures
+        exc_info = (type(exc), exc, exc.__traceback__) if exc is not None else None
+        if failures > self.MAX_RAPID_FAILURES:
+            self.given_up.add(name)
+            log.critical("daemon task %r %s; it failed %d times in a row, so it is not restarted again "
+                         "(restart the daemon)", name, what, failures, exc_info=exc_info)
+            self._record(f"daemon task {name} {what}; gave up after {failures} failures in a row "
+                         "(restart the daemon)")
+            return
+        delay = min(self.RESTART_MAX_S, self.RESTART_FIRST_S * 2 ** (failures - 1))
+        log.critical("daemon task %r %s; restarting it in %.0f s", name, what, delay, exc_info=exc_info)
+        self._record(f"daemon task {name} {what}; restarting it in {delay:.0f} s")
+        self.restarts[name] = self.restarts.get(name, 0) + 1
+        self._pending[name] = asyncio.get_running_loop().call_later(delay, self._respawn, name)
+
+    def _respawn(self, name: str) -> None:
+        if self._closed or self._stopping():
+            self._pending.pop(name, None)
+            return
+        self._spawn(name)
+
+    def _record(self, reason: str) -> None:
+        if self.events is None:
+            return
+        try:
+            self.events.insert(kind="system", status="error", reason=reason)
+        except Exception:
+            log.exception("could not record a task failure")
+
+    def snapshot(self) -> dict[str, str]:
+        out = {}
+        for name, task in self.tasks.items():
+            if name in self.given_up:
+                out[name] = "failed"
+            elif name in self._pending:
+                out[name] = "restarting"
+            elif task.done():
+                out[name] = "done"
+            else:
+                out[name] = "running"
+        return out
+
+    def close(self) -> list[asyncio.Task]:
+        """Stop restarting; returns the tasks for the caller to cancel."""
+        self._closed = True
+        for handle in self._pending.values():
+            handle.cancel()
+        self._pending.clear()
+        return list(self.tasks.values())
+
+
+RUN_MARKER = "daemon.run"
+
+
+def _read_run_marker(path: Path) -> dict[str, Any] | None:
+    try:
+        data = json.loads(common.read_regular_file(path, 4096).decode("utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        return {}  # unreadable: still a sign the last run did not end cleanly
+    return data if isinstance(data, dict) else {}
+
+
+def _write_run_marker(path: Path) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps({"pid": os.getpid(), "started_at": time.time(), "version": __version__}))
+    os.replace(tmp, path)
+
+
+def _unclean_message(marker: dict[str, Any]) -> str:
+    pid = marker.get("pid")
+    started = marker.get("started_at")
+    when = "unknown time"
+    if isinstance(started, (int, float)) and not isinstance(started, bool):
+        with contextlib.suppress(OverflowError, OSError, ValueError):
+            when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(started))
+    who = f"pid {pid}" if isinstance(pid, int) and not isinstance(pid, bool) else "pid unknown"
+    return f"previous daemon ({who}, started {when}) did not shut down cleanly"
 
 
 def _acquire_lock(home: Path):
@@ -1451,28 +1659,48 @@ async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) 
     loop = asyncio.get_running_loop()
     server = None
     daemon = None
-    tasks: list[asyncio.Task] = []
+    supervisor: TaskSupervisor | None = None
     events = None
     signals_installed: list[int] = []
+    marker_path = home / RUN_MARKER
+    marker_written = False
     try:
         # Refuse to start before touching anything if another daemon owns
         # the socket, so a refused start has no side effects.
         _clear_stale_socket(sock_path)
+        # daemon.run exists only while a daemon runs: one left behind by
+        # another pid means that daemon crashed or was killed (a clean
+        # shutdown removes it below).
+        previous = _read_run_marker(marker_path)
+        if previous is not None and previous.get("pid") == os.getpid():
+            previous = None
+        try:
+            _write_run_marker(marker_path)
+            marker_written = True
+        except OSError as exc:
+            log.warning("could not write %s: %s", marker_path, exc)
         store = ConfigStore()
         if store.ensure_default_file():
             log.info("wrote default config to %s", store.path)
         events = EventLog(home / "events.db")
         events.bind_loop(loop)
         recovered = events.recover_unfinished("daemon restarted")
+        if previous is not None:
+            unclean = _unclean_message(previous)
+            log.warning("%s (any crash trace is in %s)", unclean, home / "service.log")
+            with contextlib.suppress(Exception):
+                events.insert(kind="system", status="error", reason=unclean)
         imported = ingest_spool(events)
         daemon = Daemon(home, store, events)
 
         server = await asyncio.start_unix_server(daemon.handle_connection, path=str(sock_path), limit=SOCKET_LINE_LIMIT)
         os.chmod(sock_path, 0o600)
-        tasks.append(asyncio.create_task(daemon.worker(), name="worker"))
-        tasks.append(asyncio.create_task(daemon.spool_poller(), name="spool"))
-        tasks.append(asyncio.create_task(daemon.warm_models(), name="warm"))
-        tasks.append(asyncio.create_task(daemon.retention_loop(), name="retention"))
+        supervisor = TaskSupervisor(lambda: daemon._stopping, events)
+        daemon.supervisor = supervisor
+        supervisor.start("worker", daemon.worker)
+        supervisor.start("spool", daemon.spool_poller)
+        supervisor.start("warm", daemon.warm_models, oneshot=True)
+        supervisor.start("retention", daemon.retention_loop)
 
         # Our own SIGINT/SIGTERM handling in both modes, so shutdown always
         # runs the cleanup below (uvicorn's own capture re-raises the signal
@@ -1550,6 +1778,7 @@ async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) 
             daemon.engine.shutdown()  # cancel queued renders before the worker is cancelled
             with contextlib.suppress(Exception):
                 daemon._abort_playback()
+        tasks = supervisor.close() if supervisor is not None else []
         for t in tasks:
             t.cancel()
         for t in tasks:
@@ -1572,9 +1801,37 @@ async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) 
             with contextlib.suppress(Exception):
                 events.insert(kind="system", status="info", reason="daemon stopped")
             events.close()
+        if marker_written:
+            with contextlib.suppress(OSError):
+                marker_path.unlink()
         lock.close()
         log.info("stopped")
     return daemon.exit_code if daemon is not None else 0
+
+
+def _thread_excepthook(args) -> None:
+    if args.exc_type is SystemExit:
+        return
+    name = args.thread.name if args.thread is not None else "?"
+    log.critical("uncaught exception in thread %s", name,
+                 exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+
+
+def install_crash_handlers(stream=None) -> bool:
+    """Native crashes (a segfault in PortAudio or MLX, say) print every
+    thread's Python stack to stderr, which is service.log under launchd;
+    exceptions that end a thread go to the log. Returns whether
+    faulthandler could be enabled (stderr needs a real file descriptor)."""
+    import faulthandler
+    import sys
+
+    threading.excepthook = _thread_excepthook
+    try:
+        faulthandler.enable(file=stream if stream is not None else sys.stderr, all_threads=True)
+    except (AttributeError, OSError, ValueError, io.UnsupportedOperation):
+        log.warning("faulthandler not enabled: stderr has no file descriptor")
+        return False
+    return True
 
 
 def main(port: int | None = None, http: bool = True, verbose: bool = False) -> int:
@@ -1592,6 +1849,7 @@ def main(port: int | None = None, http: bool = True, verbose: bool = False) -> i
                        stderr_level=logging.WARNING if as_service else logging.NOTSET)
     if trimmed:
         log.info("trimmed %s to its last %d bytes", home / service.LOG_NAME, service.LOG_KEEP)
+    install_crash_handlers()
     try:
         return asyncio.run(run_daemon(port=port, http=http))
     except AlreadyRunning as exc:
