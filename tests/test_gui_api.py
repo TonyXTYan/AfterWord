@@ -38,6 +38,7 @@ def test_sessions_merge_state_files_and_events(gui):
     d.dispatch(hook_msg("on-1"), time.time())
     body = client.get("/api/sessions").json()
     assert body["muted_all"] is False and body["profiles"] == ["nova", "ember"]
+    assert body["voice_in_use_s"] == common.VOICE_IN_USE_S  # the window the Sessions page warns on
     by_id = {s["session_id"]: s for s in body["sessions"]}
     assert by_id["on-1"]["profile"] == "nova" and by_id["on-1"]["source"] == "env"
     assert by_id["on-1"]["cwd"] == "/w/on" and by_id["on-1"]["events"] == 1

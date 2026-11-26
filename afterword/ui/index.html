@@ -413,6 +413,13 @@
   .vx-stats { color: var(--slate); }
   .sx-mute { font-size: var(--fs-sm); padding: 1px 8px; }
   .sx-mute[aria-pressed="true"] { color: var(--error); font-weight: 600; background: none; border-color: color-mix(in srgb, var(--error) 45%, var(--rule)); }
+  /* two live sessions on one voice: a warning line under the row, amber like the other warnings */
+  .sx-warn { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; min-width: 0; margin: 2px 0 3px; padding: 4px 10px;
+             border: 1px solid color-mix(in srgb, var(--queued) 45%, var(--rule)); border-left-width: 3px; border-radius: 7px;
+             background: color-mix(in srgb, var(--queued) 9%, var(--sheet)); color: var(--ink); font-size: var(--fs-sm); }
+  .sx-warn > span { flex: 1 1 24ch; min-width: 0; overflow-wrap: anywhere; }
+  .sx-warn b { color: var(--queued); }
+  .sx-warn button { flex: none; font-size: var(--fs-sm); padding: 1px 8px; }
   .sx-row.muted .sx-line { opacity: .6; }
   .sx-row.pending { opacity: .65; }
   @media (max-width: 760px) {
@@ -2809,6 +2816,49 @@ const LogPage = {
   hide() { Stats.hide(); },
 };
 
+// ---------- shared voices
+// Two live sessions on one voice talk over each other. A session is live when
+// its voice is on, it is not muted and it was seen less than windowS seconds
+// ago (GET /api/sessions "voice_in_use_s"; strictly less, like the hooks'
+// "in use" check, so a session seen exactly windowS ago is not live). A
+// missing or zero window means nothing is live.
+function sharedVoiceLive(s, nowS, windowS) {
+  if (!s || typeof s.profile !== "string" || s.profile === "" || s.muted) return false;
+  const seen = typeof s.last_seen === "number" ? s.last_seen : s.updated;
+  return typeof seen === "number" && Number.isFinite(seen) && typeof windowS === "number" && nowS - seen < windowS;
+}
+// Map session_id -> {profile, others: [session, ...]} for every live session
+// that shares its profile with at least one other live session.
+function sharedVoiceWarnings(sessions, nowS, windowS) {
+  const byProfile = new Map();
+  for (const s of sessions) {
+    if (!sharedVoiceLive(s, nowS, windowS)) continue;
+    if (!byProfile.has(s.profile)) byProfile.set(s.profile, []);
+    byProfile.get(s.profile).push(s);
+  }
+  const out = new Map();
+  for (const [profile, group] of byProfile)
+    if (group.length > 1)
+      for (const s of group) out.set(s.session_id, {profile, others: group.filter(o => o !== s)});
+  return out;
+}
+// The profile "Pick another" switches a session to, chosen like
+// /afterword:voice pick: never its current one, only profiles no live session
+// uses, the least recently used first (lastUsed: {profile: unix time}; never
+// used counts as oldest; ties keep the config order). {name: null, why} when
+// there is none: "none-configured" (no other profile exists) or "all-in-use".
+function pickAnotherVoice(session, sessions, profiles, lastUsed, nowS, windowS) {
+  const used = new Set();
+  for (const s of sessions) if (sharedVoiceLive(s, nowS, windowS)) used.add(s.profile);
+  const others = profiles.filter(p => p !== session.profile);
+  const free = others.map((name, i) => ({name, i, t: (lastUsed && typeof lastUsed[name] === "number") ? lastUsed[name] : 0}))
+    .filter(c => !used.has(c.name))
+    .sort((a, b) => a.t - b.t || a.i - b.i);
+  if (free.length) return {name: free[0].name, why: ""};
+  return {name: null, why: others.length ? "all-in-use" : "none-configured"};
+}
+// ---------- end shared voices
+
 // ===================================================================
 // Sessions (#sessions): the voice roster (GET /api/voices, PATCH
 // /api/lab/profiles/{name}, POST /api/lab/preview) and the session list
@@ -2828,7 +2878,7 @@ const Sessions = (() => {
   };
   const DESC_MAX = 300;
   let visible = false, stale = true, loadedOnce = false;
-  let data = new Map(), profiles = [];
+  let data = new Map(), profiles = [], voiceInUseS = 0;
   const rows = new Map();     // session_id -> {tr, sig}
   const pending = new Set();  // session ids with a POST in flight
   const notes = new Map();    // session_id -> {text, kind}
@@ -2846,6 +2896,7 @@ const Sessions = (() => {
     $("s-err").hidden = true;
     loadedOnce = true;
     profiles = Array.isArray(r.data.profiles) ? r.data.profiles.filter(p => typeof p === "string") : [];
+    voiceInUseS = isNum(r.data.voice_in_use_s) ? r.data.voice_in_use_s : 0;
     const next = new Map();
     for (const s of Array.isArray(r.data.sessions) ? r.data.sessions : [])
       if (s && typeof s.session_id === "string") next.set(s.session_id, s);
@@ -2881,7 +2932,7 @@ const Sessions = (() => {
     if (r.ok) vSoon();   // the roster's "in use" line follows a voice change
   }
 
-  function rowFor(s) {
+  function rowFor(s, warn) {
     const id = s.session_id;
     const busy = pending.has(id);
     const on = typeof s.profile === "string" && s.profile !== "";
@@ -2920,7 +2971,26 @@ const Sessions = (() => {
             h("a", {href: "/api/export?format=md&session_id=" + encodeURIComponent(id), download: "", "aria-label": `Export ${folder || shortId(id)} as Markdown`}, "Markdown"), " · ",
             h("a", {href: "/api/export?format=txt&session_id=" + encodeURIComponent(id), download: "", "aria-label": `Export ${folder || shortId(id)} as text`}, "Text")) : null,
           n ? h("span", {class: "msg " + n.kind}, n.text) : null,
-          mute)));
+          mute)),
+      warn ? warnLine(s, warn, busy) : null);
+  }
+
+  // Under a row whose voice another live session also uses: who shares it,
+  // and a button that moves this session to a free voice (the same POST as
+  // the voice chip).
+  function warnLine(s, warn, busy) {
+    const names = warn.others.map(folderOf);
+    const shown = names.slice(0, 3).join(", ") + (names.length > 3 ? ` +${names.length - 3} more` : "");
+    const pick = warn.pick;
+    const btn = h("button", {type: "button", class: "small", "data-k": "pick", disabled: busy || !pick.name,
+      title: pick.name ? `Switch this session to ${pick.name}, a voice no live session uses`
+        : pick.why === "none-configured" ? `${warn.profile} is the only voice in config: add another in the Voice lab`
+        : "Every other voice is in use by a live session: free one, or add a voice in the Voice lab"}, "Pick another");
+    btn.addEventListener("click", () => { if (pick.name) change(s.session_id, {profile: pick.name}); });
+    return h("div", {class: "sx-warn", role: "status"},
+      h("span", {title: warn.others.map(o => `${folderOf(o)}\nsession ${o.session_id}`).join("\n")},
+        h("b", null, "Shared voice. "), `${warn.profile} is also in use by ${shown}; two voices overlapping are hard to tell apart.`),
+      btn);
   }
 
   function emptyState() {
@@ -2958,12 +3028,19 @@ const Sessions = (() => {
       return recency(b) - recency(a);
     });
     const focusK = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.k : null;
+    const nowS = Date.now() / 1000;
+    const warns = sharedVoiceWarnings(list, nowS, voiceInUseS);
+    const lastUsed = {};
+    for (const p of voices || []) if (isNum(p.last_used)) lastUsed[p.name] = p.last_used;
+    for (const [sid, w] of warns) w.pick = pickAnotherVoice(data.get(sid), list, profiles, lastUsed, nowS, voiceInUseS);
     const want = [];
     for (const s of list) {
-      const sig = JSON.stringify([s, profiles, speakerProfiles, pending.has(s.session_id), notes.get(s.session_id) || null]);
+      const warn = warns.get(s.session_id) || null;
+      const sig = JSON.stringify([s, profiles, speakerProfiles, pending.has(s.session_id), notes.get(s.session_id) || null,
+        warn && [warn.profile, warn.others.map(o => [o.session_id, o.cwd]), warn.pick]]);
       let r = rows.get(s.session_id);
       if (!r || r.sig !== sig) {
-        const tr = rowFor(s);
+        const tr = rowFor(s, warn);
         const hadFocus = r && r.tr.contains(document.activeElement);
         if (r && r.tr.parentNode) r.tr.replaceWith(tr);
         r = {tr, sig};
@@ -3006,7 +3083,7 @@ const Sessions = (() => {
         voicesErr = r.status === 404 ? "The voice roster isn't available from this daemon yet." : `Voice roster unavailable: ${r.error || "empty response"}`;
       }
     } finally { vBusy = false; }
-    if (visible) renderVoices();
+    if (visible) { renderVoices(); if (loadedOnce) renderAll(); }   // last use feeds "Pick another"
   }
   function vSoon() {
     if (!visible || vTimer) return;
@@ -3196,7 +3273,7 @@ const Sessions = (() => {
       if (stale || !loadedOnce) load(); else renderAll();
       if (voices) renderVoices();
       loadVoices();
-      if (!vTick) vTick = setInterval(() => { if (visible && !document.hidden) loadVoices(); }, 10000);
+      if (!vTick) vTick = setInterval(() => { if (visible && !document.hidden) { loadVoices(); if (loadedOnce) renderAll(); } }, 10000);   // renderAll: a session ages out of the 2 h window
     },
     hide() {
       visible = false;

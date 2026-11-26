@@ -100,6 +100,7 @@ Event types: `event` (an event row changed; summary without payload),
 {
   "muted_all": false,
   "profiles": ["nova", "ember"],
+  "voice_in_use_s": 7200,             // how recently a session counts as using its voice (common.VOICE_IN_USE_S)
   "sessions": [
     {
       "session_id": "5faab7a2-…",
@@ -116,6 +117,11 @@ Event types: `event` (an event row changed; summary without payload),
   ]
 }
 ```
+`voice_in_use_s` is the same 2 hour window as `in_use` in `GET /api/voices`.
+The Sessions page calls a session live when its voice is on, it is not muted
+and its `last_seen` is less than this many seconds ago, and warns on every
+live session that shares its profile with another one.
+
 Sessions come from state files and from sessions seen in the event log, newest
 activity first. Sessions with voice off that never set a voice still appear
 (from their events).
