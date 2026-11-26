@@ -4,6 +4,30 @@ How versions are numbered: [AGENTS.md](AGENTS.md#versioning). Versions before
 0.3.1 were never tagged; their entries were written afterwards from the git
 history, and the last commit of each is given.
 
+## 0.3.6 (2026-11-26)
+
+Updates by themselves: merge a version bump on GitHub (from a cloud session,
+say) and every Mac running the service picks it up.
+
+- A GitHub Action tags each merged version (`vX.Y.Z`) and makes a release
+  from its CHANGELOG entry.
+- `afterword install-service` now runs the daemon from its own managed copy
+  in `~/.afterword/app` (a release per tag, each with its own venv, and a
+  `current` link), not from the checkout you run it in; `--dev` keeps the old
+  behaviour for development. Run it once to move over.
+- The daemon checks for new release tags (5 minutes after starting, then
+  every 6 hours), installs and smoke-tests a new one in the background,
+  switches to it once nothing has been spoken or queued for 30 s, and
+  restarts. If the new version fails to start three times it goes back to
+  the previous one and does not retry that tag by itself.
+- After an update is confirmed, the Claude Code and Codex plugins are
+  refreshed too (open Claude Code sessions load the new hooks after a
+  restart).
+- `[update]` in config.toml: `mode = "auto"` (default), `"notify"` or
+  `"off"`, and `check_every_h`. `afterword update` shows the state, `--check`
+  checks now and `--now` updates now; the Config page's Daemon section has
+  the same, with the new release's notes.
+
 ## 0.3.5 (2026-11-26)
 
 Hardening, from an audit of the repo.
