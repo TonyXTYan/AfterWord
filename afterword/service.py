@@ -428,6 +428,12 @@ def install(dry_run: bool = False, start: bool = True, out=None) -> int:
     py = python_executable()
     data = plistlib.dumps(build_plist(py))
     info = service_info()
+    if start and info.loaded is None:
+        # Without a usable answer we cannot tell whether an older agent is
+        # loaded: writing the plist and bootstrapping could leave a new plist
+        # beside an old, still-loaded job.
+        print(f"cannot tell whether the service is loaded: {info.error}; nothing written", file=sys.stderr)
+        return 1
     if "/.cache/uv/" in py or "/uv/archive-" in py:
         print("warning: the interpreter is inside uv's cache (uvx); install with `uv tool install` "
               "or from a clone so the path stays valid.", file=sys.stderr)
@@ -553,6 +559,9 @@ def uninstall(out=None) -> int:
     out = out or sys.stdout
     path = plist_path()
     info = service_info()
+    if info.loaded is None:  # it may be loaded: deleting the plist would orphan it
+        print(f"cannot tell whether the service is loaded: {info.error}; nothing removed", file=sys.stderr)
+        return 1
     if info.loaded:
         r = _bootout(info)
         if not r.ok:

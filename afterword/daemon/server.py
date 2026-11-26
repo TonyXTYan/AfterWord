@@ -1508,7 +1508,9 @@ async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) 
                 pass
             if not daemon._uvicorn.started and not daemon._stop_event.is_set():
                 msg = f"HTTP UI could not start on 127.0.0.1:{port} (port in use?)"
-                if os.environ.get("AFTERWORD_SERVICE") != "1":
+                from afterword import service
+
+                if os.environ.get(service.SERVICE_ENV) != "1":
                     raise RuntimeError(msg)
                 # Under launchd, exiting would only bring the same failure
                 # back every ThrottleInterval. Speech works without the UI:

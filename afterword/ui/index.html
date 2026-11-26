@@ -2825,7 +2825,7 @@ const LogPage = {
 function sharedVoiceLive(s, nowS, windowS) {
   if (!s || typeof s.profile !== "string" || s.profile === "" || s.muted) return false;
   const seen = typeof s.last_seen === "number" ? s.last_seen : s.updated;
-  return typeof seen === "number" && Number.isFinite(seen) && typeof windowS === "number" && nowS - seen < windowS;
+  return typeof seen === "number" && Number.isFinite(seen) && typeof windowS === "number" && windowS > 0 && nowS - seen < windowS;
 }
 // Map session_id -> {profile, others: [session, ...]} for every live session
 // that shares its profile with at least one other live session.
@@ -2989,7 +2989,7 @@ const Sessions = (() => {
     btn.addEventListener("click", () => { if (pick.name) change(s.session_id, {profile: pick.name}); });
     return h("div", {class: "sx-warn", role: "status"},
       h("span", {title: warn.others.map(o => `${folderOf(o)}\nsession ${o.session_id}`).join("\n")},
-        h("b", null, "Shared voice. "), `${warn.profile} is also in use by ${shown}; two voices overlapping are hard to tell apart.`),
+        h("b", null, "Shared voice. "), `${warn.profile} is also in use by ${shown}; their replies sound like the same speaker, so it is hard to tell which session is talking.`),
       btn);
   }
 

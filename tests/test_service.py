@@ -477,6 +477,23 @@ def test_uninstall_boots_out_and_deletes(launchd, capsys):
     assert "service removed: stopped it and deleted" in capsys.readouterr().out
 
 
+def test_uninstall_and_install_refuse_when_launchctl_gives_no_answer(launchd, capsys):
+    """If launchctl print fails, the agent may still be loaded: deleting or
+    rewriting its plist would leave a loaded job beside a missing or
+    different plist."""
+    assert cli.main(["install-service"]) == 0
+    before = service.plist_path().read_bytes()
+    launchd.calls.clear()
+    launchd.fail["print"] = service.Result(1, "", "launchctl print: some transient error\n")
+    assert cli.main(["uninstall-service"]) == 1
+    assert service.plist_path().read_bytes() == before
+    assert cli.main(["install-service"]) == 1
+    assert service.plist_path().read_bytes() == before
+    assert launchd.mutations() == []
+    err = capsys.readouterr().err
+    assert err.count("cannot tell whether the service is loaded") == 2 and "transient error" in err
+
+
 def test_uninstall_when_not_installed(launchd, capsys):
     assert cli.main(["uninstall-service"]) == 0
     assert launchd.mutations() == []

@@ -94,6 +94,10 @@ def test_no_window_means_nothing_is_live():
     # An older daemon sends no voice_in_use_s: the page must not guess a window.
     assert _run(live=[sess("a")], window=None)["live"] == [False]
     assert _run(live=[sess("a")], window=0)["live"] == [False]
+    # A session seen a moment "in the future" (clock skew) is still not live
+    # without a window, nor with a negative one.
+    assert _run(live=[sess("ahead", ago=-0.5)], window=0)["live"] == [False]
+    assert _run(live=[sess("ahead", ago=-0.5)], window=-10)["live"] == [False]
 
 
 def test_two_live_sessions_on_one_profile_both_warn():
