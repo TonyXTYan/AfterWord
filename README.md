@@ -116,6 +116,36 @@ keep controlling your music. Then, in another shell:
 uv run afterword test "Hello from AfterWord" --profile nova --wait
 ```
 
+### Run it as a service
+
+`afterword serve` stops when its shell does. To start the daemon at login
+and restart it after a crash, install it as a LaunchAgent:
+
+```bash
+uv run afterword install-service
+```
+
+That writes `~/Library/LaunchAgents/io.github.tonyxtyan.afterword.plist`,
+which runs `afterword serve` with the same Python (keep the clone where it
+is), and loads it. A daemon you started by hand is stopped first. `--dry-run`
+prints the plist and the `launchctl` commands without doing anything. Run
+`install-service` again after moving the clone or changing `AFTERWORD_HOME`;
+it rewrites the plist and reloads it. Then:
+
+```bash
+uv run afterword status    # includes a service line: loaded, pid, last exit
+uv run afterword restart
+uv run afterword stop      # stays stopped until the next login or `afterword start`
+uv run afterword start
+uv run afterword uninstall-service
+```
+
+`stop` unloads the agent (`launchctl bootout`), so launchd does not restart
+it; the plist stays. The daemon still logs to `~/.afterword/afterwordd.log`;
+`~/.afterword/service.log` gets its warnings, errors and anything else it
+prints (a crash's traceback), and is cut to its last 1 MB at startup once it
+passes 5 MB.
+
 ## Voices and profiles
 
 A profile in `~/.afterword/config.toml` picks a voice and how it speaks:

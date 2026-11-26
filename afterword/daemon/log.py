@@ -63,7 +63,8 @@ def _summary_stats(values: list[float]) -> dict[str, Any]:
     return {"n": len(v), "p50": pct(0.5), "p95": pct(0.95), "max": round(v[-1], 3)}
 
 
-def setup_text_logging(home: Path, level: int = logging.INFO, stderr: bool = True) -> None:
+def setup_text_logging(home: Path, level: int = logging.INFO, stderr: bool = True,
+                       stderr_level: int = logging.NOTSET) -> None:
     root = logging.getLogger("afterword")
     root.setLevel(level)
     for h in list(root.handlers):
@@ -77,6 +78,7 @@ def setup_text_logging(home: Path, level: int = logging.INFO, stderr: bool = Tru
     if stderr:
         sh = logging.StreamHandler()
         sh.setFormatter(fmt)
+        sh.setLevel(stderr_level)
         root.addHandler(sh)
 
 

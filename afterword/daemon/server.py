@@ -1551,11 +1551,32 @@ async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) 
 
 
 def main(port: int | None = None, http: bool = True, verbose: bool = False) -> int:
+    from afterword import service
+
     home = common.ensure_home()
-    setup_text_logging(home, level=logging.DEBUG if verbose else logging.INFO)
+    as_service = os.environ.get(service.SERVICE_ENV) == "1"
+    trimmed = False
+    with contextlib.suppress(OSError):
+        trimmed = service.trim_log(home / service.LOG_NAME)
+    # Under launchd, stderr is service.log, which never rotates: only
+    # warnings and errors go there; afterwordd.log has everything.
+    setup_text_logging(home, level=logging.DEBUG if verbose else logging.INFO,
+                       stderr_level=logging.WARNING if as_service else logging.NOTSET)
+    if trimmed:
+        log.info("trimmed %s to its last %d bytes", home / service.LOG_NAME, service.LOG_KEEP)
     try:
         asyncio.run(run_daemon(port=port, http=http))
-    except (AlreadyRunning, RuntimeError) as exc:
+    except AlreadyRunning as exc:
+        if as_service:
+            # A non-zero exit would make launchd (KeepAlive SuccessfulExit =
+            # false) retry every ThrottleInterval for as long as the other
+            # daemon runs.
+            log.warning("%s; started by launchd, so exiting 0 and not retrying "
+                        "(`afterword start` once the other daemon has stopped)", exc)
+            return 0
+        log.error("%s", exc)
+        return 1
+    except RuntimeError as exc:
         log.error("%s", exc)
         return 1
     except KeyboardInterrupt:
