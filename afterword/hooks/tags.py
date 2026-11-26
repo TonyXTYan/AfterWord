@@ -15,6 +15,9 @@ Rules:
   ones are dropped with a warning); `.say` is the last one (the v1 rule).
   The last valid <voice> wins.
 - Unknown or invalid attributes are dropped and reported in `warnings`.
+- Only the first MAX_MESSAGE_CHARS of a reply are parsed, and each block is
+  cut to MAX_SAY_CHARS before it is cleaned, so parsing stays fast on any
+  input.
 
 This module is stdlib-only and must stay importable on Python 3.9+, because
 the hook runs under whichever python3 Claude Code is configured to call.
@@ -38,6 +41,8 @@ __all__ = [
     "truncate",
     "limit_says",
     "MAX_SAYS",
+    "MAX_MESSAGE_CHARS",
+    "MAX_SAY_CHARS",
     "PROFILE_NAME_RE",
 ]
 
@@ -48,6 +53,12 @@ PACE_MIN = 0.5
 PACE_MAX = 2.0
 MOOD_MAX = 64
 MAX_SAYS = 4  # <say> blocks spoken per reply; extra ones are dropped
+# Size caps that keep a crafted reply from burning the hook's 3 s deadline:
+# only the first MAX_MESSAGE_CHARS of a reply are parsed (a <say> past that
+# is not spoken), and only the first MAX_SAY_CHARS of each block are cleaned
+# (far more than max_chars ever keeps).
+MAX_MESSAGE_CHARS = 64 * 1024
+MAX_SAY_CHARS = 8 * 1024
 
 # Opening tag name must be followed by whitespace, '/' or '>' so that
 # <sayings> or <voice-over> never match.
@@ -286,9 +297,11 @@ _TAG_LIKE_RE = re.compile(
     r"(?:\s[^<>]{0,1000})?/?>",
     re.IGNORECASE,
 )
-_MD_LINK_RE = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
+# The runs inside links and emphasis are bounded: unbounded, a block of
+# "[[[[" or "**a **a" costs time quadratic in its length.
+_MD_LINK_RE = re.compile(r"!?\[([^\]]{0,300})\]\([^)]{0,1000}\)")
 # Paired emphasis only: "2**10" and "a ** b" keep their stars.
-_MD_EMPH_RE = re.compile(r"(\*\*|__|~~)(?=\S)(.+?)(?<=\S)\1")
+_MD_EMPH_RE = re.compile(r"(\*\*|__|~~)(?=\S)(.{1,300}?)(?<=\S)\1")
 _MD_LINE_PREFIX_RE = re.compile(r"^[ \t]*(?:#{1,6}[ \t]+|>[ \t]?|[-*+][ \t]+)", re.MULTILINE)
 _SINGLE_STAR_RE = re.compile(r"(?<![\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\w*])")
 _SPEECH_CMD_RE = re.compile(r"\[\[[^\[\]]{0,200}\]\]")
@@ -382,6 +395,12 @@ def parse(message: object) -> ParseResult:
     if not isinstance(message, str) or not message:
         return result
 
+    if len(message) > MAX_MESSAGE_CHARS:
+        # Cut the tail, not the head: a growing message (early speaking)
+        # then parses the same once it is past the cap.
+        result.warnings.append("message over %d chars: the rest is ignored" % MAX_MESSAGE_CHARS)
+        message = message[:MAX_MESSAGE_CHARS]
+
     masked = _mask_code(message, result.open_comments)
 
     # Pair each </say> with the nearest preceding unpaired <say>, like
@@ -391,7 +410,7 @@ def parse(message: object) -> ParseResult:
     marks += [(m.start(), 1, m) for m in _SAY_CLOSE_RE.finditer(masked)]
     marks.sort(key=lambda x: (x[0], x[1]))
     stack: List[re.Match] = []
-    ends: Dict[int, int] = {}  # start -> end of each kept block
+    pairs = []  # (opener, closer)
     for _pos, kind, m in marks:
         if kind == 0:
             if not m.group(1).rstrip().endswith("/"):  # <say …/> is empty
@@ -399,39 +418,43 @@ def parse(message: object) -> ParseResult:
             continue
         if not stack:
             continue  # stray closer
-        opener = stack.pop()
-        inner = message[opener.end():m.start()]
-        attrs = _normalise_say_attrs(_parse_attrs(opener.group(1)), result.warnings)
-        text = clean_text(inner)
-        if not text:
-            result.warnings.append("say: empty tag ignored")
-            continue
-        result.says.append(
-            SayTag(text=text, attrs=attrs, raw=message[opener.start():m.end()], start=opener.start())
-        )
-        ends[opener.start()] = m.end()
+        pairs.append((stack.pop(), m))
     if stack:
         result.warnings.append("say: %d unclosed tag(s) ignored" % len(stack))
         result.open_says = [m.start() for m in stack]
     # A block nested in another one is already part of the outer block's
     # text: keep the outer one only (as v1 did), so nothing is said twice.
     # Pairs are bracket-matched, so two blocks either nest or do not touch.
-    result.says.sort(key=lambda t: t.start)
-    outer: List[SayTag] = []
+    # Nesting is resolved before any text is cleaned, so deeply nested tags
+    # cost one pass, not one per level.
+    pairs.sort(key=lambda p: p[0].start())
+    outer = []
     reach = -1
-    for t in result.says:
-        if t.start < reach:
+    for opener, closer in pairs:
+        if opener.start() < reach:
             continue
-        outer.append(t)
-        reach = ends[t.start]
-    if len(outer) < len(result.says):
-        result.warnings.append("say: %d nested tag(s) ignored" % (len(result.says) - len(outer)))
-        result.says = outer
-    if len(result.says) > MAX_SAYS:
-        result.warnings.append(
-            "say: %d extra tag(s) dropped (at most %d per reply)" % (len(result.says) - MAX_SAYS, MAX_SAYS)
+        outer.append((opener, closer))
+        reach = closer.end()
+    if len(outer) < len(pairs):
+        result.warnings.append("say: %d nested tag(s) ignored" % (len(pairs) - len(outer)))
+    for k, (opener, closer) in enumerate(outer):
+        if len(result.says) >= MAX_SAYS:
+            result.warnings.append(
+                "say: %d extra tag(s) dropped (at most %d per reply)" % (len(outer) - k, MAX_SAYS)
+            )
+            break
+        inner = message[opener.end():closer.start()]
+        if len(inner) > MAX_SAY_CHARS:
+            result.warnings.append("say: block over %d chars cut" % MAX_SAY_CHARS)
+            inner = inner[:MAX_SAY_CHARS]
+        attrs = _normalise_say_attrs(_parse_attrs(opener.group(1)), result.warnings)
+        text = clean_text(inner)
+        if not text:
+            result.warnings.append("say: empty tag ignored")
+            continue
+        result.says.append(
+            SayTag(text=text, attrs=attrs, raw=message[opener.start():closer.end()], start=opener.start())
         )
-        del result.says[MAX_SAYS:]
 
     for m in _VOICE_RE.finditer(masked):
         raw = message[m.start():m.end()]

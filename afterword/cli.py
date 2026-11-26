@@ -131,7 +131,11 @@ def cmd_test(args: argparse.Namespace) -> int:
 
         text = tags.clean_text(args.text)
         print("afterwordd is not running; speaking with `say` instead")
-        subprocess.run(common.say_argv(), input=text.encode())
+        with _say_lock() as got:
+            if not got:
+                print("another `say` fallback is still speaking; gave up waiting")
+                return 1
+            subprocess.run(common.say_argv(), input=text.encode())
         return 0
     except (OSError, ValueError) as exc:
         # Connected but no usable reply: the daemon may still speak it, so
@@ -146,6 +150,42 @@ def cmd_test(args: argparse.Namespace) -> int:
     if args.wait and reply.get("status") == "queued":
         return _wait_for_event(reply["event_id"])
     return 0
+
+
+@contextlib.contextmanager
+def _say_lock():
+    """Hold <home>/say.lock, the lock the hook's `say` fallback runner takes,
+    so `afterword test` with the daemon down does not talk over a fallback
+    line (or the other way round). Yields False after waiting
+    SAY_LOCK_WAIT_S; True when it holds the lock, or when the lock file
+    cannot be used at all (never silence a line over that)."""
+    import fcntl
+
+    from afterword.hooks.afterword_hook import SAY_LOCK_NAME, SAY_LOCK_WAIT_S
+
+    path = common.home() / SAY_LOCK_NAME
+    try:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        fd = os.open(str(path), os.O_RDWR | os.O_CREAT | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    except OSError:
+        yield True
+        return
+    try:
+        end = time.monotonic() + SAY_LOCK_WAIT_S
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= end:
+                    yield False
+                    return
+                time.sleep(0.05)
+            except OSError:
+                break  # cannot lock: speak anyway
+        yield True
+    finally:
+        os.close(fd)
 
 
 def _wait_for_event(event_id: int, timeout: float = 60.0) -> int:
