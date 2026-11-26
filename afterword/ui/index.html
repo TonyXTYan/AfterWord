@@ -5644,9 +5644,13 @@ function upPhaseLine(u) {
   if (!u.phase || u.phase === "idle") return null;
   return `${UP_PHASES[u.phase] || u.phase}${u.phase_tag ? " " + u.phase_tag : ""}`;
 }
-// Update now: only a managed install under launchd, with a newer release and nothing under way.
+// Update now: only a managed install under launchd, with a newer release and nothing under way,
+// or while a scheduled update prepares or waits (force: switch to it without waiting).
 function upApply(u) {
   if (u.apply_blocked) return {enabled: false, title: u.apply_blocked};
+  if (u.scheduled && (u.phase === "preparing" || u.phase === "waiting"))
+    return {enabled: true, force: true, label: `Switch to ${u.phase_tag} now`,
+      title: `A scheduled update to ${u.phase_tag} is ${u.phase === "preparing" ? "being prepared" : "waiting for a moment with nothing to say"}: switch to it as soon as it is ready, without waiting, and restart.`};
   if (u.phase && u.phase !== "idle") return {enabled: false, title: `An update step is under way: ${upPhaseLine(u)}`};
   if (!u.available) return {enabled: false, title: u.latest ? `Up to date (${u.latest})` : "Check for a release first"};
   const again = u.rolled_back && u.rolled_back === u.latest ? ` It was rolled back before (${u.rollback_reason || "it did not stay up"}).` : "";
@@ -5830,7 +5834,7 @@ const UpdatePanel = (() => {
     const ap = upApply(u), b = $("up-apply");
     b.disabled = busy || !!follow || !ap.enabled;
     b.title = ap.title;
-    b.textContent = u.available ? `Update to ${u.latest}` : "Update now";
+    b.textContent = ap.label || (u.available ? `Update to ${u.latest}` : "Update now");
     $("up-check").disabled = busy || !!follow || !!(u.phase && u.phase !== "idle");
     $("up-notesbox").hidden = !u.notes;
     if (u.notes) { $("up-notestag").textContent = u.notes_tag || ""; $("up-notes").textContent = u.notes; }
@@ -5875,11 +5879,16 @@ const UpdatePanel = (() => {
     schedule(2000);
   }
   async function apply() {
-    if (!data || !data.available || follow) return;
-    if (!confirm(`Install ${data.latest} now? It is prepared and tested first; then, once nothing is being said, the daemon restarts on it.`)) return;
+    if (!data || follow) return;
+    const ap = upApply(data);
+    if (!ap.enabled) return;
+    const ask = ap.force
+      ? `Switch to ${data.phase_tag} now? The daemon restarts on it as soon as it is ready, even mid-sentence.`
+      : `Install ${data.latest} now? It is prepared and tested first; then, once nothing is being said, the daemon restarts on it.`;
+    if (!confirm(ask)) return;
     busy = true;
     render(data);
-    const r = await api("POST", "/api/update/apply", {});
+    const r = await api("POST", "/api/update/apply", ap.force ? {force: true} : {});
     busy = false;
     if (!r.ok || !r.data) { render(data); return flashNote("up-msg", `Update failed: ${r.error || "empty response"}`, "err", 8000); }
     follow = {pid: r.data.pid, until: Date.now() + UP_FOLLOW_MS};

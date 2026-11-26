@@ -13,22 +13,27 @@ changes (`afterword install-service`; `--dev` runs a checkout instead):
 
 The LaunchAgent runs <home>/app/current/.venv/bin/python -P -m
 afterword.cli serve, so switching versions is a symlink swap plus a
-restart. Only release tags (vX.Y.Z) are installed. The newest two releases
-are kept: the current one and the previous one, for rollback.
+restart. Only release tags (vX.Y.Z) whose commit is on main are installed;
+the verified commit is recorded in the release's marker and checked again
+before it is reused or switched to. The current release and the rollback
+target (`previous`: the last confirmed release) are kept, and never synced
+again: extras that changed since come with the next release.
 
 The daemon checks `git ls-remote --tags` about 5 min after it starts and
 then every [update] check_every_h hours. In "auto" mode, a managed install
-run by launchd prepares a newer release (worktree, uv sync, smoke test)
-while the old one keeps speaking, waits until nothing is queued, playing or
-rendering, records the switch in update.json (pending), swaps the symlink
-and exits 75, which launchd answers by starting the new release. That
-daemon confirms the update after 60 s of serving. A release that does not
-get there is started at most MAX_START_ATTEMPTS times: the next start
-(`afterword serve` under launchd, before the daemon is imported) swaps the
-symlink back, marks the tag rolled back (not retried automatically) and
-starts the previous release in its place. After a confirmed update the
-Claude Code and Codex plugins are refreshed, when their CLIs are on PATH
-and the plugin is installed.
+run by launchd prepares a newer release (worktree, uv sync, Kokoro's UniDic
+dictionary, smoke test) while the old one keeps speaking, waits until
+nothing is queued, playing or rendering (30 s awake, on the monotonic
+clock), records the switch in update.json (pending), swaps the symlink and
+exits 75, which launchd answers by starting the new release. That daemon
+confirms the update after 60 s of serving (awake). A start after a run
+that did not shut down cleanly (daemon.run left behind) is a failed one;
+after MAX_START_ATTEMPTS of them the next start (`afterword serve` under
+launchd, before the daemon is imported) swaps the symlink back, marks the
+tag rolled back (not retried automatically) and starts the previous release
+in its place. After a confirmed update the Claude Code and Codex plugins
+are refreshed, when their CLIs are on PATH and the plugin is installed and
+enabled; a failed refresh is retried at the next checks.
 
 Every program (git, uv, the new release's python, claude, codex) runs
 through `run_cmd()`, and tools are found with `which()`: tests replace both.
@@ -42,6 +47,7 @@ import fcntl
 import importlib.util
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -83,7 +89,14 @@ IDLE_SETTLE_S = 30.0  # idle this long before switching
 IDLE_WAIT_S = 2 * 3600.0  # then give up until the next check
 APPLY_WAIT_S = 600.0  # "Update now": how long it waits for idle
 CONFIRM_AFTER_S = 60.0
-MAX_START_ATTEMPTS = 3
+MAX_START_ATTEMPTS = 3  # failed starts (the run before did not stop cleanly) before a rollback
+MAX_WAIT_S = 86400.0  # the longest wait_s "Update now" takes
+PLUGIN_RETRIES = 3  # a failed plugin refresh is tried again at the next checks, this many times
+# Only tags whose commit is on this branch are installed.
+MAIN_REF = "refs/heads/main"
+# daemon/server.py's RUN_MARKER: written when a daemon starts, removed when
+# it stops cleanly (a test checks they agree; the daemon is not imported here).
+RUN_MARKER_NAME = "daemon.run"
 
 LS_REMOTE_TIMEOUT_S = 60
 FETCH_TIMEOUT_S = 600
@@ -384,17 +397,17 @@ def plist_kind(home: Path) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def plugin_installed(tool: str) -> bool:
-    """Whether AfterWord's plugin is installed for `tool`, from that tool's
-    own records (read only)."""
+def plugin_status(tool: str) -> str | None:
+    """"installed", "disabled" (Codex: `enabled = false`) or None (not
+    installed), from `tool`'s own records (read only)."""
     if tool == "claude":
         root = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude").expanduser()
         try:
             data = json.loads((root / "plugins" / "installed_plugins.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return False
+            return None
         plugins = data.get("plugins") if isinstance(data, dict) else None
-        return isinstance(plugins, dict) and bool(plugins.get(PLUGIN_ID))
+        return "installed" if isinstance(plugins, dict) and bool(plugins.get(PLUGIN_ID)) else None
     if tool == "codex":
         import tomllib
 
@@ -402,10 +415,72 @@ def plugin_installed(tool: str) -> bool:
         try:
             data = tomllib.loads((root / "config.toml").read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return False
+            return None
         plugins = data.get("plugins")
-        return isinstance(plugins, dict) and isinstance(plugins.get(PLUGIN_ID), dict)
-    return False
+        entry = plugins.get(PLUGIN_ID) if isinstance(plugins, dict) else None
+        if not isinstance(entry, dict):
+            return None
+        # `codex plugin add` would turn a disabled plugin back on.
+        return "disabled" if entry.get("enabled") is False else "installed"
+    return None
+
+
+def plugin_installed(tool: str) -> bool:
+    """Whether AfterWord's plugin is installed (and not disabled) for `tool`."""
+    return plugin_status(tool) == "installed"
+
+
+def parse_wait(value: Any) -> float:
+    """"Update now"'s wait_s: a finite number of seconds, 0 to MAX_WAIT_S;
+    raises UpdateError otherwise."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise UpdateError("wait_s must be a number of seconds")
+    try:
+        wait = float(value)
+    except (OverflowError, ValueError):
+        wait = math.inf
+    if not math.isfinite(wait) or not 0 <= wait <= MAX_WAIT_S:
+        raise UpdateError(f"wait_s must be between 0 and {MAX_WAIT_S:.0f} seconds")
+    return wait
+
+
+def _has_dictionary(d: Path) -> bool:
+    try:
+        return d.is_dir() and any(d.iterdir())
+    except OSError:
+        return False
+
+
+def running_unidic() -> Path | None:
+    """The UniDic dictionary (unidic/dicdir, from `python -m unidic
+    download`) of the environment this code runs in, or None (tests
+    replace it)."""
+    try:
+        spec = importlib.util.find_spec("unidic")  # finds it without importing it
+    except (ImportError, ValueError):
+        return None
+    if spec is None or not spec.origin:
+        return None
+    d = Path(spec.origin).parent / "dicdir"
+    return d if _has_dictionary(d) else None
+
+
+def _venv_unidic(root: Path) -> Path | None:
+    """The unidic package dir in root/.venv, or None when it has none."""
+    for d in sorted((root / ".venv" / "lib").glob("python*/site-packages/unidic")):
+        if d.is_dir():
+            return d
+    return None
+
+
+def running_release(home: Path) -> str | None:
+    """The release dir (releases/<name>) the running code comes from, or
+    None outside the managed install."""
+    releases = os.path.realpath(Layout(home).releases)
+    pkg = os.path.realpath(package_dir())
+    if not pkg.startswith(releases + os.sep):
+        return None
+    return pkg[len(releases) + 1:].split(os.sep, 1)[0]
 
 
 # --------------------------------------------------------------------------- #
@@ -420,7 +495,10 @@ class Updater:
 
     idle(): nothing queued, playing or rendering (the daemon's); restart():
     exit for launchd to start the daemon again; note(status, reason): a
-    system row in the event log; serving(): the daemon is still up."""
+    system row in the event log; serving(): the daemon is still up.
+    clock() is wall-clock time, for the timestamps in update.json; mono()
+    measures durations (the confirmation window, the idle settle time) and,
+    like asyncio's timers, does not advance while the Mac sleeps."""
 
     def __init__(self, home: Path, settings: Callable[[], UpdateSettings] | None = None, *,
                  version: str = __version__, runner: Callable[..., Result] | None = None,
@@ -428,7 +506,8 @@ class Updater:
                  sleep=None, kind: Callable[[], str] | None = None, as_service: Callable[[], bool] | None = None,
                  idle: Callable[[], bool] | None = None, restart: Callable[[], None] | None = None,
                  note: Callable[[str, str], None] | None = None, serving: Callable[[], bool] | None = None,
-                 extras: Callable[[], list[str]] | None = None):
+                 extras: Callable[[], list[str]] | None = None, mono: Callable[[], float] | None = None,
+                 unidic: Callable[[], Path | None] | None = None):
         self.home = Path(home)
         self.layout = Layout(self.home)
         self.settings = settings or UpdateSettings
@@ -436,6 +515,7 @@ class Updater:
         self._run = runner or (lambda *a, **k: run_cmd(*a, **k))
         self._which = which_fn or (lambda name: which(name))
         self.clock = clock or time.time
+        self.mono = mono or time.monotonic
         self._sleep = sleep or asyncio.sleep
         self._kind = kind or (lambda: running_kind(self.home))
         self._as_service = as_service or (lambda: os.environ.get("AFTERWORD_SERVICE") == "1")
@@ -444,11 +524,18 @@ class Updater:
         self._note = note or (lambda status, reason: None)
         self.serving = serving or (lambda: True)
         self._extras = extras or (lambda: detect_extras())
+        self._unidic = unidic or (lambda: running_unidic())
         self.phase = "idle"  # idle | checking | preparing | waiting | switching | restarting
         self.phase_tag: str | None = None
         self.next_check: float | None = None
         self._job = threading.Lock()  # one check or apply at a time in this process
         self._apply_task: asyncio.Task | None = None
+        # A scheduled apply (tick) that "Update now" may take over while it
+        # prepares or waits for idle: _takeover is None, "manual" (switch when
+        # idle, whatever the mode) or "force" (switch without waiting).
+        self._scheduled = False
+        self._takeover: str | None = None
+        self._wake: asyncio.Event | None = None
         self._state_cache: tuple[float | None, dict[str, Any]] = (None, {})
 
     # -- state ----------------------------------------------------------- #
@@ -508,6 +595,8 @@ class Updater:
             "last_result_at": st.get("last_result_at"),
             "phase": self.phase,
             "phase_tag": self.phase_tag,
+            # A scheduled update is preparing or waiting: "Update now" takes it over.
+            "scheduled": self._scheduled and self.phase in ("preparing", "waiting"),
             "pending": bool(st.get("pending")),
             "attempts": st.get("attempts", 0),
             "switched_at": st.get("switched_at"),
@@ -623,29 +712,79 @@ class Updater:
         os.replace(tmp, repo)
 
     def _fetch_tag(self, git: str, tag: str) -> None:
+        """Fetch `tag`, and main with it (to check where the tag points)."""
         url = self._repo_url()
         r = self._run([git, "-C", str(self.layout.repo), "fetch", "--quiet", "--no-tags", url,
-                       f"+refs/tags/{tag}:refs/tags/{tag}"], env=self._git_env(), timeout=FETCH_TIMEOUT_S)
+                       f"+refs/tags/{tag}:refs/tags/{tag}", f"+{MAIN_REF}:{MAIN_REF}"],
+                      env=self._git_env(), timeout=FETCH_TIMEOUT_S)
         if not r.ok:
             raise UpdateError(f"git fetch {tag} failed: {_last_lines(r.error(), 3)}")
 
-    def _worktree(self, git: str, tag: str) -> Path:
+    def _tag_commit(self, git: str, tag: str) -> str | None:
+        """The commit `tag` points at in the object store (None: not there)."""
+        r = self._run([git, "-C", str(self.layout.repo), "rev-parse", "--verify", "--quiet", f"{tag}^{{commit}}"],
+                      env=self._git_env(), timeout=GIT_TIMEOUT_S)
+        sha = r.stdout.strip()
+        return sha if r.ok and re.fullmatch(r"[0-9a-f]{40,64}", sha) else None
+
+    def _head(self, git: str, dest: Path) -> str | None:
+        """The commit a release worktree has checked out."""
+        r = self._run([git, "-C", str(dest), "rev-parse", "HEAD"], env=self._git_env(), timeout=GIT_TIMEOUT_S)
+        return r.stdout.strip() if r.ok and r.stdout.strip() else None
+
+    def _verified_commit(self, git: str, tag: str) -> str:
+        """The commit of the fetched `tag`, once it is known to be on main:
+        tags are not protected the way main is (review, CI), so a tag pushed
+        on any other commit is refused."""
+        sha = self._tag_commit(git, tag)
+        if sha is None:
+            raise UpdateError(f"{tag} was fetched but does not name a commit")
+        r = self._run([git, "-C", str(self.layout.repo), "merge-base", "--is-ancestor", sha, MAIN_REF],
+                      env=self._git_env(), timeout=GIT_TIMEOUT_S)
+        if r.returncode == 1:
+            raise UpdateError(f"{tag} ({sha[:12]}) is not on main: only release tags on main are installed")
+        if not r.ok:
+            raise UpdateError(f"checking that {tag} is on main failed: {_last_lines(r.error(), 3)}")
+        return sha
+
+    def _worktree(self, git: str, tag: str, sha: str) -> Path:
+        """releases/<tag> checked out at `sha`. A worktree left on another
+        commit (the tag was moved since) is made again."""
         dest = self.layout.release(tag)
+        repo = str(self.layout.repo)
         if (dest / ".git").exists():
-            return dest
+            if self._head(git, dest) == sha:
+                return dest
+            if tag in self._protected():
+                raise UpdateError(f"{dest} is not at {tag}'s commit {sha[:12]}, and it is the current or the "
+                                  "rollback release; not touching it")
+            log.info("%s is not at %s any more: checking it out again", dest, sha[:12])
+            self._run([git, "-C", repo, "worktree", "remove", "--force", str(dest)], env=self._git_env(),
+                      timeout=GIT_TIMEOUT_S)
         if dest.exists():
             if dest.name == self.layout.current_tag():
                 raise UpdateError(f"{dest} is the current release but not a git worktree; not touching it")
             shutil.rmtree(dest)
         self.layout.releases.mkdir(parents=True, exist_ok=True)
-        repo = str(self.layout.repo)
         self._run([git, "-C", repo, "worktree", "prune"], env=self._git_env(), timeout=GIT_TIMEOUT_S)
-        r = self._run([git, "-C", repo, "worktree", "add", "--detach", "--force", str(dest), f"{tag}^{{commit}}"],
+        r = self._run([git, "-C", repo, "worktree", "add", "--detach", "--force", str(dest), sha],
                       env=self._git_env(), timeout=GIT_TIMEOUT_S)
         if not r.ok:
             shutil.rmtree(dest, ignore_errors=True)
             raise UpdateError(f"git worktree add {tag} failed: {_last_lines(r.error(), 3)}")
         return dest
+
+    def _protected(self) -> set[str]:
+        """Releases prepare() never changes: the current one (the service
+        runs from its venv) and the rollback target."""
+        out = set()
+        cur = self.layout.current_tag()
+        if cur:
+            out.add(cur)
+        prev = read_state(self.home).get("previous")
+        if isinstance(prev, str) and TAG_RE.match(prev) and self.layout.marker(prev):
+            out.add(prev)
+        return out
 
     def extras(self) -> list[str]:
         saved = self.state().get("extras")
@@ -654,9 +793,14 @@ class Updater:
         return sorted(self._extras())
 
     def prepare(self, tag: str) -> Path:
-        """Make releases/<tag> ready to run: worktree, uv sync --frozen with
-        the extras, smoke test. Raises UpdateError; the running release is
-        never touched. A release already prepared with the same extras is
+        """Make releases/<tag> ready to run: fetch the tag (it must be on
+        main), worktree at its commit, uv sync --frozen with the extras (and
+        Kokoro's UniDic dictionary), smoke test. Raises UpdateError.
+
+        The current release and the rollback target are never changed: when
+        they are ready they are used as they are, even if the extras have
+        changed since (new extras come with the next release). Another
+        release already prepared with the same extras at the tag's commit is
         reused as it is."""
         dest = self.layout.release(tag)
         git, uv = self.git(), self.uv()
@@ -664,12 +808,20 @@ class Updater:
         try:
             with _flock(self.layout.run_lock, blocking=False):
                 marker = self.layout.marker(tag)
+                if tag in self._protected():
+                    if not marker:
+                        raise UpdateError(f"{dest} is the current release but was never prepared; not touching it")
+                    if marker.get("commit") and self._head(git, dest) != marker["commit"]:
+                        raise UpdateError(f"{dest} is not at the commit it was prepared from; not touching it")
+                    return dest
                 if marker and sorted(marker.get("extras") or []) == extras and \
-                        self.layout.python_in(dest).exists():
+                        self.layout.python_in(dest).exists() and marker.get("commit") and \
+                        self._tag_commit(git, tag) == marker["commit"] == self._head(git, dest):
                     return dest
                 self._ensure_repo(git)
                 self._fetch_tag(git, tag)
-                self._worktree(git, tag)
+                sha = self._verified_commit(git, tag)
+                self._worktree(git, tag, sha)
                 (dest / READY_MARKER).unlink(missing_ok=True)
                 argv = [uv, "sync", "--frozen", "--no-dev"]
                 for e in extras:
@@ -679,16 +831,62 @@ class Updater:
                 if not r.ok:
                     raise UpdateError(f"uv sync for {tag} failed: {_last_lines(r.error())}")
                 sync_s = time.monotonic() - t0
+                unidic = self._carry_unidic(dest) if "kokoro" in extras else None
                 self.smoke_test(dest, tag)
-                (dest / READY_MARKER).write_text(json.dumps({
-                    "tag": tag, "extras": extras, "uv": uv, "prepared_at": self.clock(),
-                    "sync_s": round(sync_s, 1)}, indent=2) + "\n", encoding="utf-8")
+                info: dict[str, Any] = {"tag": tag, "commit": sha, "extras": extras, "uv": uv,
+                                        "prepared_at": self.clock(), "sync_s": round(sync_s, 1)}
+                if unidic:
+                    info["unidic"] = unidic
+                (dest / READY_MARKER).write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
         except BlockingIOError:
             raise UpdateError("another update is in progress (update.lock is held)") from None
         except OSError as exc:
             raise UpdateError(f"preparing {tag} failed: {exc}") from None
         log.info("prepared %s in %s (extras: %s)", tag, dest, ", ".join(extras) or "none")
         return dest
+
+    def _carry_unidic(self, dest: Path) -> str | None:
+        """Copy Kokoro's UniDic dictionary (unidic/dicdir, about 0.5 GB, from
+        `python -m unidic download`) from the environment this code runs in
+        into the new venv, which uv never fills: a clone (`cp -c`, APFS)
+        where it can, else a copy. Returns "copied", "present", "missing"
+        (nothing to copy from), or None (the new venv has no unidic)."""
+        pkg = _venv_unidic(dest)
+        if pkg is None:
+            return None
+        target = pkg / "dicdir"
+        if _has_dictionary(target):
+            return "present"
+        src = self._unidic()
+        if src is None or not _has_dictionary(Path(src)):
+            log.warning("no UniDic dictionary to copy into %s: Kokoro's Japanese needs "
+                        "`%s -m unidic download`", dest, self.layout.python_in(dest))
+            return "missing"
+        tmp = pkg / f".dicdir.{os.getpid()}.tmp"
+        shutil.rmtree(tmp, ignore_errors=True)
+        try:
+            r = self._run(["/bin/cp", "-c", "-R", str(src), str(tmp)], timeout=UV_TIMEOUT_S)
+            if not r.ok:  # not APFS, or another volume: a plain copy
+                shutil.rmtree(tmp, ignore_errors=True)
+                shutil.copytree(src, tmp, symlinks=True)
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target)
+            elif target.exists() or target.is_symlink():
+                target.unlink()
+            os.replace(tmp, target)
+        except OSError as exc:
+            shutil.rmtree(tmp, ignore_errors=True)
+            log.warning("could not copy the UniDic dictionary from %s: %s", src, exc)
+            return "missing"
+        return "copied"
+
+    def unidic_warning(self, tag: str) -> str | None:
+        """What to say when a prepared release has Kokoro without UniDic."""
+        m = self.layout.marker(tag)
+        if not m or m.get("unidic") != "missing":
+            return None
+        return (f"{tag} has no UniDic dictionary, so Kokoro cannot speak Japanese: run "
+                f"`{self.layout.python_in(self.layout.release(tag))} -m unidic download`")
 
     def smoke_test(self, dest: Path, tag: str) -> None:
         py = self.layout.python_in(dest)
@@ -708,27 +906,49 @@ class Updater:
 
     def switch(self, tag: str, pending: bool = True) -> str | None:
         """Point `current` at the prepared `tag`; with `pending`, record it
-        so the next starts count towards a rollback. Returns the previous
-        tag. Older releases than current and previous are deleted."""
-        if not self.layout.marker(tag):
+        so the next starts count towards a rollback. Returns the tag it
+        switched from.
+
+        The rollback target (`previous`) is the release switched from, or,
+        while that one is itself pending (not confirmed yet), the last
+        confirmed release, which is then kept too. Other releases are
+        deleted."""
+        marker = self.layout.marker(tag)
+        if not marker:
             raise UpdateError(f"{tag} is not prepared")
         try:
             with _flock(self.layout.run_lock, blocking=False):
                 old = self.layout.current_tag()
                 if old == tag:
                     return old
-                fields: dict[str, Any] = {"previous": old, "current": tag, "switched_at": self.clock(),
+                if marker.get("commit"):
+                    head = self._head(self.git(), self.layout.release(tag))
+                    if head != marker["commit"]:
+                        raise UpdateError(f"releases/{tag} is at {(head or 'no commit')[:12]}, not at the commit "
+                                          f"{marker['commit'][:12]} it was prepared and checked at; not switching")
+                st = read_state(self.home)
+                prev = old
+                confirmed = st.get("previous")
+                if st.get("pending") and st.get("current") == old and isinstance(confirmed, str) and \
+                        confirmed != tag and TAG_RE.match(confirmed) and self.layout.marker(confirmed):
+                    prev = confirmed  # old was never confirmed: not something to go back to
+                fields: dict[str, Any] = {"previous": prev, "current": tag, "switched_at": self.clock(),
                                           "rolled_back": None, "rollback_reason": None}
                 if pending and old:
                     fields.update(pending=True, attempts=0)
                 else:
                     fields.update(pending=None, attempts=None)
-                self.change(**fields)  # before the swap: a crash in between still rolls back
-                swap_current(self.layout, tag)
-                self.prune(keep={tag, old} if old else {tag})
+                before = {k: st.get(k) for k in fields}
+                self.change(**fields)  # before the swap: a crash in between is caught at the next start
+                try:
+                    swap_current(self.layout, tag)
+                except OSError as exc:
+                    self.change(**before)  # still on old: as it was
+                    raise UpdateError(f"could not point {self.layout.current} at releases/{tag}: {exc}") from None
+                self.prune(keep={tag, old, prev})
         except BlockingIOError:
             raise UpdateError("another update is in progress (update.lock is held)") from None
-        log.info("switched %s -> %s", old, tag)
+        log.info("switched %s -> %s (rollback target %s)", old, tag, prev)
         return old
 
     def prune(self, keep: set[str | None]) -> list[str]:
@@ -763,7 +983,7 @@ class Updater:
         st = self.state()
         if not st.get("pending") or st.get("current") != f"v{self.version}":
             return False
-        self.change(pending=None, attempts=None, confirmed_at=self.clock(), plugins_pending=True,
+        self.change(pending=None, attempts=None, confirmed_at=self.clock(), plugins_pending=True, plugins_tries=None,
                     last_result=f"updated to v{self.version}" + (f" from {st['previous']}" if st.get("previous") else ""),
                     last_error=None, last_result_at=self.clock())
         log.info("update to v%s confirmed", self.version)
@@ -771,16 +991,20 @@ class Updater:
 
     def refresh_plugins(self) -> dict[str, Any]:
         """Update the Claude Code and Codex plugins, each only when its CLI
-        is on PATH and AfterWord's plugin is installed there. Failures are
-        recorded, never raised."""
+        is on PATH and AfterWord's plugin is installed (and enabled) there.
+        Failures are recorded, never raised; after one, plugins_pending stays
+        set and the refresh is tried again at the next checks, at most
+        PLUGIN_RETRIES more times."""
         results: dict[str, Any] = {}
         for tool, steps in PLUGIN_STEPS.items():
             exe = self._which(tool)
             if not exe:
                 results[tool] = {"ok": None, "message": f"{tool} is not on PATH; skipped"}
                 continue
-            if not plugin_installed(tool):
-                results[tool] = {"ok": None, "message": f"the {tool} plugin is not installed; skipped"}
+            status = plugin_status(tool)
+            if status != "installed":
+                why = "disabled" if status == "disabled" else "not installed"
+                results[tool] = {"ok": None, "message": f"the {tool} plugin is {why}; skipped"}
                 continue
             for args in steps:
                 r = self._run([exe, *args], timeout=PLUGIN_TIMEOUT_S)
@@ -790,8 +1014,24 @@ class Updater:
                     break
             else:
                 results[tool] = {"ok": True, "message": f"updated; {PLUGIN_NOTES[tool]}"}
-        self.change(plugins={"at": self.clock(), "version": self.version, **results}, plugins_pending=None)
+        tries = int(read_state(self.home).get("plugins_tries") or 0) + 1
+        again = any(r.get("ok") is False for r in results.values()) and tries <= PLUGIN_RETRIES
+        self.change(plugins={"at": self.clock(), "version": self.version, "tries": tries, **results},
+                    plugins_pending=True if again else None, plugins_tries=tries if again else None)
         return results
+
+    async def _refresh_plugins_noted(self) -> None:
+        """refresh_plugins() when one is due, with a row in the event log."""
+        if not self.state().get("plugins_pending"):
+            return
+        results = await self._thread(self.refresh_plugins)
+        failed = [r["message"] for r in results.values() if r.get("ok") is False]
+        if failed:
+            again = " (tried again at the next check)" if self.state().get("plugins_pending") else ""
+            self._note("error", "plugin refresh: " + "; ".join(failed) + again)
+        elif any(r.get("ok") for r in results.values()):
+            self._note("info", "plugins updated: " + "; ".join(
+                f"{t}: {r['message']}" for t, r in results.items() if r.get("ok")))
 
     # -- the daemon's loop ----------------------------------------------- #
 
@@ -823,22 +1063,17 @@ class Updater:
             self.change(rollback_notice=None)
             self._note("error", f"update to {st.get('rolled_back')} rolled back: {st.get('rollback_reason')}")
         if st.get("pending") and st.get("current") == f"v{self.version}" and self.kind() == "managed":
-            t0 = self.clock()
-            while self.clock() - t0 < CONFIRM_AFTER_S:
-                await self._sleep(min(5.0, CONFIRM_AFTER_S - (self.clock() - t0)))
+            # Time awake and serving: the monotonic clock stops while the Mac
+            # sleeps, so a sleep right after the switch does not count.
+            t0 = self.mono()
+            while (left := CONFIRM_AFTER_S - (self.mono() - t0)) > 0:
+                await self._sleep(min(5.0, left))
             if not self.serving():
                 return
             if await self._thread(self.confirm):
                 st = self.state()
                 self._note("info", st.get("last_result") or f"updated to v{self.version}")
-        if self.state().get("plugins_pending"):
-            results = await self._thread(self.refresh_plugins)
-            failed = [r["message"] for r in results.values() if r.get("ok") is False]
-            if failed:
-                self._note("error", "plugin refresh: " + "; ".join(failed))
-            elif any(r.get("ok") for r in results.values()):
-                self._note("info", "plugins updated: " + "; ".join(
-                    f"{t}: {r['message']}" for t, r in results.items() if r.get("ok")))
+        await self._refresh_plugins_noted()
 
     async def run_loop(self) -> None:
         """The daemon's update task."""
@@ -868,19 +1103,25 @@ class Updater:
             return self.view()  # a check or apply is running: its result comes soon
         try:
             self.phase = "checking"
-            return await self._thread(self.check)
+            await self._thread(self.check)
         finally:
             self.phase = "idle" if self.phase == "checking" else self.phase
             self._job.release()
+        return self.view()  # after the phase is back to idle
 
     async def tick(self) -> None:
-        """A scheduled check; in auto mode, prepare and switch to a newer release."""
+        """A scheduled check; in auto mode, prepare and switch to a newer
+        release. A plugin refresh that failed before is tried again."""
         if not self._job.acquire(blocking=False):
             return
         try:
             self.phase = "checking"
             view = await self._thread(self.check)
             self.phase = "idle"
+            try:
+                await self._refresh_plugins_noted()
+            except Exception:
+                log.exception("plugin refresh failed")
             if self.settings().mode != "auto" or not view["available"]:
                 return
             blocked = self.apply_blocked()
@@ -890,7 +1131,7 @@ class Updater:
             if latest == self.state().get("rolled_back"):
                 self._record(f"{latest} was rolled back; it is not retried automatically (Update now retries it)")
                 return
-            await self._apply(latest, force=False, wait_s=IDLE_WAIT_S)
+            await self._apply(latest, force=False, wait_s=IDLE_WAIT_S, scheduled=True)
         finally:
             self._job.release()
 
@@ -898,49 +1139,88 @@ class Updater:
         """"Update now": check, prepare, wait for idle (up to wait_s; not at
         all with force), switch. Runs in the background; returns the tag it
         goes for (None when no check has run yet: the job checks first).
-        Raises UpdateError when it cannot start."""
+        Raises UpdateError when it cannot start.
+
+        While a scheduled update prepares or waits for idle, it is taken
+        over instead: with force it switches as soon as it is prepared,
+        without force it switches when idle whatever the mode is now."""
         blocked = self.apply_blocked()
         if blocked:
             raise UpdateError(blocked)
-        if self.phase == "restarting" or not self._job.acquire(blocking=False):
-            # (restarting: switched already; the daemon is on its way out)
+        wait = APPLY_WAIT_S if wait_s is None else parse_wait(wait_s)
+        if self.phase == "restarting":
+            # switched already; the daemon is on its way out
             raise UpdateError(f"an update step is already running ({self.phase})")
-        latest = self.state().get("latest")
-        if latest is not None and not newer(latest, self.version):
+        if not self._job.acquire(blocking=False):
+            if self._scheduled and self.phase in ("preparing", "waiting"):
+                self._takeover = "force" if force or self._takeover == "force" else "manual"
+                if self._takeover == "force" and self._wake is not None:
+                    self._wake.set()  # ends the idle wait's nap now
+                log.info("update now: taking over the scheduled update to %s (%s)", self.phase_tag, self._takeover)
+                return self.phase_tag
+            raise UpdateError(f"an update step is already running ({self.phase})")
+        try:
+            latest = self.state().get("latest")
+            if latest is not None and not newer(latest, self.version):
+                raise UpdateError(f"already up to date: the newest release is {latest} (running {self.version})")
+            self.phase, self.phase_tag = "checking", None  # before the answer goes out: the page polls for it
+            self._apply_task = asyncio.get_running_loop().create_task(self._apply_job(force, wait),
+                                                                      name="update-apply")
+        except BaseException:
+            self.phase, self.phase_tag = "idle", None
             self._job.release()
-            raise UpdateError(f"already up to date: the newest release is {latest} (running {self.version})")
-        wait = APPLY_WAIT_S if wait_s is None else max(0.0, float(wait_s))
-        self.phase, self.phase_tag = "checking", None  # before the answer goes out: the page polls for it
-
-        async def job():
-            try:
-                self.phase = "checking"
-                view = await self._thread(self.check)
-                target = view["latest"] if view["available"] else None
-                self.phase = "idle"
-                if not target:
-                    self._record(view.get("last_result") or "nothing to update", view.get("last_error"))
-                    return
-                if target == self.state().get("rolled_back"):
-                    self.change(rolled_back=None, rollback_reason=None)  # an explicit retry
-                await self._apply(target, force=force, wait_s=wait)
-            except Exception as exc:
-                log.exception("update failed")
-                self._record("update failed", f"{type(exc).__name__}: {exc}")
-            finally:
-                if self.phase != "restarting":
-                    self.phase, self.phase_tag = "idle", None
-                self._job.release()
-
-        self._apply_task = asyncio.get_running_loop().create_task(job(), name="update-apply")
+            raise
         return latest
 
+    async def _apply_job(self, force: bool, wait: float) -> None:
+        """start_apply's background job (it holds _job; released here)."""
+        try:
+            self.phase = "checking"
+            view = await self._thread(self.check)
+            target = view["latest"] if view["available"] else None
+            self.phase = "idle"
+            if not target:
+                self._record(view.get("last_result") or "nothing to update", view.get("last_error"))
+                return
+            if target == self.state().get("rolled_back"):
+                self.change(rolled_back=None, rollback_reason=None)  # an explicit retry
+            await self._apply(target, force=force, wait_s=wait)
+        except Exception as exc:
+            log.exception("update failed")
+            self._record("update failed", f"{type(exc).__name__}: {exc}")
+        finally:
+            if self.phase != "restarting":
+                self.phase, self.phase_tag = "idle", None
+            self._job.release()
+
+    async def _nap(self, s: float) -> None:
+        """Sleep `s`, or less when "Update now" takes over (the _wake event)."""
+        wake = self._wake
+        if wake is None:
+            await self._sleep(s)
+            return
+        if wake.is_set():
+            return
+        nap = asyncio.ensure_future(self._sleep(s))
+        woken = asyncio.ensure_future(wake.wait())
+        try:
+            await asyncio.wait({nap, woken}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for t in (nap, woken):
+                t.cancel()
+        if nap.done() and not nap.cancelled() and nap.exception() is not None:
+            raise nap.exception()
+
     async def wait_idle(self, max_s: float) -> bool:
-        """True once idle() has held for IDLE_SETTLE_S; False after max_s."""
-        end = self.clock() + max_s
+        """True once idle() has held for IDLE_SETTLE_S (or a forced "Update
+        now" took over); False after max_s. Measured on the monotonic clock:
+        time asleep is neither idle time nor waiting time."""
+        end = self.mono() + max_s
         since = None
         while True:
-            now = self.clock()
+            if self._takeover == "force":
+                return True
+            now = self.mono()
             if self.idle():
                 since = now if since is None else since
                 if now - since >= IDLE_SETTLE_S:
@@ -949,9 +1229,19 @@ class Updater:
                 since = None
             if now >= end:
                 return False
-            await self._sleep(IDLE_POLL_S)
+            await self._nap(IDLE_POLL_S)
 
-    async def _apply(self, tag: str, force: bool, wait_s: float) -> bool:
+    async def _apply(self, tag: str, force: bool, wait_s: float, scheduled: bool = False) -> bool:
+        """Prepare `tag`, wait for idle (not with force), switch, restart.
+        A scheduled apply can be taken over by start_apply meanwhile."""
+        self._scheduled, self._takeover = scheduled, None
+        self._wake = asyncio.Event() if scheduled else None
+        try:
+            return await self._prepare_wait_switch(tag, force, wait_s, scheduled)
+        finally:
+            self._scheduled, self._takeover, self._wake = False, None, None
+
+    async def _prepare_wait_switch(self, tag: str, force: bool, wait_s: float, scheduled: bool) -> bool:
         self.phase, self.phase_tag = "preparing", tag
         try:
             await self._thread(self.prepare, tag)
@@ -960,10 +1250,22 @@ class Updater:
             self._note("error", f"update to {tag} not prepared: {exc}")
             self.phase, self.phase_tag = "idle", None
             return False
-        if not force:
+        if not (force or self._takeover == "force"):
             self.phase = "waiting"
             if not await self.wait_idle(wait_s):
                 self._record(f"{tag} is ready; waiting for a moment with nothing to say (next try at the next check)")
+                self.phase, self.phase_tag = "idle", None
+                return False
+        if scheduled and self._takeover is None:
+            # Still the scheduled update, maybe hours later: the settings may
+            # have changed meanwhile.
+            mode = self.settings().mode
+            if mode != "auto":
+                self._record(f"{tag} is ready; not switching: [update] mode is now {mode!r}")
+                self.phase, self.phase_tag = "idle", None
+                return False
+            if tag == self.state().get("rolled_back"):
+                self._record(f"{tag} was rolled back; it is not retried automatically (Update now retries it)")
                 self.phase, self.phase_tag = "idle", None
                 return False
         self.phase = "switching"
@@ -975,6 +1277,9 @@ class Updater:
             return False
         self._record(f"switched from {old} to {tag}; restarting", None)
         self._note("info", f"update: switching from {old or self.version} to {tag}; restarting")
+        warning = self.unidic_warning(tag)
+        if warning:
+            self._note("error", warning)
         self.phase = "restarting"
         if self.restart is not None:
             self.restart()
@@ -1018,12 +1323,49 @@ def for_daemon(d) -> Updater:
 # --------------------------------------------------------------------------- #
 
 
+def _pid_alive(pid: Any) -> bool:
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # (EPERM) someone else's process
+    return True
+
+
+def _previous_run_failed(home: Path) -> bool:
+    """Whether the daemon's last run ended without a clean shutdown: its
+    daemon.run is still there (a clean shutdown removes it) and is not the
+    marker of a daemon that is running now. With no marker, one is written
+    for this start, so a release that dies before the daemon writes its own
+    is still caught at the next start."""
+    path = Path(home) / RUN_MARKER_NAME
+    try:
+        data = json.loads(common.read_regular_file(path, 4096).decode("utf-8"))
+    except FileNotFoundError:
+        with contextlib.suppress(OSError):
+            tmp = path.with_name(path.name + ".tmp")
+            tmp.write_text(json.dumps({"pid": os.getpid(), "started_at": time.time(), "by": "startup_check"}))
+            os.replace(tmp, path)
+        return False
+    except (OSError, ValueError):
+        return True  # unreadable: as the daemon reads it, not a clean shutdown
+    pid = data.get("pid") if isinstance(data, dict) else None
+    return not (pid != os.getpid() and _pid_alive(pid))
+
+
 def startup_check(home: Path | None = None, exec_fn=None, argv: list[str] | None = None, out=None) -> str:
-    """Under launchd, with a switch pending: count this start; after more
-    than MAX_START_ATTEMPTS starts without a confirmation, point `current`
-    back at the previous release and start that instead (exec). Returns
-    "none", "counted", "rolled-back" or "no-rollback" (tests); after a
-    rollback it only returns when exec_fn does."""
+    """Under launchd, with a switch pending: count this start as a failed
+    one when the run before it did not shut down cleanly (a crash, a kill,
+    an exception; not a restart, a logout or install-service's reload);
+    after MAX_START_ATTEMPTS failed starts without a confirmation, point
+    `current` back at the previous release and start that instead (exec).
+    Returns "none", "clean" (not counted), "counted", "stale" (the pending
+    release is not the one running: the record is cleared), "rolled-back"
+    or "no-rollback" (tests); after a rollback it only returns when exec_fn
+    does."""
     if os.environ.get("AFTERWORD_SERVICE") != "1":
         return "none"
     home = Path(home) if home is not None else common.home()
@@ -1032,14 +1374,21 @@ def startup_check(home: Path | None = None, exec_fn=None, argv: list[str] | None
         return "none"
     if running_kind(home) != "managed":
         return "none"
+    if running_release(home) != state.get("current"):
+        # The switch never happened (a failed swap, or a crash between
+        # update.json and the swap): nothing of the pending release runs.
+        change_state(home, pending=None, attempts=None)
+        return "stale"
     out = out or sys.stderr
+    if not _previous_run_failed(home):
+        return "clean"
     attempts = int(state.get("attempts") or 0) + 1
     state = change_state(home, attempts=attempts)
-    if attempts <= MAX_START_ATTEMPTS:
+    if attempts < MAX_START_ATTEMPTS:
         return "counted"
     layout = Layout(home)
     bad, prev = state.get("current"), state.get("previous")
-    reason = (f"{bad} did not stay up for {CONFIRM_AFTER_S:.0f} s in {attempts - 1} starts")
+    reason = (f"{bad} did not stay up for {CONFIRM_AFTER_S:.0f} s in {attempts} starts")
     if not prev or not layout.marker(prev):
         change_state(home, pending=None, attempts=None, rolled_back=bad,
                      rollback_reason=reason + "; no previous release to go back to", rollback_notice=True)
@@ -1090,6 +1439,7 @@ def install_managed(dry_run: bool = False, start: bool = True, out=None, updater
               file=sys.stderr)
         return 1
     extras = sorted(up._extras())  # what this environment has; later updates keep it
+    protected = tag in up._protected()
     if dry_run:
         print(f"# managed install of {tag} in {lay.release(tag)} (extras: {', '.join(extras) or 'none'})", file=out)
         print(f"# would fetch {tag} from {up.settings().repo} into {lay.repo}", file=out)
@@ -1098,7 +1448,8 @@ def install_managed(dry_run: bool = False, start: bool = True, out=None, updater
         return service.install(dry_run=True, start=start, out=out, python=lay.service_python())
     common.ensure_home()
     up.change(uv=uv, extras=extras)
-    if not lay.marker(tag):
+    marker = lay.marker(tag)
+    if not marker:
         print(f"preparing {tag} in {lay.release(tag)} (extras: {', '.join(extras) or 'none'}); this can take a "
               "few minutes the first time", file=out, flush=True)
     try:
@@ -1107,9 +1458,19 @@ def install_managed(dry_run: bool = False, start: bool = True, out=None, updater
     except UpdateError as exc:
         print(f"install-service: {exc}; the service was not touched", file=sys.stderr)
         return 1
-    up.change(install="managed", pending=None, attempts=None)
+    # switch() cleared a pending update when it switched; when it did not
+    # (already on `tag`), a pending update keeps counting towards a rollback.
+    up.change(install="managed")
     note = f" (was {old})" if old and old != tag else ""
     print(f"{lay.current} -> releases/{tag}{note}", file=out)
+    had = sorted((lay.marker(tag) or {}).get("extras") or [])
+    if protected and had != extras:
+        # The release the service runs (or goes back to) is never synced again.
+        print(f"note: {tag} stays installed with extras {', '.join(had) or 'none'}; {', '.join(extras) or 'none'} "
+              "come with the next release (`afterword install-service --dev` runs this checkout now)", file=out)
+    warning = up.unidic_warning(tag)
+    if warning:
+        print(f"note: {warning}", file=out)
     return service.install(dry_run=False, start=start, out=out, python=lay.service_python())
 
 

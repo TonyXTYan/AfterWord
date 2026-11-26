@@ -358,7 +358,7 @@ uses the same endpoints). `GET /api/status` carries the same object as
   "repo": "https://github.com/TonyXTYan/AfterWord.git",
   "running": "0.3.6",           // this daemon's version
   "current": "v0.3.6",          // what app/current points at (null without a managed install)
-  "previous": "v0.3.5",         // kept for rollback
+  "previous": "v0.3.5",         // the last confirmed release, kept for rollback
   "latest": "v0.3.7",           // the newest release tag at the last check (null: none yet)
   "available": true,            // latest is newer than running
   "last_check": 1795480000.0,
@@ -369,8 +369,9 @@ uses the same endpoints). `GET /api/status` carries the same object as
   "phase": "idle",              // "idle" | "checking" | "preparing" | "waiting" (for nothing to be said)
                                 // | "switching" | "restarting"
   "phase_tag": null,            // the tag being prepared or switched to
-  "pending": false,             // switched, not yet confirmed (after 60 s of serving)
-  "attempts": 0,                // starts of a pending release so far (rolled back after 3)
+  "scheduled": false,           // the scheduled update is preparing or waiting: apply takes it over
+  "pending": false,             // switched, not yet confirmed (after 60 s of serving, awake)
+  "attempts": 0,                // failed starts of a pending release so far (rolled back after 3)
   "switched_at": 1795400000.0,
   "confirmed_at": 1795400070.0,
   "rolled_back": null,          // a tag that was rolled back; not installed again automatically
@@ -379,7 +380,7 @@ uses the same endpoints). `GET /api/status` carries the same object as
   "notes": "- …",               // the available release's CHANGELOG.md section (null if none)
   "notes_tag": "v0.3.7",
   "plugins": {                  // the last plugin refresh, after a confirmed update (null: none yet)
-    "at": 1795400071.0, "version": "0.3.6",
+    "at": 1795400071.0, "version": "0.3.6", "tries": 1,   // failed ones are tried again at the next 3 checks
     "claude": {"ok": true, "message": "updated; restart open Claude Code sessions to load the new hooks"},
     "codex": {"ok": null, "message": "codex is not on PATH; skipped"}    // ok null: skipped; false: failed
   },
@@ -400,10 +401,15 @@ restarts. It answers 202 `{"started": true, "tag": "v0.3.7", "pid": 4321,
 "update": {…}}` at once (`tag` is null when no check has run yet) and works
 in the background: follow `phase` in `GET /api/status` until `pid` changes
 (updated) or `phase` is "idle" again (stopped: `last_result`, `last_error`).
-It works in any `mode`, and also retries a rolled-back tag. 409 when this
-daemon cannot apply updates (`apply_blocked`), when the newest known release
-is not newer, or while an update step is running; 400 for a bad body; 503
-while the daemon is stopping. All POSTs need `X-AfterWord: 1`.
+It works in any `mode`, and also retries a rolled-back tag. While the
+scheduled update prepares or waits for quiet (`scheduled` true), it takes
+that one over and answers 202 with its `tag`: with `force` it switches as
+soon as the release is prepared, without it it switches once quiet, whatever
+`mode` is by then. 409 when this daemon cannot apply updates
+(`apply_blocked`), when the newest known release is not newer, or while
+another update step is running; 400 for a bad body (`wait_s` must be a
+finite number from 0 to 86400); 503 while the daemon is stopping. All POSTs
+need `X-AfterWord: 1`.
 
 ## Voices
 

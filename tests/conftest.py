@@ -206,5 +206,6 @@ def no_real_updates(monkeypatch, tmp_path):
 
     monkeypatch.setattr(update, "run_cmd", refuse)
     monkeypatch.setattr(update, "which", lambda name: None)
+    monkeypatch.setattr(update, "running_unidic", lambda: None)  # never this venv's dictionary
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "no-claude-config"))
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "no-codex-home"))

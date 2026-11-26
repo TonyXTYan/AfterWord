@@ -1664,7 +1664,7 @@ async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) 
     events = None
     signals_installed: list[int] = []
     marker_path = home / RUN_MARKER
-    marker_written = False
+    marker_written = stopped_cleanly = False
     try:
         # Refuse to start before touching anything if another daemon owns
         # the socket, so a refused start has no side effects.
@@ -1765,6 +1765,7 @@ async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) 
             if on_ready:
                 on_ready(daemon)
             await daemon._stop_event.wait()
+        stopped_cleanly = True
     finally:
         for sig in signals_installed:
             with contextlib.suppress(Exception):
@@ -1803,7 +1804,9 @@ async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) 
             with contextlib.suppress(Exception):
                 events.insert(kind="system", status="info", reason="daemon stopped")
             events.close()
-        if marker_written:
+        # Only a clean shutdown removes it: after an exception the next start
+        # reports it, and an update pending counts the start as a failed one.
+        if marker_written and stopped_cleanly:
             with contextlib.suppress(OSError):
                 marker_path.unlink()
         lock.close()

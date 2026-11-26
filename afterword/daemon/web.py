@@ -480,15 +480,21 @@ def build_app(daemon: "Daemon", port: int) -> FastAPI:
 
     @app.post("/api/update/apply")
     async def update_apply(request: Request):
-        from afterword.update import UpdateError
+        from afterword.update import MAX_WAIT_S, UpdateError, parse_wait
 
         can_queue()  # 503 while stopping
         body = await json_body(request) if (await request.body()).strip() else {}
-        if not isinstance(body, dict) or not isinstance(body.get("force", False), bool) or \
-                not isinstance(body.get("wait_s", 0), (int, float)) or isinstance(body.get("wait_s"), bool):
-            raise LabError(400, "send {\"force\": true|false, \"wait_s\": seconds} (both optional)")
+        usage = f"send {{\"force\": true|false, \"wait_s\": 0 to {MAX_WAIT_S:.0f} seconds}} (both optional)"
+        if not isinstance(body, dict) or not isinstance(body.get("force", False), bool):
+            raise LabError(400, usage)
+        wait_s = body.get("wait_s")
+        if wait_s is not None:
+            try:
+                wait_s = parse_wait(wait_s)
+            except UpdateError as exc:
+                raise LabError(400, f"{exc}: {usage}") from None
         try:
-            tag = daemon.updater.start_apply(force=body.get("force", False), wait_s=body.get("wait_s"))
+            tag = daemon.updater.start_apply(force=body.get("force", False), wait_s=wait_s)
         except UpdateError as exc:
             raise LabError(409, str(exc)) from None
         return JSONResponse({"started": True, "tag": tag, "pid": os.getpid(), "update": daemon.updater.view()},

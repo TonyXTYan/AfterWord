@@ -6,6 +6,7 @@ python, claude, codex and launchctl are all fakes; every home is a temp
 directory."""
 
 import asyncio
+import hashlib
 import json
 import os
 import plistlib
@@ -60,8 +61,11 @@ class Tools:
     def __init__(self, tags=("v0.3.5", "v0.3.6", "v0.3.7")):
         self.tags = list(tags)
         self.calls = []
-        self.fail = {}  # key -> Result: "ls-remote", "fetch", "worktree", "sync:<tag>", "import:<tag>", "<tool> <sub>"
+        # key -> Result: "ls-remote", "fetch", "worktree", "sync:<tag>", "import:<tag>", "<tool> <sub>", "cp"
+        self.fail = {}
         self.versions = {}  # tag -> what `--version` prints instead of the tag's version
+        self.commits = {}  # tag -> the commit it points at (default: a hash of the tag's name)
+        self.off_main = set()  # tags whose commit is not on main
         self.changelog = CHANGELOG
         self.paths = {"git": "/usr/bin/git", "uv": "/fake/bin/uv", "claude": "/fake/bin/claude",
                       "codex": "/fake/bin/codex"}
@@ -75,6 +79,12 @@ class Tools:
 
     def _tag_of(self, path):
         return Path(path).name
+
+    def sha(self, tag):
+        return self.commits.get(tag) or hashlib.sha1(tag.encode()).hexdigest()
+
+    def tag_of_sha(self, sha):
+        return next((t for t in self.tags if self.sha(t) == sha), sha[:7])
 
     def __call__(self, argv, cwd=None, env=None, timeout=60):
         argv = [str(a) for a in argv]
@@ -97,14 +107,30 @@ class Tools:
             assert argv[1] == "-C"
             sub = argv[3]
             if sub == "fetch":
-                tag = argv[-1].split(":")[-1].rsplit("/", 1)[-1]
+                spec = next(a for a in argv if a.startswith("+refs/tags/"))
+                assert argv[-1] == "+refs/heads/main:refs/heads/main"  # main comes with it
+                tag = spec.split(":")[-1].rsplit("/", 1)[-1]
                 return f"fetch {tag}", self.fail.get("fetch") or ok
+            if sub == "rev-parse" and argv[-1] == "HEAD":  # in a release worktree
+                head = Path(argv[2]) / ".fake-head"
+                name = f"head {Path(argv[2]).name}"
+                return name, update.Result(0, head.read_text() + "\n") if head.exists() else update.Result(128)
+            if sub == "rev-parse":
+                assert argv[2].endswith("repo.git") and argv[4:6] == ["--verify", "--quiet"]
+                tag = argv[-1].removesuffix("^{commit}")
+                return f"rev-parse {tag}", update.Result(0, self.sha(tag) + "\n") if tag in self.tags \
+                    else update.Result(1)
+            if sub == "merge-base":
+                assert argv[4] == "--is-ancestor" and argv[-1] == "refs/heads/main"
+                tag = self.tag_of_sha(argv[5])
+                return f"merge-base {tag}", update.Result(1 if tag in self.off_main else 0)
             if sub == "worktree" and argv[4] == "add":
                 dest = Path(argv[-2])
                 if "worktree" in self.fail:
                     return f"worktree add {dest.name}", self.fail["worktree"]
                 dest.mkdir(parents=True)
                 (dest / ".git").write_text("gitdir: ../../repo.git/worktrees/x\n")
+                (dest / ".fake-head").write_text(argv[-1])
                 return f"worktree add {dest.name}", ok
             if sub == "worktree" and argv[4] == "remove":
                 shutil.rmtree(argv[-1], ignore_errors=True)
@@ -122,7 +148,15 @@ class Tools:
             py = Path(cwd) / ".venv" / "bin" / "python"
             py.parent.mkdir(parents=True, exist_ok=True)
             py.write_text("")
+            if "kokoro" in argv:  # misaki[ja] brings unidic, without its dictionary
+                (Path(cwd) / ".venv" / "lib" / "python3.12" / "site-packages" / "unidic").mkdir(parents=True, exist_ok=True)
             return f"uv sync {tag}", ok
+        if exe == "cp":
+            assert argv[:4] == ["/bin/cp", "-c", "-R", argv[3]]
+            if "cp" in self.fail:
+                return "cp", self.fail["cp"]
+            shutil.copytree(argv[3], argv[4])
+            return "cp", ok
         if exe == "python":
             tag = Path(argv[0]).parents[2].name
             assert argv[1] == "-P"
@@ -138,17 +172,28 @@ class Tools:
 
 
 class Clock:
+    """Wall-clock time (calling it) and monotonic time (mono); sleep()
+    advances both. Values in `asleep` are system sleeps, one per sleep()
+    call: the wall clock jumps by that much more, the monotonic one does not
+    (as on macOS)."""
+
     def __init__(self, t=1_000_000.0):
         self.t = t
+        self.m = 5_000.0
         self.slept = []
         self.until = None
+        self.asleep = []
 
     def __call__(self):
         return self.t
 
+    def mono(self):
+        return self.m
+
     async def sleep(self, s):
         self.slept.append(s)
-        self.t += s
+        self.t += s + (self.asleep.pop(0) if self.asleep else 0)
+        self.m += s
         if self.until is not None and self.t > self.until:
             raise _Stop()
         await asyncio.sleep(0)
@@ -173,8 +218,10 @@ def tools(monkeypatch):
 
 def make(home, tools=None, version="0.3.6", mode="auto", kind="managed", service_=True, **kw):
     s = update.UpdateSettings(mode=mode)
-    return update.Updater(home, settings=lambda: s, version=version, kind=lambda: kind,
-                          as_service=lambda: service_, extras=lambda: ["qwen"], **kw)
+    kw.setdefault("settings", lambda: s)
+    kw.setdefault("extras", lambda: ["qwen"])
+    kw.setdefault("unidic", lambda: None)
+    return update.Updater(home, version=version, kind=lambda: kind, as_service=lambda: service_, **kw)
 
 
 def install_release(up, tag):
@@ -253,18 +300,18 @@ def test_prepare_builds_a_tested_release(aw_home, tools):
     up = make(aw_home)
     dest = up.prepare("v0.3.7")
     assert dest == aw_home / "app" / "releases" / "v0.3.7"
-    assert tools.names() == ["init", "fetch v0.3.7", "worktree prune", "worktree add v0.3.7", "uv sync v0.3.7",
-                             "version v0.3.7", "import v0.3.7"]
+    assert tools.names() == ["init", "fetch v0.3.7", "rev-parse v0.3.7", "merge-base v0.3.7", "worktree prune",
+                             "worktree add v0.3.7", "uv sync v0.3.7", "version v0.3.7", "import v0.3.7"]
     calls = dict(tools.calls)
     assert calls["uv sync v0.3.7"] == ["/fake/bin/uv", "sync", "--frozen", "--no-dev", "--extra", "qwen"]
-    assert calls["worktree add v0.3.7"][-1] == "v0.3.7^{commit}"
+    assert calls["worktree add v0.3.7"][-1] == tools.sha("v0.3.7")  # the commit that was checked
     assert calls["version v0.3.7"][0] == str(dest / ".venv" / "bin" / "python")
     marker = json.loads((dest / update.READY_MARKER).read_text())
-    assert marker["tag"] == "v0.3.7" and marker["extras"] == ["qwen"]
+    assert marker["tag"] == "v0.3.7" and marker["extras"] == ["qwen"] and marker["commit"] == tools.sha("v0.3.7")
     assert up.layout.ready() == ["v0.3.7"]
     tools.calls.clear()
-    up.prepare("v0.3.7")  # ready with the same extras: reused as it is
-    assert tools.calls == []
+    up.prepare("v0.3.7")  # ready with the same extras, at the tag's commit: reused as it is
+    assert tools.names() == ["rev-parse v0.3.7", "head v0.3.7"]
 
 
 def test_prepare_without_uv_or_git_says_so(aw_home, tools):
@@ -350,6 +397,8 @@ def test_switch_keeps_the_newest_two_releases(aw_home, tools):
     for tag in ("v0.3.7", "v0.3.8", "v0.3.9"):
         up.prepare(tag)
         up.switch(tag)
+        up.version = tag[1:]  # each one confirmed before the next
+        assert up.confirm()
     assert sorted(p.name for p in up.layout.releases.iterdir()) == ["v0.3.8", "v0.3.9"]
     assert "worktree remove v0.3.6" in tools.names() and "worktree remove v0.3.7" in tools.names()
     with pytest.raises(update.UpdateError, match="not prepared"):
@@ -363,7 +412,7 @@ def test_switch_keeps_the_newest_two_releases(aw_home, tools):
 
 def daemon_updater(home, tools, clock, idle=lambda: True, **kw):
     restarts, notes = [], []
-    up = make(home, clock=clock, sleep=clock.sleep, idle=idle, restart=lambda: restarts.append(clock()),
+    up = make(home, clock=clock, mono=clock.mono, sleep=clock.sleep, idle=idle, restart=lambda: restarts.append(clock()),
               note=lambda s, r: notes.append((s, r)), **kw)
     return up, restarts, notes
 
@@ -548,13 +597,24 @@ def switched(aw_home, tools, monkeypatch):
     return up
 
 
-def test_rollback_after_more_than_three_failed_starts(aw_home, tools, monkeypatch, capsys):
+def crash(aw_home):
+    """The daemon started by the last startup_check dies without a clean
+    shutdown: its daemon.run stays, under a pid that is gone."""
+    (aw_home / update.RUN_MARKER_NAME).write_text(json.dumps({"pid": 2 ** 22 + 12345, "started_at": 1}))
+
+
+def test_rollback_after_three_failed_starts(aw_home, tools, monkeypatch, capsys):
     up = switched(aw_home, tools, monkeypatch)
     execs = []
-    for n in range(1, 4):
+    # The first start follows the old release's clean exit: not a failure.
+    assert update.startup_check(aw_home, exec_fn=lambda *a: execs.append(a), argv=["serve"]) == "clean"
+    assert json.loads((aw_home / update.RUN_MARKER_NAME).read_text())["pid"] == os.getpid()
+    for n in range(1, 3):
+        crash(aw_home)
         assert update.startup_check(aw_home, exec_fn=lambda *a: execs.append(a), argv=["serve"]) == "counted"
         assert update.read_state(aw_home)["attempts"] == n
     assert up.layout.current_tag() == "v0.3.7" and execs == []
+    crash(aw_home)
     assert update.startup_check(aw_home, exec_fn=lambda *a: execs.append(a), argv=["serve", "-v"]) == "rolled-back"
     assert up.layout.current_tag() == "v0.3.6"
     py = str(aw_home / "app" / "current" / ".venv" / "bin" / "python")
@@ -822,6 +882,7 @@ def test_api_status_check_and_apply_from_a_dev_daemon(gui, tools):
     assert client.post("/api/update/check").status_code == 403  # the POST guard
     r = client.post("/api/update/check", headers=H)
     assert r.status_code == 200 and r.json()["latest"] == "v0.3.7" and r.json()["available"] is True
+    assert r.json()["phase"] == "idle"  # the check is over by the time it answers
     assert r.json()["notes"] == "- Seven.\n- More seven."
     r = client.post("/api/update/apply", headers=H, json={})
     assert r.status_code == 409 and "development checkout" in r.json()["error"]
@@ -893,6 +954,11 @@ def test_ui_lines_and_buttons():
     assert js("upApply", uview(apply_blocked="dev checkout")) == {"enabled": False, "title": "dev checkout"}
     assert js("upApply", uview(available=False))["enabled"] is False
     assert js("upApply", uview(phase="waiting"))["enabled"] is False
+    # A scheduled update waiting for quiet: the button switches to it now.
+    take = js("upApply", uview(phase="waiting", phase_tag="v0.3.7", scheduled=True))
+    assert take["enabled"] is True and take["force"] is True and take["label"] == "Switch to v0.3.7 now"
+    assert js("upApply", uview(phase="preparing", phase_tag="v0.3.7", scheduled=True))["force"] is True
+    assert js("upApply", uview(phase="switching", phase_tag="v0.3.7", scheduled=False))["enabled"] is False
     assert "rolled back before" in js("upApply", uview(rolled_back="v0.3.7", rollback_reason="crashed"))["title"]
     plugins = {"claude": {"ok": True, "message": "updated; restart open Claude Code sessions to load the new hooks"},
                "codex": {"ok": None, "message": "codex is not on PATH; skipped"}}
@@ -913,7 +979,8 @@ def test_ui_follow():
 def test_ui_wiring():
     t = UI.read_text(encoding="utf-8")
     panel = re.search(r"const UpdatePanel = \(\(\) => \{(.*?)\n\}\)\(\);", t, re.S).group(1)
-    for call in ('api("GET", "/api/update")', 'api("POST", "/api/update/check")', 'api("POST", "/api/update/apply", {})'):
+    for call in ('api("GET", "/api/update")', 'api("POST", "/api/update/check")',
+                 'api("POST", "/api/update/apply", ap.force ? {force: true} : {})'):
         assert call in panel, call
     for el in ("up-check", "up-apply", "up-meta", "up-msg", "up-notes", "up-notesbox"):
         assert f'id="{el}"' in t, el
@@ -984,3 +1051,391 @@ def test_changelog_script_as_the_workflow_runs_it(tmp_path):
     p = subprocess.run([sys.executable, "-m", "afterword.changelog", "9.9.9", str(tmp_path / "CHANGELOG.md")],
                        cwd=ROOT, capture_output=True, text=True)
     assert p.returncode == 1 and "no (or an empty) section for 9.9.9" in p.stderr and p.stdout == ""
+
+
+# --------------------------------------------------------------------------- #
+# Where tags come from, and the commit a release is at                        #
+# --------------------------------------------------------------------------- #
+
+
+def test_prepare_refuses_a_tag_that_is_not_on_main(aw_home, tools):
+    up = make(aw_home)
+    tools.off_main = {"v0.3.7"}
+    with pytest.raises(update.UpdateError, match=r"v0.3.7 \([0-9a-f]{12}\) is not on main"):
+        up.prepare("v0.3.7")
+    assert not any(n.startswith(("worktree add", "uv sync", "version")) for n in tools.names())
+    assert up.layout.marker("v0.3.7") is None
+
+
+def test_a_moved_tag_is_checked_out_again(aw_home, tools):
+    up = make(aw_home)
+    install_release(up, "v0.3.6")
+    tools.fail["sync:v0.3.7"] = update.Result(1, "", "network down")
+    with pytest.raises(update.UpdateError):
+        up.prepare("v0.3.7")  # half prepared: a worktree at the first commit, no marker
+    tools.fail.clear()
+    tools.commits["v0.3.7"] = "7" * 40  # the maintainer moved the tag
+    tools.calls.clear()
+    up.prepare("v0.3.7")
+    names = tools.names()
+    assert names.index("worktree remove v0.3.7") < names.index("worktree add v0.3.7") < names.index("uv sync v0.3.7")
+    assert dict(tools.calls)["worktree add v0.3.7"][-1] == "7" * 40
+    assert up.layout.marker("v0.3.7")["commit"] == "7" * 40
+    # Prepared, then moved again: not reused, made again at the new commit.
+    tools.commits["v0.3.7"] = "8" * 40
+    tools.calls.clear()
+    up.prepare("v0.3.7")
+    assert "uv sync v0.3.7" in tools.names() and up.layout.marker("v0.3.7")["commit"] == "8" * 40
+
+
+def test_switch_refuses_a_release_not_at_its_checked_commit(aw_home, tools):
+    up = make(aw_home)
+    install_release(up, "v0.3.6")
+    up.prepare("v0.3.7")
+    (up.layout.release("v0.3.7") / ".fake-head").write_text("9" * 40)  # someone checked out another commit
+    with pytest.raises(update.UpdateError, match="not at the commit"):
+        up.switch("v0.3.7")
+    assert up.layout.current_tag() == "v0.3.6" and not update.read_state(aw_home).get("pending")
+
+
+# --------------------------------------------------------------------------- #
+# The running release and the rollback target are never synced again         #
+# --------------------------------------------------------------------------- #
+
+
+def test_install_service_never_resyncs_the_running_release(launchd, tools, aw_home, monkeypatch, capsys):
+    monkeypatch.setattr(update, "__version__", "0.3.6")
+    up = make(aw_home)
+    assert update.install_managed(updater=up) == 0
+    assert up.layout.marker("v0.3.6")["extras"] == ["qwen"]
+    # The checkout gained kokoro; install-service again, with uv failing if it ran.
+    up = make(aw_home, extras=lambda: ["kokoro", "qwen"])
+    tools.fail["sync:v0.3.6"] = update.Result(1, "", "uv must not run here")
+    tools.calls.clear()
+    capsys.readouterr()
+    assert update.install_managed(updater=up) == 0
+    assert not any(n.startswith(("uv sync", "worktree")) for n in tools.names())
+    assert up.layout.marker("v0.3.6")["extras"] == ["qwen"] and up.layout.current_tag() == "v0.3.6"
+    assert "kokoro, qwen come with the next release" in capsys.readouterr().out
+    assert update.read_state(aw_home)["extras"] == ["kokoro", "qwen"]
+    # ... which they do.
+    tools.fail.clear()
+    up.prepare("v0.3.7")
+    assert dict(tools.calls)["uv sync v0.3.7"][-4:] == ["--extra", "kokoro", "--extra", "qwen"]
+
+
+def test_prepare_never_resyncs_the_rollback_release(aw_home, tools):
+    up = make(aw_home)
+    install_release(up, "v0.3.6")
+    up.prepare("v0.3.7")
+    up.switch("v0.3.7")
+    up.change(extras=["chatterbox", "qwen"])
+    tools.calls.clear()
+    assert up.prepare("v0.3.6") == up.layout.release("v0.3.6")
+    assert up.prepare("v0.3.7") == up.layout.release("v0.3.7")
+    assert not any(n.startswith(("uv sync", "worktree", "fetch")) for n in tools.names())
+    assert up.layout.ready() == ["v0.3.6", "v0.3.7"]
+
+
+# --------------------------------------------------------------------------- #
+# Kokoro's UniDic dictionary                                                  #
+# --------------------------------------------------------------------------- #
+
+
+def unidic_src(tmp_path):
+    d = tmp_path / "checkout-venv" / "unidic" / "dicdir"
+    d.mkdir(parents=True)
+    (d / "dicrc").write_text("dicrc")
+    (d / "sys.dic").write_bytes(b"\0" * 64)
+    return d
+
+
+@pytest.mark.parametrize("clone", [True, False])
+def test_prepare_carries_the_unidic_dictionary_over(aw_home, tools, tmp_path, clone):
+    src = unidic_src(tmp_path)
+    if not clone:
+        tools.fail["cp"] = update.Result(1, "", "cp: clonefile failed: Cross-device link")
+    up = make(aw_home, extras=lambda: ["kokoro", "qwen"], unidic=lambda: src)
+    dest = up.prepare("v0.3.7")
+    target = dest / ".venv" / "lib" / "python3.12" / "site-packages" / "unidic" / "dicdir"
+    assert (target / "dicrc").read_text() == "dicrc" and (target / "sys.dic").stat().st_size == 64
+    assert "cp" in tools.names() and dict(tools.calls)["cp"][:3] == ["/bin/cp", "-c", "-R"]
+    assert up.layout.marker("v0.3.7")["unidic"] == "copied" and up.unidic_warning("v0.3.7") is None
+    assert not list(target.parent.glob(".dicdir.*"))
+
+
+def test_prepare_says_when_there_is_no_unidic_dictionary(launchd, tools, aw_home, monkeypatch, capsys):
+    monkeypatch.setattr(update, "__version__", "0.3.6")
+    up = make(aw_home, extras=lambda: ["kokoro"], unidic=lambda: None)
+    assert update.install_managed(updater=up) == 0
+    assert up.layout.marker("v0.3.6")["unidic"] == "missing"
+    out = capsys.readouterr().out
+    py = up.layout.release("v0.3.6") / ".venv" / "bin" / "python"
+    assert f"note: v0.3.6 has no UniDic dictionary, so Kokoro cannot speak Japanese: run `{py} -m unidic download`" in out
+    # Without kokoro nothing is looked for.
+    up.change(extras=["qwen"])
+    up = make(aw_home, unidic=lambda: pytest.fail("looked for UniDic without kokoro"))
+    up.prepare("v0.3.7")
+    assert "unidic" not in up.layout.marker("v0.3.7")
+
+
+# --------------------------------------------------------------------------- #
+# Switching while an update is pending; a failed swap                         #
+# --------------------------------------------------------------------------- #
+
+
+def test_switch_while_pending_keeps_the_last_confirmed_release(aw_home, tools):
+    tools.tags = ["v0.3.6", "v0.3.7", "v0.3.8", "v0.3.9"]
+    up = make(aw_home)
+    install_release(up, "v0.3.6")  # confirmed
+    up.prepare("v0.3.7")
+    up.switch("v0.3.7")  # pending, crash-looping say
+    up.prepare("v0.3.8")
+    assert up.switch("v0.3.8") == "v0.3.7"
+    st = update.read_state(aw_home)
+    assert st["previous"] == "v0.3.6" and st["current"] == "v0.3.8" and st["pending"] is True
+    assert up.layout.ready() == ["v0.3.6", "v0.3.7", "v0.3.8"]  # v0.3.7 still runs until the restart
+    up.prepare("v0.3.9")
+    up.switch("v0.3.9")
+    assert update.read_state(aw_home)["previous"] == "v0.3.6"
+    assert up.layout.ready() == ["v0.3.6", "v0.3.8", "v0.3.9"]
+
+
+def test_a_failed_swap_leaves_the_state_as_it_was(aw_home, tools, monkeypatch):
+    up = make(aw_home)
+    install_release(up, "v0.3.6")
+    up.prepare("v0.3.7")
+    before = update.read_state(aw_home)
+
+    def broken(layout, tag):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(update, "swap_current", broken)
+    with pytest.raises(update.UpdateError, match="could not point .* at releases/v0.3.7: .*No space left"):
+        up.switch("v0.3.7")
+    after = update.read_state(aw_home)
+    assert after == before and not after.get("pending") and up.layout.current_tag() == "v0.3.6"
+
+
+def test_startup_check_clears_a_pending_update_that_is_not_running(aw_home, tools, monkeypatch):
+    up = switched(aw_home, tools, monkeypatch)
+    # As if the swap never happened: v0.3.6 still runs, update.json says v0.3.7.
+    monkeypatch.setattr(update, "package_dir", lambda: up.layout.releases / "v0.3.6" / "afterword")
+    crash(aw_home)
+    assert update.startup_check(aw_home, exec_fn=lambda *a: pytest.fail("rolled back")) == "stale"
+    st = update.read_state(aw_home)
+    assert not st.get("pending") and not st.get("attempts") and not st.get("rolled_back")
+    for _ in range(4):
+        crash(aw_home)
+        assert update.startup_check(aw_home, exec_fn=lambda *a: pytest.fail("rolled back")) == "none"
+
+
+# --------------------------------------------------------------------------- #
+# Which starts count towards a rollback                                       #
+# --------------------------------------------------------------------------- #
+
+
+def test_clean_restarts_do_not_count_towards_a_rollback(aw_home, tools, monkeypatch):
+    up = switched(aw_home, tools, monkeypatch)
+    for _ in range(6):  # afterword restart, the GUI's Restart, logout/login, install-service's reload
+        assert update.startup_check(aw_home, exec_fn=lambda *a: pytest.fail("rolled back")) == "clean"
+        (aw_home / update.RUN_MARKER_NAME).unlink()  # that daemon then shut down cleanly
+    st = update.read_state(aw_home)
+    assert st["pending"] is True and st["attempts"] == 0 and up.layout.current_tag() == "v0.3.7"
+    # A marker of a daemon that is running right now is not a crash either.
+    (aw_home / update.RUN_MARKER_NAME).write_text(json.dumps({"pid": os.getppid()}))
+    assert update.startup_check(aw_home, exec_fn=lambda *a: pytest.fail("rolled back")) == "clean"
+    # An unreadable one is.
+    (aw_home / update.RUN_MARKER_NAME).write_text("{not json")
+    assert update.startup_check(aw_home, exec_fn=lambda *a: pytest.fail("rolled back")) == "counted"
+
+
+def test_the_run_marker_is_the_daemons_and_stays_after_an_exception(aw_home, monkeypatch):
+    from afterword.daemon import server
+
+    assert update.RUN_MARKER_NAME == server.RUN_MARKER
+
+    def boom(events):
+        raise RuntimeError("the new release fails at startup")
+
+    monkeypatch.setattr(server, "ingest_spool", boom)
+    with pytest.raises(RuntimeError, match="fails at startup"):
+        asyncio.run(server.run_daemon(http=False))
+    # Not a clean shutdown: the next start sees it (and counts it, with an update pending).
+    assert json.loads((aw_home / server.RUN_MARKER).read_text())["pid"] == os.getpid()
+
+
+# --------------------------------------------------------------------------- #
+# Time asleep, takeover and settings during the wait                          #
+# --------------------------------------------------------------------------- #
+
+
+def test_confirmation_counts_only_time_awake(aw_home, tools, monkeypatch):
+    switched(aw_home, tools, monkeypatch)
+    clock = Clock()
+    clock.asleep = [8 * 3600]  # the lid closes 5 s after the start, for 8 h
+    up, _, _ = daemon_updater(aw_home, tools, clock, version="0.3.7")
+    asyncio.run(up.startup())
+    assert sum(clock.slept) == update.CONFIRM_AFTER_S
+    assert not update.read_state(aw_home).get("pending")
+
+
+def test_idle_settle_time_does_not_count_time_asleep(aw_home, tools):
+    clock = Clock()
+    clock.asleep = [3600]
+    up, _, _ = daemon_updater(aw_home, tools, clock)
+    assert asyncio.run(up.wait_idle(600)) is True
+    assert len(clock.slept) == int(update.IDLE_SETTLE_S / update.IDLE_POLL_S)
+
+
+@pytest.mark.parametrize("force", [True, False])
+def test_update_now_takes_over_a_scheduled_wait(aw_home, tools, force):
+    clock = Clock()
+    s = {"mode": "auto"}
+    taken, views = [], []
+    polls = {"n": 0}
+
+    def idle():
+        polls["n"] += 1
+        if polls["n"] == 3:  # busy so far; the user presses Update now
+            views.append(up.view())
+            taken.append(up.start_apply(force=force))
+            s["mode"] = "notify"  # and a manual update switches whatever the mode is
+        return polls["n"] > 3 and not force  # without force: once it is quiet
+
+    up, restarts, _ = daemon_updater(aw_home, tools, clock, idle=idle,
+                                     settings=lambda: update.UpdateSettings(mode=s["mode"]))
+    install_release(up, "v0.3.6")
+    asyncio.run(up.tick())
+    assert taken == ["v0.3.7"] and views[0]["phase"] == "waiting" and views[0]["scheduled"] is True
+    assert restarts and up.layout.current_tag() == "v0.3.7" and up.phase == "restarting"
+    if force:
+        assert sum(clock.slept) == 2 * update.IDLE_POLL_S  # no settle time after the takeover
+    assert up.view()["scheduled"] is False
+
+
+@pytest.mark.parametrize("change", ["mode", "rolled_back"])
+def test_the_scheduled_switch_rechecks_after_the_wait(aw_home, tools, change):
+    clock = Clock()
+    s = {"mode": "auto"}
+
+    def idle():
+        if change == "mode":
+            s["mode"] = "off"
+        else:
+            up.change(rolled_back="v0.3.7")
+        return True
+
+    up, restarts, _ = daemon_updater(aw_home, tools, clock, idle=idle,
+                                     settings=lambda: update.UpdateSettings(mode=s["mode"]))
+    install_release(up, "v0.3.6")
+    asyncio.run(up.tick())
+    assert restarts == [] and up.layout.current_tag() == "v0.3.6" and up.phase == "idle"
+    st = update.read_state(aw_home)
+    assert ("mode is now 'off'" if change == "mode" else "not retried automatically") in st["last_result"]
+    assert not st.get("pending")
+
+
+# --------------------------------------------------------------------------- #
+# start_apply's wait_s; check_now's answer                                    #
+# --------------------------------------------------------------------------- #
+
+
+def test_start_apply_rejects_a_bad_wait_and_keeps_the_lock_free(aw_home, tools):
+    clock = Clock()
+    up, restarts, _ = daemon_updater(aw_home, tools, clock)
+    install_release(up, "v0.3.6")
+
+    async def now(wait):
+        return up.start_apply(wait_s=wait)
+
+    for bad in (10 ** 400, -1, float("nan"), float("inf"), update.MAX_WAIT_S + 1, True, "5"):
+        with pytest.raises(update.UpdateError, match="wait_s"):
+            asyncio.run(now(bad))
+        assert up.phase == "idle"
+    assert up._job.acquire(blocking=False)
+    up._job.release()
+    assert update.parse_wait(0) == 0.0 and update.parse_wait(update.MAX_WAIT_S) == update.MAX_WAIT_S
+
+
+def test_api_apply_rejects_a_bad_wait(gui, tools):
+    d, client = gui
+    for raw in ('{"wait_s": 1' + "0" * 400 + "}", '{"wait_s": -5}', '{"wait_s": 1e999}', '{"wait_s": 86401}'):
+        r = client.post("/api/update/apply", headers={**H, "Content-Type": "application/json"}, content=raw)
+        assert r.status_code == 400 and "wait_s" in r.json()["error"], raw
+    assert d.updater._job.acquire(blocking=False)
+    d.updater._job.release()
+
+
+def test_check_now_answers_with_the_phase_reset(aw_home, tools):
+    up = make(aw_home)
+    v = asyncio.run(up.check_now())
+    assert v["phase"] == "idle" and v["available"] is True and up.phase == "idle"
+
+
+# --------------------------------------------------------------------------- #
+# Plugins: a disabled Codex plugin, retries                                   #
+# --------------------------------------------------------------------------- #
+
+
+def test_plugin_refresh_leaves_a_disabled_codex_plugin_alone(aw_home, tools, tmp_path):
+    write_plugin_records(tmp_path)
+    (tmp_path / "no-codex-home" / "config.toml").write_text('[plugins."afterword@afterword"]\nenabled = false\n')
+    assert update.plugin_status("codex") == "disabled" and not update.plugin_installed("codex")
+    res = make(aw_home).refresh_plugins()
+    assert res["codex"] == {"ok": None, "message": "the codex plugin is disabled; skipped"}
+    assert not any(n.startswith("codex") for n in tools.names()) and res["claude"]["ok"] is True
+
+
+def test_a_failed_plugin_refresh_is_retried_at_the_next_checks(aw_home, tools, tmp_path):
+    write_plugin_records(tmp_path)
+    clock = Clock()
+    up, _, notes = daemon_updater(aw_home, tools, clock, version="0.3.7")
+    up.change(plugins_pending=True)  # as confirm() leaves it
+    tools.fail["claude marketplace"] = update.Result(1, "", "Could not resolve host")
+    asyncio.run(up.startup())
+    st = update.read_state(aw_home)
+    assert st["plugins_pending"] is True and st["plugins_tries"] == 1
+    assert "tried again at the next check" in notes[-1][1]
+    for _ in range(update.PLUGIN_RETRIES + 2):
+        asyncio.run(up.tick())
+    # The first try and PLUGIN_RETRIES more, then it stops.
+    assert tools.names().count("claude plugin marketplace update afterword") == 1 + update.PLUGIN_RETRIES
+    st = update.read_state(aw_home)
+    assert not st.get("plugins_pending") and not st.get("plugins_tries") and st["plugins"]["claude"]["ok"] is False
+    # One that works at a retry is done.
+    up.change(plugins_pending=True)
+    asyncio.run(up.startup())
+    tools.fail.clear()
+    asyncio.run(up.tick())
+    st = update.read_state(aw_home)
+    assert not st.get("plugins_pending") and st["plugins"]["claude"]["ok"] is True
+    assert notes[-1][1].startswith("plugins updated")
+
+
+# --------------------------------------------------------------------------- #
+# install-service with an update pending                                      #
+# --------------------------------------------------------------------------- #
+
+
+def test_install_service_on_the_pending_release_keeps_its_rollback(launchd, tools, aw_home, monkeypatch):
+    monkeypatch.setattr(update, "__version__", "0.3.7")
+    up = make(aw_home, version="0.3.7")
+    install_release(up, "v0.3.6")
+    up.prepare("v0.3.7")
+    up.switch("v0.3.7")
+    up.change(attempts=2)  # crash-looping
+    assert update.install_managed(updater=up) == 0
+    st = update.read_state(aw_home)
+    assert st["pending"] is True and st["attempts"] == 2 and st["previous"] == "v0.3.6"
+    assert st["install"] == "managed"
+
+
+def test_changelog_ignores_headings_in_code_blocks():
+    text = ("## 0.3.7 (x)\n\n- Seven:\n\n```sh\n## restart\nafterword restart\n```\n\n~~~\n## 0.3.6 not this\n~~~\n"
+            "- After.\n\n## 0.3.6 (y)\n\n- Six.\n")
+    body = section(text, "0.3.7")
+    assert body.endswith("~~~\n- After.") and "## restart" in body and body.count("```") == 2
+    assert section(text, "0.3.6") == "- Six."
+    # A heading only inside a code block is no section.
+    assert section("```\n## 1.0.0 (x)\n- a\n```\n", "1.0.0") is None

@@ -18,15 +18,23 @@ say) and every Mac running the service picks it up.
 - The daemon checks for new release tags (5 minutes after starting, then
   every 6 hours), installs and smoke-tests a new one in the background,
   switches to it once nothing has been spoken or queued for 30 s, and
-  restarts. If the new version fails to start three times it goes back to
-  the previous one and does not retry that tag by itself.
+  restarts. If the new version crashes or fails at startup three times
+  before it has run for a minute (time asleep does not count, and neither
+  do clean restarts), it goes back to the last confirmed version and does
+  not retry that tag by itself.
+- Only tags whose commit is on `main` are installed. The release the
+  service runs, and the one it would go back to, are never re-synced in
+  place: changed extras come with the next release. With Kokoro, the UniDic
+  dictionary is carried over into each release.
 - After an update is confirmed, the Claude Code and Codex plugins are
   refreshed too (open Claude Code sessions load the new hooks after a
-  restart).
+  restart; a disabled Codex plugin is left alone; a failed refresh is tried
+  again at the next checks).
 - `[update]` in config.toml: `mode = "auto"` (default), `"notify"` or
   `"off"`, and `check_every_h`. `afterword update` shows the state, `--check`
-  checks now and `--now` updates now; the Config page's Daemon section has
-  the same, with the new release's notes.
+  checks now and `--now` updates now (and takes over an update waiting for
+  quiet); the Config page's Daemon section has the same, with the new
+  release's notes.
 
 ## 0.3.5 (2026-11-26)
 

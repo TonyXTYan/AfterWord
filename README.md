@@ -97,7 +97,8 @@ uv run afterword models pull kokoro chatterbox
 ```
 
 Kokoro is about 0.4 GB. Its Japanese text handling needs the UniDic
-dictionary, one time (about 0.5 GB): `uv run python -m unidic download`.
+dictionary, one time (about 0.5 GB): `uv run python -m unidic download`
+(before `install-service`, which copies it into the service's install).
 Chatterbox Multilingual is about 2.7 GB, plus its speech tokenizer. Apple
 voices need nothing extra: a small Swift helper is compiled on first use
 (Xcode command line tools). For better Apple voices, download Premium or
@@ -168,11 +169,20 @@ it, and `afterword login` prints the setting.
 
 Releases are the repository's `vX.Y.Z` tags: a GitHub workflow tags each
 version that reaches `main` with its CHANGELOG entry, and the service picks
-up tags only, never unreleased commits. `install-service` installs the
+up tags only, never unreleased commits. Only tags on `main` are installed:
+the updater fetches `main` with the tag and refuses a tag whose commit is
+not on it, and records the commit it checked. `install-service` installs the
 release of the code you run it from (or the newest release, if that code is
 not one), with the same optional extras (`qwen`, `kokoro`, `chatterbox`)
-that are installed where you run it. Releases before v0.3.6 cannot update
-themselves, so it refuses them (use `--dev` until then):
+that are installed where you run it. The release the service runs (and the
+one it would roll back to) is never synced again: if you change the extras
+and run `install-service` again on the same release, it says so and the
+new extras come with the next release (`--dev` runs your checkout now).
+With `kokoro`, the UniDic dictionary is copied (cloned, on APFS) from the
+environment you install from, and from each release to the next; if there
+is none to copy, it says so: run `~/.afterword/app/current/.venv/bin/python
+-m unidic download`. Releases before v0.3.6 cannot update themselves, so it
+refuses them (use `--dev` until then):
 
 ```
 ~/.afterword/app/repo.git          git objects (fetched tags only)
@@ -186,17 +196,25 @@ daemon runs `git ls-remote --tags` for a newer release. With `[update] mode
 = "auto"` (the default) it prepares it next to the running one (a checkout,
 `uv sync`, and a smoke test: the new `afterword --version` and an import of
 the daemon), waits until nothing is queued, being said or rendered in the
-voice lab, points `current` at it and restarts (launchd starts it again
-within about 10 s). If the new release does not stay up for a minute, it is
-started at most three times, then `current` goes back to the previous
-release (the newest two are kept), the event log says so, and that tag is
-not tried again by itself. After an update, the Claude Code and Codex
-plugins are refreshed too when their CLIs are on PATH (`claude plugin
+voice lab (for 30 s, not counting time the Mac sleeps), points `current` at
+it and restarts (launchd starts it again within about 10 s). The update is
+confirmed after a minute of running (awake). If the new release crashes,
+is killed or fails at startup three times before that (restarts, logouts
+and `install-service` do not count: only runs that did not shut down
+cleanly), `current` goes back to the previous release (the last confirmed
+one, which is kept), the event log says so, and that tag is not tried again
+by itself. After an update, the Claude Code and Codex plugins are refreshed
+too when their CLIs are on PATH and the plugin is installed (`claude plugin
 marketplace update` and `claude plugin update afterword@afterword`; `codex
-plugin marketplace upgrade` and `codex plugin add afterword@afterword`):
-restart open Claude Code sessions to load the new hooks, and Codex asks you
-to review changed hooks. `mode = "notify"` only reports new releases, and
-`"off"` does not check. A `--dev` service only reports them too.
+plugin marketplace upgrade` and `codex plugin add afterword@afterword`, not
+when the Codex plugin is disabled): restart open Claude Code sessions to
+load the new hooks, and Codex asks you to review changed hooks. A failed
+refresh is tried again at the next three checks. `mode = "notify"` only
+reports new releases, and `"off"` does not check; changing the mode while a
+prepared update waits for quiet stops it. A `--dev` service only reports
+them too. Update now (or `afterword update --now`) while an update waits
+for quiet takes it over: with `--force` (the button's "Switch to … now") it
+switches at once.
 
 ```bash
 uv run afterword update            # running version, install, mode, latest release, last check
