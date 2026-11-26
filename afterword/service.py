@@ -73,7 +73,8 @@ RESTART_EXIT = 75
 # Passed from the installing shell into the plist when set: where the models
 # were downloaded (Hugging Face honours these) and which Claude config
 # `claude -p` uses for alert phrases. Never secrets: the plist is 0644.
-PASS_ENV = ("HF_HOME", "HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "XDG_CACHE_HOME", "HF_HUB_OFFLINE", "CLAUDE_CONFIG_DIR")
+PASS_ENV = ("HF_HOME", "HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "XDG_CACHE_HOME", "HF_HUB_OFFLINE",
+            "CLAUDE_CONFIG_DIR", "CODEX_HOME")
 
 
 # --------------------------------------------------------------------------- #
@@ -152,11 +153,13 @@ def python_executable() -> str:
 def service_path(python: str) -> str:
     """PATH for the agent: launchd's default is only /usr/bin:/bin:/usr/sbin:/sbin.
     The venv's bin first, then ~/.local/bin and the directory of `claude`
-    (alert generation runs `claude -p`), then Homebrew and the system."""
+    (alert generation runs `claude -p`) and of `codex` (the updater refreshes
+    both plugins), then Homebrew and the system."""
     dirs = [str(Path(python).parent), str(Path.home() / ".local" / "bin")]
-    claude = shutil.which("claude")
-    if claude:
-        dirs.append(str(Path(claude).parent))
+    for tool in ("claude", "codex"):  # the updater refreshes both plugins; codex often lives under nvm/npm
+        found = shutil.which(tool)
+        if found:
+            dirs.append(str(Path(found).parent))
     dirs.extend(SYSTEM_PATH)
     seen: list[str] = []
     for d in dirs:

@@ -28,7 +28,9 @@ def _outside_fences(lines: list[str]) -> list[bool]:
     for line in lines:
         m = _FENCE.match(line)
         if fence is None:
-            if m:
+            # A backtick fence's info string cannot hold a backtick, so a line
+            # like ```inline``` is code in a paragraph, not a fence (CommonMark).
+            if m and not (m.group(1)[0] == "`" and "`" in line.strip()[len(m.group(1)):]):
                 fence = m.group(1)
                 out.append(False)
             else:

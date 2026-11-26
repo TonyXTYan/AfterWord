@@ -334,17 +334,8 @@ def change_state(home: Path, **fields: Any) -> dict[str, Any]:
                 state.pop(k, None)
             else:
                 state[k] = v
-        tmp = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(3)}.tmp")
-        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(state, fh, indent=2, sort_keys=True)
-                fh.write("\n")
-            os.replace(tmp, path)
-        except BaseException:
-            with contextlib.suppress(OSError):
-                os.unlink(tmp)
-            raise
+        # fsynced: rollback depends on this file surviving a crash or power loss
+        common.atomic_write(path, json.dumps(state, indent=2, sort_keys=True) + "\n", mode=0o600)
     return state
 
 
@@ -535,21 +526,23 @@ class Updater:
         # idle, whatever the mode) or "force" (switch without waiting).
         self._scheduled = False
         self._takeover: str | None = None
+        self._deadline: float | None = None  # a manual takeover's own wait (monotonic)
         self._wake: asyncio.Event | None = None
-        self._state_cache: tuple[float | None, dict[str, Any]] = (None, {})
+        self._state_cache: tuple[tuple[int, int, int] | None, dict[str, Any]] = (None, {})
 
     # -- state ----------------------------------------------------------- #
 
     def state(self) -> dict[str, Any]:
         """update.json, re-read only when it changed (status asks often)."""
         try:
-            mtime = self.layout.state.stat().st_mtime_ns
+            st = self.layout.state.stat()
         except OSError:
-            mtime = None
-        if mtime is None:
             return {}
-        if self._state_cache[0] != mtime:
-            self._state_cache = (mtime, read_state(self.home))
+        # Each write replaces the file (a new inode), so two writes within
+        # the mtime's resolution are still told apart.
+        key = (st.st_ino, st.st_mtime_ns, st.st_size)
+        if self._state_cache[0] != key:
+            self._state_cache = (key, read_state(self.home))
         return dict(self._state_cache[1])
 
     def change(self, **fields: Any) -> dict[str, Any]:
@@ -709,6 +702,13 @@ class Updater:
         if not r.ok:
             shutil.rmtree(tmp, ignore_errors=True)
             raise UpdateError(f"git init failed: {_last_lines(r.error(), 3)}")
+        if repo.exists() or repo.is_symlink():
+            # A broken store (no HEAD; e.g. an interrupted first run): it only
+            # caches fetched tags, so start it again rather than fail on rename.
+            if repo.is_dir() and not repo.is_symlink():
+                shutil.rmtree(repo)
+            else:
+                repo.unlink()
         os.replace(tmp, repo)
 
     def _fetch_tag(self, git: str, tag: str) -> None:
@@ -837,7 +837,7 @@ class Updater:
                                         "prepared_at": self.clock(), "sync_s": round(sync_s, 1)}
                 if unidic:
                     info["unidic"] = unidic
-                (dest / READY_MARKER).write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
+                common.atomic_write(dest / READY_MARKER, json.dumps(info, indent=2) + "\n", mode=0o644)
         except BlockingIOError:
             raise UpdateError("another update is in progress (update.lock is held)") from None
         except OSError as exc:
@@ -858,6 +858,8 @@ class Updater:
         if _has_dictionary(target):
             return "present"
         src = self._unidic()
+        if src is not None:
+            src = Path(src).resolve()  # a symlinked dicdir: copy the dictionary, not the link
         if src is None or not _has_dictionary(Path(src)):
             log.warning("no UniDic dictionary to copy into %s: Kokoro's Japanese needs "
                         "`%s -m unidic download`", dest, self.layout.python_in(dest))
@@ -913,11 +915,15 @@ class Updater:
         while that one is itself pending (not confirmed yet), the last
         confirmed release, which is then kept too. Other releases are
         deleted."""
-        marker = self.layout.marker(tag)
-        if not marker:
+        if not self.layout.marker(tag):
             raise UpdateError(f"{tag} is not prepared")
         try:
             with _flock(self.layout.run_lock, blocking=False):
+                # Read again under the lock, with the HEAD check below: a
+                # prepare that ran meanwhile cannot change it under us.
+                marker = self.layout.marker(tag)
+                if not marker:
+                    raise UpdateError(f"{tag} is not prepared")
                 old = self.layout.current_tag()
                 if old == tag:
                     return old
@@ -1083,13 +1089,19 @@ class Updater:
         except Exception:
             log.exception("update startup step failed")
         self.next_check = t0 + FIRST_CHECK_S
+        last_tick = None  # when the last scheduled check ran
         while True:
+            if last_tick is not None:
+                # Re-read the interval on every nap, so a changed
+                # check_every_h (hot-reloaded) moves the next check either way.
+                self.next_check = last_tick + max(1.0, self.settings().check_every_h) * 3600
             wait = self.next_check - self.clock()
             if wait > 0:
-                await self._sleep(min(wait, 60.0))  # short naps: a changed check_every_h applies soon
+                await self._sleep(min(wait, 60.0))
                 continue
             s = self.settings()
-            self.next_check = self.clock() + max(1.0, s.check_every_h) * 3600
+            last_tick = self.clock()
+            self.next_check = last_tick + max(1.0, s.check_every_h) * 3600
             if s.mode == "off":
                 continue
             try:
@@ -1154,6 +1166,9 @@ class Updater:
         if not self._job.acquire(blocking=False):
             if self._scheduled and self.phase in ("preparing", "waiting"):
                 self._takeover = "force" if force or self._takeover == "force" else "manual"
+                if self._takeover == "manual":  # the caller's wait, not the schedule's 2 h
+                    end = self.mono() + wait
+                    self._deadline = end if self._deadline is None else min(self._deadline, end)
                 if self._takeover == "force" and self._wake is not None:
                     self._wake.set()  # ends the idle wait's nap now
                 log.info("update now: taking over the scheduled update to %s (%s)", self.phase_tag, self._takeover)
@@ -1221,6 +1236,8 @@ class Updater:
             if self._takeover == "force":
                 return True
             now = self.mono()
+            if self._deadline is not None and now >= self._deadline:
+                return False  # a manual "Update now" with a shorter wait took over
             if self.idle():
                 since = now if since is None else since
                 if now - since >= IDLE_SETTLE_S:
@@ -1234,12 +1251,12 @@ class Updater:
     async def _apply(self, tag: str, force: bool, wait_s: float, scheduled: bool = False) -> bool:
         """Prepare `tag`, wait for idle (not with force), switch, restart.
         A scheduled apply can be taken over by start_apply meanwhile."""
-        self._scheduled, self._takeover = scheduled, None
+        self._scheduled, self._takeover, self._deadline = scheduled, None, None
         self._wake = asyncio.Event() if scheduled else None
         try:
             return await self._prepare_wait_switch(tag, force, wait_s, scheduled)
         finally:
-            self._scheduled, self._takeover, self._wake = False, None, None
+            self._scheduled, self._takeover, self._wake, self._deadline = False, None, None, None
 
     async def _prepare_wait_switch(self, tag: str, force: bool, wait_s: float, scheduled: bool) -> bool:
         self.phase, self.phase_tag = "preparing", tag
@@ -1387,7 +1404,7 @@ def startup_check(home: Path | None = None, exec_fn=None, argv: list[str] | None
     layout = Layout(home)
     bad, prev = state.get("current"), state.get("previous")
     reason = (f"{bad} did not stay up for {CONFIRM_AFTER_S:.0f} s in {attempts} starts")
-    if not prev or not layout.marker(prev):
+    if not prev or not layout.marker(prev) or not layout.python_in(layout.release(prev)).exists():
         change_state(home, pending=None, attempts=None, rolled_back=bad,
                      rollback_reason=reason + "; no previous release to go back to", rollback_notice=True)
         print(f"afterword: {reason}, and there is no previous release to go back to", file=out)
@@ -1445,6 +1462,7 @@ def install_managed(dry_run: bool = False, start: bool = True, out=None, updater
         print(f"# would smoke-test it, then point {lay.current} at releases/{tag}", file=out)
         return service.install(dry_run=True, start=start, out=out, python=lay.service_python())
     common.ensure_home()
+    before = {k: up.state().get(k) for k in ("uv", "extras")}  # restored if this install fails
     up.change(uv=uv, extras=extras)
     marker = lay.marker(tag)
     if not marker:
@@ -1454,6 +1472,7 @@ def install_managed(dry_run: bool = False, start: bool = True, out=None, updater
         up.prepare(tag)
         old = up.switch(tag, pending=False)
     except UpdateError as exc:
+        up.change(**before)  # "not touched" includes update.json
         print(f"install-service: {exc}; the service was not touched", file=sys.stderr)
         return 1
     # switch() cleared a pending update when it switched; when it did not

@@ -5664,11 +5664,16 @@ function upPluginsLine(u) {
   return parts.length ? parts.join("; ") : null;
 }
 // While Update now runs: GET /api/status's answer (null while the daemon is down) -> what to show.
-function upFollow(oldPid, s) {
+function upFollow(oldPid, s, tag) {
   if (!s) return {done: false, ok: false, kind: "run", text: "restarting…"};
-  if (Number.isInteger(s.pid) && s.pid > 0 && s.pid !== oldPid)
-    return {done: true, ok: true, kind: "ok", text: `Updated: running ${s.version} (pid ${s.pid}); it is confirmed after a minute.`};
   const u = s.update || {};
+  if (Number.isInteger(s.pid) && s.pid > 0 && s.pid !== oldPid) {
+    // A release that crashed at start is rolled back before the next poll:
+    // the new pid is then the old release again.
+    if (tag && u.rolled_back === tag)
+      return {done: true, ok: false, kind: "err", text: `${tag} did not stay up and was rolled back: ${u.rollback_reason || "see service.log"}`};
+    return {done: true, ok: true, kind: "ok", text: `Updated: running ${s.version} (pid ${s.pid}); it is confirmed after a minute.`};
+  }
   if (!u.phase || u.phase === "idle")
     return {done: true, ok: false, kind: "err", text: u.last_error ? `${u.last_result || "Update failed"}: ${u.last_error}` : (u.last_result || "The update stopped.")};
   return {done: false, ok: false, kind: "run", text: `${upPhaseLine(u)}…`};
@@ -5866,7 +5871,7 @@ const UpdatePanel = (() => {
     let s = null;
     try { const res = await fetch("/api/status", {cache: "no-store"}); if (res.ok) s = await res.json(); } catch { /* down for the restart */ }
     if (!follow) return;
-    const f = upFollow(follow.pid, s);
+    const f = upFollow(follow.pid, s, follow.tag);
     if (f.done || Date.now() >= follow.until) {
       follow = null;
       if (f.done) note("up-msg", f.text, f.kind);
@@ -5891,7 +5896,7 @@ const UpdatePanel = (() => {
     const r = await api("POST", "/api/update/apply", ap.force ? {force: true} : {});
     busy = false;
     if (!r.ok || !r.data) { render(data); return flashNote("up-msg", `Update failed: ${r.error || "empty response"}`, "err", 8000); }
-    follow = {pid: r.data.pid, until: Date.now() + UP_FOLLOW_MS};
+    follow = {pid: r.data.pid, tag: r.data.tag || data.latest, until: Date.now() + UP_FOLLOW_MS};
     if (r.data.update) render(r.data.update);
     note("up-msg", `updating to ${r.data.tag || data.latest}…`, "run");
     schedule(1500);

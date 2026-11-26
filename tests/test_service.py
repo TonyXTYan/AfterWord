@@ -489,6 +489,17 @@ def test_plist_passes_model_and_claude_locations(launchd, monkeypatch):
     assert "ANTHROPIC_API_KEY" not in env
 
 
+def test_plist_finds_codex_for_the_plugin_refresh(launchd, monkeypatch):
+    """launchd does not read the shell profile: codex installed under npm or
+    nvm, and CODEX_HOME, must reach the agent or the updater skips Codex."""
+    monkeypatch.setenv("CODEX_HOME", "/Users/x/.codex-alt")
+    where = {"claude": "/Users/x/.local/bin/claude", "codex": "/Users/x/.nvm/versions/node/v24/bin/codex"}
+    monkeypatch.setattr(service.shutil, "which", lambda tool: where.get(tool))
+    env = service.build_plist("/venv/bin/python")["EnvironmentVariables"]
+    assert env["CODEX_HOME"] == "/Users/x/.codex-alt"
+    assert "/Users/x/.nvm/versions/node/v24/bin" in env["PATH"].split(":")
+
+
 def test_restart_falls_back_to_kickstart_k(launchd, capsys):
     install_plist()
     launchd.loaded = True

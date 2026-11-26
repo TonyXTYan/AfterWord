@@ -678,18 +678,25 @@ def cmd_update(args: argparse.Namespace) -> int:
 
 def _follow_update(base: str, old_pid, tag, args) -> int:
     """Print the daemon's update phases until it restarts on the new release
-    (or stops trying)."""
+    (or stops trying). Follows the daemon's status, which carries both its
+    pid and the update view: a new pid means it restarted (launchd brings it
+    back well under a poll interval when it ran longer than 10 s), so an
+    "idle" phase only counts as a failure while the old daemon still answers."""
     from afterword import update
 
     print(f"updating to {tag}: preparing (the first time can take a few minutes)…", flush=True)
     seen = "preparing"
     end = time.time() + update.UV_TIMEOUT_S + (0 if args.force else args.wait) + 120
+    restarted = False
     while time.time() < end:
         time.sleep(2)
-        try:
-            _, view = _http(base, "GET", "/api/update", timeout=10)
-        except OSError:
-            break  # down for the restart
+        st = _daemon_status()
+        if st is None:
+            restarted = True  # down for the restart
+            break
+        if st.get("pid") != old_pid:
+            return _report_restart(st, tag)
+        view = st.get("update") or {}
         phase = view.get("phase")
         if phase == seen:
             continue
@@ -703,17 +710,32 @@ def _follow_update(base: str, old_pid, tag, args) -> int:
             if view.get("last_error"):
                 print(view["last_error"], file=sys.stderr)
             return 1
+    if not restarted:
+        print("the update did not finish in time: see `afterword update`", file=sys.stderr)
+        return 1
     # launchd starts it again, no sooner than 10 s after its last launch.
     end = time.time() + 90
     while time.time() < end:
         time.sleep(2)
         st = _daemon_status()
         if st and st.get("pid") != old_pid:
-            print(f"afterwordd {st.get('version')} is running, pid {st.get('pid')}; it confirms the update "
-                  f"after {update.CONFIRM_AFTER_S:.0f} s")
-            return 0
+            return _report_restart(st, tag)
     print("afterwordd did not come back within 90 s: see `afterword status` and service.log", file=sys.stderr)
     return 1
+
+
+def _report_restart(st: dict, tag) -> int:
+    """The daemon answered with a new pid: on the new release, or rolled back."""
+    from afterword import update
+
+    view = st.get("update") or {}
+    if tag and view.get("rolled_back") == tag:
+        print(f"{tag} did not stay up and was rolled back: {view.get('rollback_reason') or 'see service.log'}",
+              file=sys.stderr)
+        return 1
+    print(f"afterwordd {st.get('version')} is running, pid {st.get('pid')}; it confirms the update "
+          f"after {update.CONFIRM_AFTER_S:.0f} s")
+    return 0
 
 
 def _update_local(args: argparse.Namespace) -> int:

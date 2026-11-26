@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -527,6 +528,30 @@ def test_run_loop_schedule_and_modes(aw_home, tools):
         assert restarts == []
 
 
+def test_a_shorter_check_every_h_applies_to_the_wait_under_way(aw_home, tools):
+    """Lowering check_every_h (config.toml is hot-reloaded) moves the next
+    check forward instead of waiting out the old interval."""
+    clock = Clock()
+    t0 = clock.t
+    cfg = {"s": update.UpdateSettings(mode="notify", check_every_h=24)}
+    checks = []
+
+    def runner(*a, **k):
+        if a and "ls-remote" in [str(x) for x in a[0]]:
+            checks.append(clock())
+            if len(checks) == 1:
+                cfg["s"] = update.UpdateSettings(mode="notify", check_every_h=1)  # changed after the first
+        return tools(*a, **k)
+
+    clock.until = t0 + update.FIRST_CHECK_S + 2 * 3600 + 120
+    up, _, _ = daemon_updater(aw_home, tools, clock, mode="notify", version="0.3.7", runner=runner,
+                              settings=lambda: cfg["s"])
+    with pytest.raises(_Stop):
+        asyncio.run(up.run_loop())
+    assert len(checks) == 3, checks  # 5 min in, then hourly, not 24 h later
+    assert checks[1] - checks[0] <= 3600 + 60 and checks[2] - checks[1] <= 3600 + 60
+
+
 def test_notify_mode_only_reports(aw_home, tools):
     clock = Clock()
     up, restarts, _ = daemon_updater(aw_home, tools, clock, mode="notify")
@@ -779,6 +804,27 @@ def test_install_service_failure_touches_nothing(launchd, tools, aw_home, capsys
     assert "the service was not touched" in capsys.readouterr().err
 
 
+def test_a_failed_install_service_leaves_update_json_as_it_was(launchd, tools, aw_home, capsys):
+    """Run from a venv without kokoro, a failed install must not leave
+    extras = ["qwen"] behind for every later update."""
+    update.change_state(aw_home, extras=["kokoro", "qwen"], uv="/old/uv")
+    tools.fail["sync:v0.3.7"] = update.Result(1, "", "uv exploded")
+    assert cli.main(["install-service"]) == 1
+    st = update.read_state(aw_home)
+    assert st["extras"] == ["kokoro", "qwen"] and st["uv"] == "/old/uv"
+    assert "the service was not touched" in capsys.readouterr().err
+
+
+def test_state_and_ready_marker_are_written_with_fsync(aw_home, tools, monkeypatch):
+    seen = []
+    real = update.common.atomic_write
+    monkeypatch.setattr(update.common, "atomic_write", lambda p, *a, **k: (seen.append(Path(p).name), real(p, *a, **k))[1])
+    up = make(aw_home, tools=tools, version="0.3.7")
+    up.prepare("v0.3.7")
+    update.change_state(aw_home, note="x")
+    assert update.STATE_NAME in seen and update.READY_MARKER in seen
+
+
 def test_install_service_refuses_a_release_without_the_updater(launchd, tools, aw_home, capsys):
     tools.tags = ["v0.3.3", "v0.3.5"]
     assert cli.main(["install-service"]) == 1
@@ -970,6 +1016,9 @@ def test_ui_lines_and_buttons():
 def test_ui_follow():
     assert js("upFollow", 10, None) == {"done": False, "ok": False, "kind": "run", "text": "restarting…"}
     assert js("upFollow", 10, {"pid": 11, "version": "0.3.7"})["ok"] is True
+    rolled = js("upFollow", 10, {"pid": 12, "version": "0.3.6",
+                                  "update": uview(rolled_back="v0.3.7", rollback_reason="crashed")}, "v0.3.7")
+    assert rolled["ok"] is False and rolled["kind"] == "err" and "rolled back: crashed" in rolled["text"]
     assert js("upFollow", 10, {"pid": 10, "update": uview(phase="preparing", phase_tag="v0.3.7")})["text"] == \
         "preparing v0.3.7…"
     stopped = js("upFollow", 10, {"pid": 10, "update": uview(last_result="could not prepare v0.3.7", last_error="boom")})
@@ -1031,12 +1080,70 @@ def test_update_cli_through_a_running_daemon(monkeypatch, capsys):
     assert "has no updater" in capsys.readouterr().err
 
 
+def _follow(monkeypatch, statuses, tag="v0.3.7", wait=30.0):
+    """Run cli._follow_update against a scripted sequence of daemon statuses
+    (None = not answering), without sleeping."""
+    seq = iter(statuses)
+    monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+    monkeypatch.setattr(cli, "_daemon_status", lambda: next(seq))
+    args = SimpleNamespace(force=False, wait=wait)
+    return cli._follow_update("http://127.0.0.1:47800", 7, tag, args)
+
+
+def st(pid, phase, **update):
+    return {"pid": pid, "version": "0.3.7" if pid != 7 else "0.3.6", "update": {"phase": phase, **update}}
+
+
+def test_update_now_succeeds_when_launchd_restarts_it_between_polls(monkeypatch, capsys):
+    """launchd relaunches a daemon that ran over 10 s at once, so the next
+    poll already reaches the new one, idle: that is success, not a failure."""
+    rc = _follow(monkeypatch, [st(7, "waiting"), st(7, "restarting"), st(8, "idle")])
+    assert rc == 0
+    out = capsys.readouterr()
+    assert "afterwordd 0.3.7 is running, pid 8" in out.out and out.err == ""
+
+
+def test_update_now_follows_a_restart_with_a_gap(monkeypatch, capsys):
+    assert _follow(monkeypatch, [st(7, "switching"), None, None, st(9, "idle")]) == 0
+    assert "pid 9" in capsys.readouterr().out
+
+
+def test_update_now_reports_a_failure_from_the_old_daemon(monkeypatch, capsys):
+    rc = _follow(monkeypatch, [st(7, "preparing"), st(7, "idle", last_result="not updated", last_error="uv failed")])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "not updated" in err and "uv failed" in err
+
+
+def test_update_now_reports_a_rollback(monkeypatch, capsys):
+    rc = _follow(monkeypatch, [st(7, "restarting"), None,
+                               st(8, "idle", rolled_back="v0.3.7", rollback_reason="crashed at start")])
+    assert rc == 1
+    assert "v0.3.7 did not stay up and was rolled back: crashed at start" in capsys.readouterr().err
+
+
 def test_changelog_section():
     assert section(CHANGELOG, "0.3.6") == "- Six."
     assert section(CHANGELOG, "v0.3.7") == "- Seven.\n- More seven."
     assert section(CHANGELOG, "0.3.5") == "- Five."  # the last one runs to the end
     assert section(CHANGELOG, "0.3.8") is None and section(CHANGELOG, "0.3") is None
     assert section("## 1.0.0 (x)\n\n## 0.9.0\n- a\n", "1.0.0") is None  # empty
+
+
+def test_changelog_inline_triple_backticks_are_not_a_fence():
+    text = "## 0.3.7 (x)\n\n```inline``` code in a line\n- Seven.\n\n## 0.3.6 (y)\n\n- Six.\n"
+    assert section(text, "0.3.7") == "```inline``` code in a line\n- Seven."
+    assert section(text, "0.3.6") == "- Six."
+
+
+def test_a_broken_repo_store_is_started_again(aw_home, tools):
+    """repo.git without HEAD (an interrupted first run) must not make every
+    later prepare fail on the rename."""
+    up = make(aw_home, tools=tools, version="0.3.7")
+    up.layout.repo.mkdir(parents=True)
+    (up.layout.repo / "leftover").write_text("x")
+    up.prepare("v0.3.7")
+    assert up.layout.marker("v0.3.7") and not (up.layout.repo / "leftover").exists()
 
 
 def test_changelog_script_as_the_workflow_runs_it(tmp_path):
@@ -1312,6 +1419,41 @@ def test_update_now_takes_over_a_scheduled_wait(aw_home, tools, force):
     if force:
         assert sum(clock.slept) == 2 * update.IDLE_POLL_S  # no settle time after the takeover
     assert up.view()["scheduled"] is False
+
+
+def test_a_manual_takeover_keeps_its_own_shorter_wait(aw_home, tools):
+    """`afterword update --now --wait 60` taking over a scheduled wait gives
+    up after its 60 s, not the schedule's 2 h."""
+    clock = Clock()
+    polls = {"n": 0}
+
+    def idle():
+        polls["n"] += 1
+        if polls["n"] == 2:
+            up.start_apply(force=False, wait_s=60)
+        return False  # never quiet
+
+    up, restarts, _ = daemon_updater(aw_home, tools, clock, idle=idle)
+    install_release(up, "v0.3.6")
+    asyncio.run(up.tick())
+    assert restarts == [] and up.layout.current_tag() == "v0.3.6"
+    assert sum(clock.slept) <= 60 + 2 * update.IDLE_POLL_S  # not IDLE_WAIT_S
+
+
+def test_rollback_needs_the_previous_releases_python(aw_home, tools, monkeypatch, capsys):
+    """A previous release whose venv is gone is no rollback target: execv
+    would fail and leave nothing running."""
+    up = switched(aw_home, tools, monkeypatch)
+    execs = []
+    assert update.startup_check(aw_home, exec_fn=lambda *a: execs.append(a), argv=["serve"]) == "clean"
+    py = up.layout.python_in(up.layout.release("v0.3.6"))
+    if py.exists() or py.is_symlink():
+        py.unlink()
+    for _ in range(3):
+        crash(aw_home)
+        rc = update.startup_check(aw_home, exec_fn=lambda *a: execs.append(a), argv=["serve"])
+    assert rc == "no-rollback" and execs == [] and up.layout.current_tag() == "v0.3.7"
+    assert "no previous release to go back to" in update.read_state(aw_home)["rollback_reason"]
 
 
 @pytest.mark.parametrize("change", ["mode", "rolled_back"])
