@@ -460,6 +460,18 @@
   .cfg-meta > .lbl { font-size: 12px; color: var(--slate); margin: 0; }
   .cfg-meta > dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
   .cfg-note { margin-top: 6px; max-width: 80ch; }
+  /* Daemon section: an on/off switch (aria-pressed), and the log viewer */
+  button.dm-switch { display: inline-flex; align-items: center; gap: 7px; }
+  .dm-switch > i { position: relative; flex: none; width: 26px; height: 15px; border-radius: 8px;
+                   background: color-mix(in srgb, var(--slate) 40%, var(--sheet)); transition: background .15s; }
+  .dm-switch > i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%;
+                          background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .3); transition: transform .15s; }
+  .dm-switch[aria-pressed="true"] > i { background: var(--cue); }
+  .dm-switch[aria-pressed="true"] > i::after { transform: translateX(11px); }
+  @media (prefers-reduced-motion: reduce) { .dm-switch > i, .dm-switch > i::after { transition: none; } }
+  .dm-loghead { display: flex; align-items: center; gap: 8px; margin-top: 8px; min-width: 0; }
+  .dm-loghead > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+  pre.dm-log { margin-top: 4px; max-height: 320px; white-space: pre; word-break: normal; }
   ul.warnings { margin: 0; padding-left: 18px; font-size: 12px; color: var(--queued); }
   ul.warnings li { word-break: break-word; }
   .toml { display: flex; border: 1px solid var(--rule); border-radius: 6px; overflow: auto; max-height: 70vh; background: var(--panel); }
@@ -1072,6 +1084,7 @@
 
 <main id="view-config" class="page cfg" hidden>
   <nav class="cfg-index" id="cfg-index" aria-label="Config sections">
+    <a href="#config" data-sec="cfg-daemon">Daemon</a>
     <a href="#config" data-sec="cfg-file">File</a>
     <a href="#config" data-sec="cfg-engine">Engine</a>
     <a href="#config" data-sec="cfg-pron">Pronunciations</a>
@@ -1080,6 +1093,27 @@
   </nav>
   <div class="cfg-body">
   <div class="banner" id="c-err" hidden></div>
+  <section class="panel cfg-sec" id="cfg-daemon" aria-label="daemon">
+    <h2>Daemon <span class="grow"></span><span class="msg" id="dm-msg" role="status"></span>
+      <button id="dm-copy" title="Copy the daemon's status as text, like afterword status">Copy status</button></h2>
+    <dl class="cfg-meta" id="dm-meta"><dd class="hint">Loading…</dd></dl>
+    <div class="bar">
+      <button id="dm-login" class="dm-switch" type="button" aria-pressed="false" disabled><i aria-hidden="true"></i>Start at login</button>
+      <span class="hint" id="dm-loginhint"></span>
+    </div>
+    <div class="bar">
+      <button id="dm-restart" disabled>Restart daemon</button>
+      <button id="dm-prune" title="Delete transcript lines older than [daemon] keep_days now (the daemon also does it every hour)">Prune now</button>
+      <button id="dm-reveal" title="Show AfterWord's home folder in Finder">Show in Finder</button>
+      <button id="dm-log-daemon" data-log="daemon" aria-expanded="false" aria-controls="dm-logbox" title="The last 200 lines of afterwordd.log">Show log</button>
+      <button id="dm-log-service" data-log="service" aria-expanded="false" aria-controls="dm-logbox" title="The last 200 lines of service.log (launchd's stdout and stderr)">Show service log</button>
+    </div>
+    <div id="dm-logbox" hidden>
+      <div class="hint dm-loghead"><span id="dm-logpath"></span><span class="grow"></span>
+        <button class="small" id="dm-logrefresh">Refresh</button><button class="small" id="dm-logclose">Hide</button></div>
+      <pre class="dm-log" id="dm-log" tabindex="0"></pre>
+    </div>
+  </section>
   <section class="panel cfg-sec" id="cfg-file" aria-label="config file">
     <h2>File <span class="grow"></span><span class="msg" id="c-msg"></span><button id="c-reload" title="Re-read config.toml now">Reload</button></h2>
     <dl class="cfg-meta" id="c-meta"><dd class="hint">Loading…</dd></dl>
@@ -5495,6 +5529,208 @@ const Alerts = (() => {
 })();
 
 // ===================================================================
+// Daemon (Config page): GET/POST /api/service, POST /api/service/restart,
+// /prune, /reveal, GET /api/logs/{daemon|service} (docs/gui-api.md, "Daemon")
+// ===================================================================
+// ---------- daemon section
+const DM_RESTART_WAIT_MS = 45000;   // launchd relaunches no sooner than 10 s after the last launch
+const DM_MANUAL = "Started by hand: restart it in its terminal, or run afterword install-service";
+function dmBytes(n) {
+  if (!Number.isFinite(n) || n < 0) return "—";
+  if (n < 1024) return `${n} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let v = n / 1024, i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
+}
+function dmUptime(s) {
+  if (!Number.isFinite(s) || s < 0) return "—";
+  s = Math.floor(s);
+  if (s < 60) return `${s} s`;
+  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  if (d) return h ? `${d} d ${h} h` : `${d} d`;
+  if (h) return m ? `${h} h ${m} min` : `${h} h`;
+  return `${m} min`;
+}
+// The status line under the heading: how this daemon was started.
+function dmModeLine(d) {
+  if (d.mode === "service") return `Running under launchd, pid ${d.pid}, up ${dmUptime(d.uptime_s)}`;
+  if (d.mode === "manual") return `Started by hand (pid ${d.pid}, up ${dmUptime(d.uptime_s)}): it stops when its terminal closes`;
+  return `pid ${d.pid}, up ${dmUptime(d.uptime_s)}; launchctl gave no answer${d.error ? ` (${d.error})` : ""}, so it is not known whether launchd started it`;
+}
+// Restart: only launchd can start the daemon again.
+function dmRestart(d) {
+  if (d.mode === "service") return {enabled: true, title: "Restart the daemon: it exits and launchd starts it again (the line being spoken is cut off)"};
+  if (d.mode === "manual") return {enabled: false, title: DM_MANUAL};
+  return {enabled: false, title: "Cannot tell whether launchd started this daemon: run afterword restart"};
+}
+// Start at login: launchctl enable/disable, only for an installed service of this home.
+function dmLogin(d) {
+  if (!d.installed) return {enabled: false, on: false, title: `Install the service first: ${d.install_command || "afterword install-service"}`, hint: ""};
+  if (d.other_home) return {enabled: false, on: d.login === true, title: `The installed service runs another AfterWord home (${d.service_home}); use afterword login there`, hint: ""};
+  if (d.login !== true && d.login !== false) return {enabled: false, on: false, title: "launchctl gave no answer", hint: "Start at login: unknown."};
+  return d.login
+    ? {enabled: true, on: true, title: "launchd starts the daemon at login (launchctl enable). Click to turn it off.", hint: "launchd starts the daemon when you log in."}
+    : {enabled: true, on: false, title: "launchd does not start the daemon at login (launchctl disable). Click to turn it on.",
+       hint: "Off: launchd will not start it at the next login; the running daemon keeps running."};
+}
+function dmLastExit(d) {
+  const e = d.last_exit;
+  if (!e) return null;
+  return String(e).split(":")[0].trim() === String(d.restart_exit) ? `${e} (a restart from this page)` : String(e);
+}
+function dmStorage(st) {
+  if (!st || typeof st !== "object") return "—";
+  return `events.db ${dmBytes(st.db_bytes)} (${st.events} event${st.events === 1 ? "" : "s"}), ` +
+    `${st.clips} clip${st.clips === 1 ? "" : "s"} ${dmBytes(st.clips_bytes)}, keep_days ${st.keep_days}, history ${st.history}`;
+}
+// The status as text for Copy, laid out like `afterword status`.
+function dmStatusText(d) {
+  const mode = d.mode === "service" ? "under launchd" : d.mode === "manual" ? "started by hand" : "unknown";
+  const lines = [
+    `afterwordd ${d.version}  pid ${d.pid}  up ${dmUptime(d.uptime_s)}`,
+    `  mode      ${mode}`,
+    `  service   ${d.summary}`,
+    `  home      ${d.home}`,
+    `  storage   ${dmStorage(d.storage)}`,
+    `  logs      ${d.logs ? `${d.logs.daemon}, ${d.logs.service}` : "—"}`,
+  ];
+  if (d.other_home) lines.splice(3, 0, `  note      the installed service runs ${d.service_home}`);
+  return lines.join("\n") + "\n";
+}
+const dmRestarted = (oldPid, pid) => Number.isInteger(pid) && pid > 0 && pid !== oldPid;
+// ---------- end daemon section
+const DaemonPanel = (() => {
+  let data = null, loading = false, restarting = null, pollTimer = null, logName = null;
+  const btns = () => ["dm-login", "dm-restart", "dm-prune"].map($);
+  function render(d) {
+    data = d;
+    const ex = dmLastExit(d);
+    const rows = [
+      [d.mode === "service" ? "running" : "started", h("span", null, dmModeLine(d),
+        d.mode === "manual" ? [". ", h("code", null, d.install_command), " runs it at login and restarts it after a crash."] : null)],
+      ["service", h("span", null, d.summary, d.other_home ? h("span", {class: "warn"}, ` (it runs AfterWord home ${d.service_home}, not this one)`) : null)],
+      ["version", h("span", null, d.version, ex ? h("span", {class: "muted"}, `, last exit ${ex}`) : null)],
+      ["home", h("code", null, d.home)],
+      ["storage", h("span", null, dmStorage(d.storage), h("span", {class: "muted"}, " · set in "), h("code", null, "[daemon]"),
+        h("span", {class: "muted"}, " of config.toml"))],
+    ];
+    $("dm-meta").replaceChildren(...rows.flatMap(([k, v]) => [h("dt", {class: "lbl"}, k), h("dd", null, v)]));
+    const login = dmLogin(d), rs = dmRestart(d);
+    const lb = $("dm-login");
+    lb.setAttribute("aria-pressed", String(login.on));
+    lb.title = login.title;
+    $("dm-loginhint").textContent = login.hint;
+    const rb = $("dm-restart");
+    rb.title = rs.title;
+    lb.disabled = !!restarting || !login.enabled;
+    rb.disabled = !!restarting || !rs.enabled;
+    $("dm-prune").disabled = !!restarting;
+    $("dm-prune").title = `Delete transcript lines older than ${d.storage ? d.storage.keep_days : "[daemon] keep_days"} days now (the daemon also does it every hour)`;
+  }
+  async function load() {
+    if (loading || restarting) return;
+    loading = true;
+    const r = await api("GET", "/api/service");
+    loading = false;
+    if (!r.ok || !r.data) { if (!restarting) note("dm-msg", `daemon status unavailable: ${r.error || "empty response"}`, "err"); return; }
+    if ($("dm-msg").classList.contains("err")) note("dm-msg", "");
+    render(r.data);
+  }
+  async function toggleLogin() {
+    if (!data) return;
+    const want = data.login !== true;
+    $("dm-login").disabled = true;
+    const r = await api("POST", "/api/service", {login: want});
+    if (!r.ok) { $("dm-login").disabled = false; return flashNote("dm-msg", `Start at login: ${r.error}`, "err", 8000); }
+    render(r.data);
+    flashNote("dm-msg", want ? "Start at login is on." : "Start at login is off; the daemon keeps running.", "ok", 4000);
+  }
+  function schedule(ms) { clearTimeout(pollTimer); pollTimer = setTimeout(poll, ms); }
+  // After a restart: wait for /api/status to answer with a new pid.
+  async function poll() {
+    clearTimeout(pollTimer);
+    if (!restarting) return;
+    let pid = null;
+    try { const res = await fetch("/api/status", {cache: "no-store"}); if (res.ok) pid = (await res.json()).pid; } catch { /* still down */ }
+    if (!restarting) return;
+    if (dmRestarted(restarting.old, pid)) {
+      restarting = null;
+      flashNote("dm-msg", `Restarted: pid ${pid}.`, "ok", 6000);
+      return load();
+    }
+    if (Date.now() >= restarting.until) {
+      restarting = null;
+      note("dm-msg", "The daemon did not come back within 45 s. Look at service.log, or run afterword start.", "err");
+      if (data) render(data);
+      return;
+    }
+    schedule(1000);
+  }
+  async function restart() {
+    if (!data || restarting) return;
+    if (!confirm("Restart the daemon? The line being spoken is cut off and queued lines are dropped.")) return;
+    const old = data.pid;
+    for (const b of btns()) b.disabled = true;
+    note("dm-msg", "restarting…", "run");
+    const r = await api("POST", "/api/service/restart");
+    if (!r.ok) { render(data); return flashNote("dm-msg", `Restart failed: ${r.error}`, "err", 8000); }
+    restarting = {old, until: Date.now() + DM_RESTART_WAIT_MS};
+    schedule(1500);
+  }
+  async function prune() {
+    const b = $("dm-prune");
+    b.disabled = true;
+    const r = await api("POST", "/api/service/prune");
+    b.disabled = !!restarting;
+    if (!r.ok) return flashNote("dm-msg", `Prune failed: ${r.error}`, "err", 8000);
+    const n = r.data.pruned, days = r.data.storage && r.data.storage.keep_days;
+    flashNote("dm-msg", days === 0 ? "keep_days is 0: everything is kept." :
+      n ? `Pruned ${n} line${n === 1 ? "" : "s"} older than ${days} days.` : `Nothing older than ${days} days.`, "ok", 6000);
+    if (data) render({...data, storage: r.data.storage});
+  }
+  async function reveal() {
+    const r = await api("POST", "/api/service/reveal");
+    if (!r.ok) flashNote("dm-msg", `Show in Finder failed: ${r.error}`, "err", 8000);
+  }
+  async function copy() {
+    if (!data) return;
+    let ok = true;
+    try { await navigator.clipboard.writeText(dmStatusText(data)); } catch { ok = false; }
+    flashNote("dm-msg", ok ? "Status copied." : "Copy failed (clipboard blocked).", ok ? "ok" : "err", 3000);
+  }
+  function paintLogButtons() {
+    const shown = !$("dm-logbox").hidden;
+    for (const b of document.querySelectorAll("#cfg-daemon [data-log]")) b.setAttribute("aria-expanded", String(shown && b.dataset.log === logName));
+  }
+  async function showLog(name, toggle = true) {
+    if (toggle && logName === name && !$("dm-logbox").hidden) return hideLog();
+    logName = name;
+    const r = await api("GET", `/api/logs/${name}?lines=200`);
+    $("dm-logbox").hidden = false;
+    paintLogButtons();
+    const pre = $("dm-log");
+    if (!r.ok || !r.data) { $("dm-logpath").textContent = ""; pre.textContent = `Could not read the log: ${r.error || "empty response"}`; return; }
+    const d = r.data;
+    $("dm-logpath").replaceChildren(h("code", null, d.path), d.truncated ? ` (its last ${d.lines.length} lines)` : "");
+    pre.textContent = !d.exists ? "(no log yet)" : d.lines.length ? d.lines.join("\n") : "(empty)";
+    pre.scrollTop = pre.scrollHeight;
+  }
+  function hideLog() { $("dm-logbox").hidden = true; paintLogButtons(); }
+  $("dm-login").addEventListener("click", toggleLogin);
+  $("dm-restart").addEventListener("click", restart);
+  $("dm-prune").addEventListener("click", prune);
+  $("dm-reveal").addEventListener("click", reveal);
+  $("dm-copy").addEventListener("click", copy);
+  for (const b of document.querySelectorAll("#cfg-daemon [data-log]")) b.addEventListener("click", () => showLog(b.dataset.log));
+  $("dm-logrefresh").addEventListener("click", () => { if (logName) showLog(logName, false); });
+  $("dm-logclose").addEventListener("click", hideLog);
+  // The stream reconnects on its own after a restart; look at once instead of at the next tick.
+  sse.on("open", () => { if (restarting) poll(); });
+  return {load, restarting: () => !!restarting};
+})();
+
+// ===================================================================
 // Config (#config): GET /api/config, POST /api/config/reload
 // ===================================================================
 const Config = (() => {
@@ -5612,10 +5848,10 @@ const Config = (() => {
   });
   return {
     show() {
-      visible = true; load(); Pronounce.load(); Alerts.load();
+      visible = true; DaemonPanel.load(); load(); Pronounce.load(); Alerts.load();
       requestAnimationFrame(() => Alerts.fit());
       // Pick up hot reloads while the page is open (unchanged text is not re-rendered).
-      if (!timer) timer = setInterval(() => { if (visible && document.visibilityState === "visible") { load(); Pronounce.load(); Alerts.load(); } }, 10000);
+      if (!timer) timer = setInterval(() => { if (visible && document.visibilityState === "visible") { DaemonPanel.load(); load(); Pronounce.load(); Alerts.load(); } }, 10000);
     },
     hide() { visible = false; },
     refresh() { if (visible) load(); },

@@ -1,6 +1,6 @@
-"""`afterword install-service | start | stop | restart | uninstall-service`
-and the service line in `status`, against a fake launchd: no test runs the
-real launchctl or writes to ~/Library/LaunchAgents."""
+"""`afterword install-service | start | stop | restart | uninstall-service |
+login` and the service line in `status`, against a fake launchd: no test
+runs the real launchctl or writes to ~/Library/LaunchAgents."""
 
 import fcntl
 import json
@@ -13,6 +13,8 @@ import sys
 import pytest
 
 from afterword import cli, service
+
+REAL_LAUNCHCTL = service.launchctl  # before the autouse fixture replaces it
 
 PRINT_SAMPLE = """\
 gui/501/io.github.tonyxtyan.afterword = {
@@ -72,6 +74,12 @@ NOT_FOUND = service.Result(113, "", 'Bad request.\nCould not find service "io.gi
                                     "in domain for user gui: 501\n")
 
 
+def disabled_text(entries):
+    """`launchctl print-disabled gui/<uid>` as macOS prints it."""
+    body = "".join(f'\t\t"{label}" => {state}\n' for label, state in entries)
+    return f"\tdisabled services = {{\n{body}\t}}\n"
+
+
 def print_text(pid, last_exit):
     text = PRINT_SAMPLE.replace("{pid}", str(pid)).replace("{last_exit}", last_exit)
     if pid is None:
@@ -80,7 +88,11 @@ def print_text(pid, last_exit):
 
 
 class FakeLaunchd:
-    """Just enough of launchd: one job, loaded or not, running or not."""
+    """Just enough of launchd: one job, loaded or not, running or not, and
+    enabled or disabled (`launchctl disable`). A disabled job cannot be
+    bootstrapped or kickstarted here; what real launchd answers is not
+    known for sure (5: Input/output error, or 119: Service is disabled), so
+    the fake refuses both and the code must not depend on which."""
 
     def __init__(self):
         self.calls = []
@@ -93,6 +105,8 @@ class FakeLaunchd:
         self.linger = 0  # after kill/bootout, the old process outlives its lock for this many checks
         self._dying = 0
         self.bootout_in_progress = 0  # answer 36 (EINPROGRESS) to this many bootouts, then unload
+        self.disabled = False
+        self.others = [("com.example.other", "disabled"), ("com.example.fine", "enabled")]
 
     def alive(self, pid):
         """service.pid_alive: only the job's own process is alive."""
@@ -116,7 +130,7 @@ class FakeLaunchd:
         self.pid = self._next
 
     def mutations(self):
-        return [c for c in self.calls if c[0] != "print"]
+        return [c for c in self.calls if c[0] not in ("print", "print-disabled")]
 
     def __call__(self, *args):
         self.calls.append(args)
@@ -130,8 +144,18 @@ class FakeLaunchd:
             if not self.loaded:
                 return NOT_FOUND
             return service.Result(0, print_text(self.pid, self.last_exit))
+        if cmd == "print-disabled":
+            assert args[1:] == (service.domain(),)
+            mine = [(service.LABEL, "disabled" if self.disabled else "enabled")] if self.disabled is not None else []
+            return service.Result(0, disabled_text(self.others + mine))
+        if cmd in ("enable", "disable"):
+            assert args[1:] == (service.target(),)
+            self.disabled = cmd == "disable"
+            return service.Result(0)
         if cmd == "bootstrap":
             assert args[1:] == (service.domain(), str(service.plist_path()))
+            if self.disabled:
+                return service.Result(5, "", "Bootstrap failed: 5: Input/output error\n")
             if self.loaded:
                 return service.Result(5, "", "Bootstrap failed: 5: Input/output error\n")
             self.loaded = True
@@ -145,6 +169,8 @@ class FakeLaunchd:
                 return service.Result(36, "", "Boot-out failed: 36: Operation now in progress\n")
             self.loaded, self.pid, self.last_exit = False, None, "0"
         elif cmd == "kickstart":
+            if self.disabled:
+                return service.Result(119, "", f'Could not kickstart service "{service.LABEL}": 119: Service is disabled\n')
             if "-k" in args or self.pid is None:
                 self.spawn()
         elif cmd == "kill":
@@ -555,13 +581,13 @@ def test_status_when_up_shows_the_service(launchd, monkeypatch, capsys):
     launchd.pid, launchd.last_exit = 123, "0"
     monkeypatch.setattr(cli, "_request", lambda msg, timeout=2.0: {"status": {"version": "x", "pid": 123}})
     assert cli.main(["status"]) == 0
-    assert "  service   loaded, running pid 123, last exit 0" in capsys.readouterr().out
+    assert "  service   loaded, running pid 123, last exit 0, start at login: on\n" in capsys.readouterr().out
     assert cli.main(["status", "--json"]) == 0
     data = json.loads(capsys.readouterr().out)
     assert data["pid"] == 123
     assert data["service"] == {
         "label": service.LABEL, "installed": True, "plist": str(service.plist_path()), "loaded": True,
-        "state": "running", "pid": 123, "last_exit": "0", "error": None,
+        "state": "running", "pid": 123, "last_exit": "0", "error": None, "login": True,
     }
 
 
@@ -660,3 +686,262 @@ def test_trim_log_leaves_small_or_missing_files(tmp_path):
     path.write_bytes(b"short\n" * 10)
     assert service.trim_log(path, limit=10, keep=9) is True
     assert path.read_bytes() == b"short\n"  # the partial line before it is dropped
+
+
+# --------------------------------------------------------------------------- #
+# start at login (launchctl enable / disable)                                 #
+# --------------------------------------------------------------------------- #
+
+
+def test_parse_disabled():
+    text = disabled_text([("com.example.a", "enabled"), (service.LABEL, "disabled")])
+    assert service.parse_disabled(text) is True
+    assert service.parse_disabled(text, "com.example.a") is False
+    assert service.parse_disabled(text, "com.example.missing") is False  # not listed: enabled
+    assert service.parse_disabled(disabled_text([(service.LABEL, "true")])) is True  # older macOS
+    assert service.parse_disabled(disabled_text([(service.LABEL, "false")])) is False
+    # a longer label that merely starts with ours is another service
+    assert service.parse_disabled(disabled_text([(service.LABEL + ".helper", "disabled")])) is False
+    assert service.parse_disabled("") is False
+
+
+def test_login_state(launchd, monkeypatch):
+    assert service.login_state() == (True, None)
+    launchd.disabled = True
+    assert service.login_state() == (False, None)
+    launchd.disabled = None  # never enabled or disabled: not in the list
+    assert service.login_state() == (True, None)
+    launchd.fail["print-disabled"] = service.Result(1, "", "Usage: launchctl print-disabled <domain>\n")
+    assert service.login_state() == (None, "Usage: launchctl print-disabled <domain>")
+
+
+def test_login_prints_the_state(launchd, capsys):
+    install_plist()
+    assert cli.main(["login"]) == 0
+    assert capsys.readouterr().out.strip() == "start at login: on"
+    launchd.disabled = True
+    assert cli.main(["login"]) == 0
+    assert capsys.readouterr().out.strip() == "start at login: off"
+    assert launchd.mutations() == []
+
+
+def test_login_without_plist(launchd, capsys):
+    assert cli.main(["login"]) == 0
+    assert "not installed" in capsys.readouterr().out
+    for state in ("on", "off"):
+        assert cli.main(["login", state]) == 1
+        assert "afterword install-service" in capsys.readouterr().err
+    assert launchd.mutations() == []
+
+
+def test_login_off_and_on(launchd, capsys):
+    install_plist()
+    launchd.loaded = True
+    launchd.spawn()
+    pid = launchd.pid
+    assert cli.main(["login", "off"]) == 0
+    assert launchd.mutations() == [("disable", service.target())]
+    assert launchd.disabled is True
+    assert launchd.loaded and launchd.pid == pid  # disable leaves the running daemon alone
+    out = capsys.readouterr().out
+    assert out.startswith("start at login: off;") and "keeps running" in out
+    assert cli.main(["login", "on"]) == 0
+    assert launchd.mutations()[-1] == ("enable", service.target())
+    assert launchd.disabled is False
+    assert capsys.readouterr().out.strip() == "start at login: on; launchd loads the service at the next login"
+
+
+def test_login_on_when_not_loaded_points_at_start(launchd, capsys):
+    install_plist()
+    launchd.disabled = True
+    assert cli.main(["login", "on"]) == 0
+    assert "`afterword start` starts it now" in capsys.readouterr().out
+
+
+def test_login_failure(launchd, capsys):
+    install_plist()
+    launchd.fail["disable"] = service.Result(1, "", "Not privileged to disable service.\n")
+    assert cli.main(["login", "off"]) == 1
+    assert "Not privileged" in capsys.readouterr().err
+
+
+def test_status_shows_login_off(launchd, capsys):
+    install_plist()
+    launchd.loaded = True
+    launchd.disabled = True
+    assert cli.main(["status"]) == 1  # no daemon answering in the test home
+    assert "  service   loaded, not running, last exit (never exited), start at login: off" in capsys.readouterr().out
+    assert cli.main(["status", "--json"]) == 1
+    assert json.loads(capsys.readouterr().out)["service"]["login"] is False
+
+
+def test_status_without_plist_has_no_login_part(launchd, capsys):
+    assert cli.main(["status"]) == 1
+    out = capsys.readouterr().out
+    assert "  service   not installed" in out and "start at login" not in out
+
+
+def _enable_bootstrap_disable():
+    return [("enable", service.target()), ("bootstrap", service.domain(), str(service.plist_path())),
+            ("disable", service.target())]
+
+
+def test_start_on_a_disabled_service_keeps_login_off(launchd, capsys):
+    install_plist()
+    launchd.disabled = True
+    assert cli.main(["start"]) == 0
+    assert launchd.mutations() == _enable_bootstrap_disable()
+    assert launchd.loaded and launchd.pid and launchd.disabled is True
+    assert capsys.readouterr().out.splitlines() == [
+        "start at login is off (`afterword login on` turns it on)", "started, pid 4321"]
+
+
+def test_start_kickstart_on_a_disabled_loaded_service(launchd, capsys):
+    install_plist()
+    launchd.loaded = True
+    launchd.disabled = True
+    assert cli.main(["start"]) == 0
+    assert launchd.mutations() == [("enable", service.target()), ("kickstart", service.target()),
+                                   ("disable", service.target())]
+    assert launchd.pid and launchd.disabled is True
+
+
+def test_install_on_a_disabled_service_keeps_login_off(launchd, capsys):
+    launchd.disabled = True
+    assert cli.main(["install-service"]) == 0
+    assert launchd.mutations() == _enable_bootstrap_disable()
+    assert launchd.disabled is True
+    out = capsys.readouterr().out
+    assert "start at login is off (`afterword login on` turns it on)" in out
+    assert "service started, pid 4321: start at login is off, and it restarts after a crash" in out
+
+
+def test_install_dry_run_on_a_disabled_service_shows_the_enable(launchd, capsys):
+    launchd.disabled = True
+    assert cli.main(["install-service", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    lines = [l for l in out.splitlines() if l.startswith("# would run:")]
+    assert [l.split()[4] for l in lines] == ["enable", "bootstrap", "disable"]
+    assert launchd.mutations() == [] and launchd.disabled is True
+
+
+def test_restart_on_a_disabled_service(launchd, capsys):
+    install_plist()
+    launchd.loaded = True
+    launchd.spawn()
+    launchd.disabled = True
+    assert cli.main(["restart"]) == 0
+    assert launchd.mutations() == [("kill", "SIGTERM", service.target()), ("enable", service.target()),
+                                   ("kickstart", "-k", service.target()), ("disable", service.target())]
+    assert launchd.disabled is True
+    assert capsys.readouterr().out.strip().endswith("restarted, pid 4322")
+
+
+def test_restart_falls_back_to_start_on_a_disabled_service(launchd, capsys):
+    install_plist()
+    launchd.disabled = True
+    assert cli.main(["restart"]) == 0
+    assert launchd.mutations() == _enable_bootstrap_disable()
+    assert launchd.disabled is True
+
+
+def test_bootstrap_failure_still_disables_again(launchd, capsys):
+    install_plist()
+    launchd.disabled = True
+    launchd.fail["bootstrap"] = service.Result(5, "", "Bootstrap failed: 5: Input/output error\n")
+    assert cli.main(["start"]) == 1
+    assert launchd.mutations()[-1] == ("disable", service.target())
+    assert launchd.disabled is True
+    assert "Bootstrap failed: 5" in capsys.readouterr().err
+
+
+def test_enable_failure_stops_before_bootstrap(launchd, capsys):
+    install_plist()
+    launchd.disabled = True
+    launchd.fail["enable"] = service.Result(1, "", "Not privileged to enable service.\n")
+    assert cli.main(["start"]) == 1
+    assert [c[0] for c in launchd.mutations()] == ["enable"]
+    err = capsys.readouterr().err
+    assert "launchctl enable" in err and "Not privileged" in err
+
+
+def test_disable_failure_after_start_warns(launchd, capsys):
+    install_plist()
+    launchd.disabled = True
+    launchd.fail["disable"] = service.Result(1, "", "nope\n")
+    assert cli.main(["start"]) == 0
+    captured = capsys.readouterr()
+    assert "start at login is on now" in captured.err
+    assert "start at login is off" not in captured.out
+
+
+def test_disabled_refusal_without_an_answer_from_print_disabled(launchd, capsys):
+    """When print-disabled gives no answer the bootstrap is tried as is; a
+    "Service is disabled" refusal points at `afterword login on`."""
+    install_plist()
+    launchd.fail["print-disabled"] = service.Result(1, "", "launchctl: some error\n")
+    launchd.fail["bootstrap"] = service.Result(119, "", "Bootstrap failed: 119: Service is disabled\n")
+    assert cli.main(["start"]) == 1
+    assert "`afterword login on` enables it" in capsys.readouterr().err
+    assert [c[0] for c in launchd.mutations()] == ["bootstrap"]
+
+
+def test_parse_print_last_terminating_signal():
+    text = print_text(123, "0").replace("\tlast exit code = 0\n", "\tlast terminating signal = Killed: 9\n")
+    assert service.parse_print(text)["last_exit"] == "signal Killed: 9"
+
+
+def test_daemon_mode(launchd, monkeypatch):
+    info = service.ServiceInfo(installed=True, plist="x", loaded=True, state="running", pid=os.getpid())
+    assert service.daemon_mode(info) == "service"
+    info.pid = os.getpid() + 1
+    assert service.daemon_mode(info) == "manual"
+    info.loaded, info.pid = None, None
+    assert service.daemon_mode(info) == "unknown"
+    monkeypatch.setenv(service.SERVICE_ENV, "1")
+    assert service.daemon_mode(info) == "service"
+
+
+def test_plist_home(launchd, aw_home, tmp_path, monkeypatch):
+    assert service.plist_home() is None
+    install_plist()
+    assert service.same_home(service.plist_home(), aw_home)
+    monkeypatch.delenv("AFTERWORD_HOME")
+    install_plist()  # no AFTERWORD_HOME: the WorkingDirectory says it
+    assert service.plist_home().endswith("/.afterword")
+    service.plist_path().write_text("not a plist")
+    assert service.plist_home() is None
+
+
+def test_launchctl_binary_override(monkeypatch, tmp_path):
+    """AFTERWORD_LAUNCHCTL swaps the binary: a missing one is an answer, not a crash."""
+    monkeypatch.setattr(service, "launchctl", REAL_LAUNCHCTL)  # never the real binary: see the env below
+    monkeypatch.setenv(service.LAUNCHCTL_ENV, str(tmp_path / "no-such-launchctl"))
+    r = service.launchctl("print", service.target())
+    assert r.returncode == 127 and "no-such-launchctl not found" in r.error()
+    fake = tmp_path / "launchctl"
+    fake.write_text("#!/bin/sh\necho \"fake $*\"\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv(service.LAUNCHCTL_ENV, str(fake))
+    assert service.launchctl("print-disabled", "gui/1").stdout == "fake print-disabled gui/1\n"
+
+
+def test_stop_with_login_off_says_it_stays_stopped(launchd, capsys):
+    install_plist()
+    launchd.loaded = True
+    launchd.spawn()
+    launchd.disabled = True
+    assert cli.main(["stop"]) == 0
+    assert launchd.mutations() == [("bootout", service.target())]
+    assert capsys.readouterr().out.strip() == "stopped; start at login is off, so it stays stopped until `afterword start`"
+
+
+def test_uninstall_clears_login_off(launchd, capsys):
+    install_plist()
+    launchd.loaded = True
+    launchd.spawn()
+    launchd.disabled = True
+    assert cli.main(["uninstall-service"]) == 0
+    assert launchd.mutations() == [("bootout", service.target()), ("enable", service.target())]
+    assert launchd.disabled is False and not service.plist_path().exists()
+    assert "reset to on" in capsys.readouterr().out

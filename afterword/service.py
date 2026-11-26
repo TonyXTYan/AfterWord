@@ -1,9 +1,10 @@
 """The daemon as a per-user LaunchAgent: `afterword install-service`,
-`start`, `stop`, `restart`, `uninstall-service`, and the service line in
-`afterword status`.
+`start`, `stop`, `restart`, `uninstall-service`, `login`, the service line in
+`afterword status`, and what the GUI's Daemon section asks about launchd.
 
-Every launchctl call goes through `launchctl()`, which tests replace, and
-the LaunchAgents directory can be moved with AFTERWORD_LAUNCH_AGENTS_DIR,
+Every launchctl call goes through `launchctl()`, which tests replace; the
+binary can be swapped with AFTERWORD_LAUNCHCTL (a fake for a throwaway
+daemon) and the LaunchAgents directory moved with AFTERWORD_LAUNCH_AGENTS_DIR,
 so tests never touch the real launchd or ~/Library/LaunchAgents.
 
 Semantics:
@@ -18,7 +19,16 @@ Semantics:
 - restart sends SIGTERM through launchd and waits for the clean exit (the
   daemon's own shutdown runs), then kickstarts it; `kickstart -k` only if
   it does not exit in time.
-- uninstall-service unloads it and deletes the plist.
+- uninstall-service unloads it and deletes the plist, and clears a
+  `login off` (enables it again), so a later install starts at login.
+- login on|off is `launchctl enable|disable`: launchd's own per-user
+  override, kept across reboots. Off does not stop or unload a running
+  daemon; launchd just does not load the agent at the next login. A
+  disabled agent cannot be bootstrapped, so start, install-service and
+  restart enable it for their bootstrap or kickstart and disable it again
+  right after: the login setting is kept.
+- The GUI's Restart makes the daemon exit RESTART_EXIT (non-zero), which
+  KeepAlive (SuccessfulExit = false) answers by launching it again.
 """
 
 from __future__ import annotations
@@ -45,6 +55,7 @@ from afterword.hooks import common
 LABEL = "io.github.tonyxtyan.afterword"
 SERVICE_ENV = "AFTERWORD_SERVICE"  # set to "1" in the plist: the daemon knows launchd started it
 AGENTS_DIR_ENV = "AFTERWORD_LAUNCH_AGENTS_DIR"  # tests point this at a temp dir
+LAUNCHCTL_ENV = "AFTERWORD_LAUNCHCTL"  # the launchctl binary; tests and throwaway daemons point it at a fake
 LOG_NAME = "service.log"
 LOCK_NAME = "afterwordd.lock"  # taken by server._acquire_lock, which writes its pid into it
 LOG_TRIM_OVER = 5 * 1024 * 1024
@@ -54,6 +65,11 @@ THROTTLE_S = 10
 SYSTEM_PATH = ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin")
 NOT_FOUND_RC = 113  # `launchctl print` of a service that is not loaded
 IN_PROGRESS_RC = 36  # `launchctl bootout` while the job is still exiting (EINPROGRESS)
+DISABLED_RC = 119  # launchd's "Service is disabled"
+# The daemon's exit status for a restart asked for in the GUI: EX_TEMPFAIL.
+# Any non-zero status makes launchd launch it again (KeepAlive
+# SuccessfulExit = false), no sooner than ThrottleInterval after the last launch.
+RESTART_EXIT = 75
 # Passed from the installing shell into the plist when set: where the models
 # were downloaded (Hugging Face honours these) and which Claude config
 # `claude -p` uses for alert phrases. Never secrets: the plist is 0644.
@@ -82,10 +98,13 @@ class Result:
 
 def launchctl(*args: str) -> Result:
     """Run `launchctl <args>`. The only place that does; tests replace it."""
+    exe = os.environ.get(LAUNCHCTL_ENV) or "launchctl"
     try:
-        p = subprocess.run(["launchctl", *args], capture_output=True, text=True, timeout=30)
+        p = subprocess.run([exe, *args], capture_output=True, text=True, timeout=30)
     except FileNotFoundError:
-        return Result(127, "", "launchctl not found (AfterWord's service needs macOS)")
+        return Result(127, "", f"{exe} not found (AfterWord's service needs macOS)")
+    except OSError as exc:
+        return Result(126, "", f"cannot run {exe}: {exc}")
     except subprocess.TimeoutExpired:
         return Result(124, "", f"launchctl {' '.join(args)} timed out")
     return Result(p.returncode, p.stdout, p.stderr)
@@ -201,6 +220,7 @@ class ServiceInfo:
     pid: int | None = None
     last_exit: str | None = None  # "0", "(never exited)", "78: EX_CONFIG", ...
     error: str | None = None
+    login: bool | None = None  # starts at login (not disabled); None: not asked, or no answer
 
     @property
     def running(self) -> bool:
@@ -210,10 +230,17 @@ class ServiceInfo:
         return {
             "label": LABEL, "installed": self.installed, "plist": self.plist, "loaded": self.loaded,
             "state": self.state, "pid": self.pid, "last_exit": self.last_exit, "error": self.error,
+            "login": self.login,
         }
 
     def summary(self) -> str:
         """One line for `afterword status`."""
+        line = self._summary()
+        if self.installed and self.login is not None:
+            line += f", start at login: {'on' if self.login else 'off'}"
+        return line
+
+    def _summary(self) -> str:
         if self.loaded is None:
             head = "installed" if self.installed else "not installed"
             return f"{head}, state unknown ({self.error or 'launchctl gave no answer'})"
@@ -246,11 +273,16 @@ def parse_print(text: str) -> dict[str, Any]:
     pid = None
     with contextlib.suppress(ValueError, TypeError):
         pid = int(fields.get("pid", ""))
+    last_exit = fields.get("last exit code") or None
+    if last_exit is None and fields.get("last terminating signal"):
+        last_exit = f"signal {fields['last terminating signal']}"  # e.g. "signal Killed: 9"
     return {"state": fields.get("state") or None, "pid": pid if pid and pid > 0 else None,
-            "last_exit": fields.get("last exit code") or None}
+            "last_exit": last_exit}
 
 
-def service_info() -> ServiceInfo:
+def service_info(login: bool = False) -> ServiceInfo:
+    """What launchd says about the agent. `login` also asks whether it starts
+    at login (one more launchctl call)."""
     path = plist_path()
     info = ServiceInfo(installed=path.is_file(), plist=str(path), loaded=None)
     r = launchctl("print", target())
@@ -264,7 +296,74 @@ def service_info() -> ServiceInfo:
         info.loaded = False
     else:
         info.error = r.error().splitlines()[-1]
+    if login:
+        info.login, _ = login_state()
     return info
+
+
+_DISABLED_LINE = re.compile(r'^\s*"([^"]+)"\s*=>\s*(\S+)\s*$')
+
+
+def parse_disabled(text: str, label: str = LABEL) -> bool:
+    """Whether `label` is disabled in `launchctl print-disabled <domain>`,
+    whose lines read `"<label>" => disabled` (or `=> true` on older macOS).
+    A label missing from the list is enabled."""
+    for line in text.splitlines():
+        m = _DISABLED_LINE.match(line)
+        if m and m.group(1) == label:
+            return m.group(2).lower() in ("disabled", "true")
+    return False
+
+
+def login_state() -> tuple[bool | None, str | None]:
+    """(starts at login, error): True unless launchd has the agent disabled;
+    None with the error when launchctl gives no answer."""
+    r = launchctl("print-disabled", domain())
+    if not r.ok:
+        return None, r.error().splitlines()[-1]
+    return not parse_disabled(r.stdout), None
+
+
+def set_login(on: bool) -> Result:
+    """`launchctl enable|disable` the agent. Persistent across reboots;
+    disable does not stop or unload a running daemon."""
+    return launchctl("enable" if on else "disable", target())
+
+
+def plist_home(path: Path | None = None) -> str | None:
+    """The AfterWord home the installed plist runs with (its AFTERWORD_HOME,
+    else its WorkingDirectory), or None when there is no readable plist."""
+    try:
+        data = plistlib.loads((path or plist_path()).read_bytes())
+    except (OSError, ValueError, plistlib.InvalidFileException):
+        return None
+    if not isinstance(data, dict):
+        return None
+    env = data.get("EnvironmentVariables")
+    home = env.get("AFTERWORD_HOME") if isinstance(env, dict) else None
+    home = home or data.get("WorkingDirectory")
+    return home if isinstance(home, str) and home else None
+
+
+def same_home(a: str | Path | None, b: str | Path | None) -> bool:
+    if not a or not b:
+        return False
+    return os.path.realpath(os.path.expanduser(str(a))) == os.path.realpath(os.path.expanduser(str(b)))
+
+
+def daemon_mode(info: ServiceInfo, pid: int | None = None) -> str:
+    """How the daemon with `pid` (default: this process) was started:
+    "service" when it is launchd's process for the agent (or launchd's plist
+    set AFTERWORD_SERVICE=1 in its environment), "manual" when it is not,
+    "unknown" when launchctl gave no answer."""
+    pid = os.getpid() if pid is None else pid
+    if info.loaded and info.pid == pid:
+        return "service"
+    if os.environ.get(SERVICE_ENV) == "1":
+        return "service"
+    if info.loaded is None:
+        return "unknown"
+    return "manual"
 
 
 def _lock_holder() -> tuple[bool, int | None]:
@@ -415,11 +514,45 @@ def _bootout(info: ServiceInfo) -> Result:
     return Result(0)
 
 
-def _bootstrap() -> int:
-    r = launchctl("bootstrap", domain(), str(plist_path()))
+def _disabled_error(r: Result) -> bool:
+    return r.returncode == DISABLED_RC or "disabled" in r.error().lower()
+
+
+def _while_enabled(args: tuple[str, ...], out) -> Result:
+    """`launchctl <args>` (a bootstrap or kickstart) with the agent enabled.
+    launchd refuses to load a disabled agent, and `afterword login off`
+    disables it; so it is enabled for this one call and disabled again right
+    after, whatever the call returned: start at login stays off."""
+    login, _ = login_state()
+    if login is not False:
+        return launchctl(*args)
+    r = set_login(True)
     if not r.ok:
-        return _fail(_cmd("bootstrap", domain(), str(plist_path())), r)
+        return Result(r.returncode, r.stdout, f"{_cmd('enable', target())} failed: {r.error()}")
+    try:
+        result = launchctl(*args)
+    finally:
+        back = set_login(False)
+        if not back.ok:
+            print(f"warning: {_cmd('disable', target())} failed: {back.error()}; start at login is on "
+                  "now (`afterword login off` turns it off)", file=sys.stderr)
+    if result.ok and back.ok:
+        print("start at login is off (`afterword login on` turns it on)", file=out)
+    return result
+
+
+def _launch(args: tuple[str, ...], out) -> int:
+    r = _while_enabled(args, out)
+    if not r.ok:
+        _fail(_cmd(*args), r)
+        if _disabled_error(r):
+            print("launchd has the service disabled; `afterword login on` enables it", file=sys.stderr)
+        return 1
     return 0
+
+
+def _bootstrap(out=None) -> int:
+    return _launch(("bootstrap", domain(), str(plist_path())), out or sys.stdout)
 
 
 def install(dry_run: bool = False, start: bool = True, out=None) -> int:
@@ -447,7 +580,12 @@ def install(dry_run: bool = False, start: bool = True, out=None) -> int:
         manual, pid = _manual_daemon(info)
         if manual:
             print(f"# would stop afterwordd pid {pid} (started outside launchd) with SIGTERM", file=out)
+        disabled = login_state()[0] is False
+        if disabled:
+            print(f"# would run: {_cmd('enable', target())}  (start at login is off)", file=out)
         print(f"# would run: {_cmd('bootstrap', domain(), str(path))}", file=out)
+        if disabled:
+            print(f"# would run: {_cmd('disable', target())}  (keeps start at login off)", file=out)
         return 0
     common.ensure_home()  # WorkingDirectory and the log live there
     _write_plist(path, data)
@@ -469,11 +607,12 @@ def install(dry_run: bool = False, start: bool = True, out=None) -> int:
     if manual and not _stop_manual(pid, out):
         print("the plist is written; run `afterword start` once it has stopped", file=sys.stderr)
         return 1
-    if _bootstrap():
+    if _bootstrap(out):
         return 1
-    now = service_info()
+    now = service_info(login=True)
     where = f", pid {now.pid}" if now.running else ""
-    print(f"service {'reloaded' if was_loaded else 'started'}{where}: it starts at login and restarts "
+    at_login = "start at login is off, and it" if now.login is False else "it starts at login and"
+    print(f"service {'reloaded' if was_loaded else 'started'}{where}: {at_login} restarts "
           f"after a crash; log {log_path()}", file=out)
     return 0
 
@@ -495,10 +634,9 @@ def start(out=None) -> int:
               "`afterword install-service`, which stops it and starts the service", file=sys.stderr)
         return 1
     if info.loaded:
-        r = launchctl("kickstart", target())
-        if not r.ok:
-            return _fail(_cmd("kickstart", target()), r)
-    elif _bootstrap():
+        if _launch(("kickstart", target()), out):
+            return 1
+    elif _bootstrap(out):
         return 1
     now = service_info()
     print("started" + (f", pid {now.pid}" if now.running else ""), file=out)
@@ -524,7 +662,10 @@ def stop(out=None) -> int:
     if info.pid and pid_alive(info.pid):
         print(f"stopped the service; pid {info.pid} is still shutting down", file=out)
         return 0
-    print("stopped; it starts again at the next login, or with `afterword start`", file=out)
+    if login_state()[0] is False:
+        print("stopped; start at login is off, so it stays stopped until `afterword start`", file=out)
+    else:
+        print("stopped; it starts again at the next login, or with `afterword start`", file=out)
     return 0
 
 
@@ -546,10 +687,8 @@ def restart(out=None) -> int:
     r = launchctl("kill", "SIGTERM", target())
     if r.ok:
         _wait_stopped(info.pid)
-    args = ("kickstart", "-k", target())
-    r = launchctl(*args)
-    if not r.ok:
-        return _fail(_cmd(*args), r)
+    if _launch(("kickstart", "-k", target()), out):
+        return 1
     now = service_info()
     print("restarted" + (f", pid {now.pid}" if now.running else ""), file=out)
     return 0
@@ -572,7 +711,93 @@ def uninstall(out=None) -> int:
     with contextlib.suppress(FileNotFoundError):
         path.unlink()
     print(f"service removed: {'stopped it and ' if info.loaded else ''}deleted {path}", file=out)
+    # `afterword login off` left a disabled override in launchd; clear it so
+    # a later install-service starts at login again, as a fresh install does.
+    if login_state()[0] is False:
+        r = set_login(True)
+        if r.ok:
+            print("start at login was off; reset to on for a later install-service", file=out)
+        else:
+            print(f"warning: {_cmd('enable', target())} failed: {r.error()}", file=sys.stderr)
     return 0
+
+
+def login(state: str | None = None, out=None) -> int:
+    """`afterword login [on|off]`: print or set whether launchd loads the
+    agent at login."""
+    out = out or sys.stdout
+    installed = plist_path().is_file()
+    if state is None:
+        now, error = login_state()
+        if now is None:
+            print(f"start at login: unknown ({error})", file=out)
+            return 1
+        note = "" if installed else " (the service is not installed; `afterword install-service` installs it)"
+        print(f"start at login: {'on' if now else 'off'}{note}", file=out)
+        return 0
+    if state not in ("on", "off"):
+        print("usage: afterword login [on|off]", file=sys.stderr)
+        return 2
+    if not installed:
+        return _not_installed()
+    on = state == "on"
+    r = set_login(on)
+    if not r.ok:
+        return _fail(_cmd("enable" if on else "disable", target()), r)
+    if on:
+        later = "" if service_info().loaded else "; `afterword start` starts it now"
+        print(f"start at login: on; launchd loads the service at the next login{later}", file=out)
+    else:
+        print("start at login: off; launchd will not load the service at the next login "
+              "(a running daemon keeps running; `afterword stop` stops it)", file=out)
+    return 0
+
+
+def run_open(*args: str) -> Result:
+    """Run `open <args>`. The only place that does; tests replace it."""
+    try:
+        p = subprocess.run(["open", *args], capture_output=True, text=True, timeout=10)
+    except FileNotFoundError:
+        return Result(127, "", "open not found (Reveal in Finder needs macOS)")
+    except subprocess.TimeoutExpired:
+        return Result(124, "", "open timed out")
+    return Result(p.returncode, p.stdout, p.stderr)
+
+
+def reveal(path: Path) -> Result:
+    """Show `path` selected in a Finder window."""
+    return run_open("-R", str(path))
+
+
+# --------------------------------------------------------------------------- #
+# Logs                                                                        #
+# --------------------------------------------------------------------------- #
+
+TAIL_MAX_LINES = 1000
+TAIL_MAX_BYTES = 512 * 1024
+
+
+def tail(path: Path, lines: int = 200, max_bytes: int = TAIL_MAX_BYTES) -> dict[str, Any]:
+    """The last `lines` lines of `path` (at most TAIL_MAX_LINES), from at
+    most its last `max_bytes`, so a big log costs no more than a small one.
+    A symlink is not followed. `truncated`: there is more before the first
+    line returned."""
+    lines = max(1, min(int(lines), TAIL_MAX_LINES))
+    try:
+        fd = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return {"path": str(path), "exists": False, "size": 0, "lines": [], "truncated": False}
+    with os.fdopen(fd, "rb") as fh:
+        size = os.fstat(fh.fileno()).st_size
+        start = max(0, size - max_bytes)
+        fh.seek(start)
+        data = fh.read(max_bytes)
+    if start > 0:
+        nl = data.find(b"\n")
+        data = data[nl + 1:] if nl >= 0 else b""  # drop the partial first line
+    text = data.decode("utf-8", errors="replace").splitlines()
+    return {"path": str(path), "exists": True, "size": size, "lines": text[-lines:],
+            "truncated": start > 0 or len(text) > lines}
 
 
 # --------------------------------------------------------------------------- #

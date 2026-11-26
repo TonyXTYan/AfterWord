@@ -261,6 +261,87 @@ counting the `info` rows that UserPromptSubmit and SessionStart log)
 ```
 `POST /api/config/reload` forces a reload and returns the same shape.
 
+## Daemon
+
+The Config page's first section. launchctl is run in a thread, and its
+answers are reused for 3 s, so a polling page does not run it every time;
+a POST asks afresh.
+
+`GET /api/service`
+```json
+{
+  "label": "io.github.tonyxtyan.afterword",
+  "installed": true,            // the plist exists
+  "plist": "/Users/me/Library/LaunchAgents/io.github.tonyxtyan.afterword.plist",
+  "loaded": true,               // null: launchctl gave no usable answer
+  "running": true,
+  "state": "running",           // as `launchctl print` says it
+  "service_pid": 4321,          // launchd's process for the agent (null when not running)
+  "last_exit": "75: EX_TEMPFAIL",  // or "0", "(never exited)", "signal Killed: 9", null
+  "error": null,                // why launchctl gave no answer
+  "login": true,                // start at login (not `launchctl disable`d); null: unknown
+  "summary": "loaded, running pid 4321, last exit 0, start at login: on",  // `afterword status`'s service line
+  "mode": "service",            // "service": this daemon is launchd's (or AFTERWORD_SERVICE=1);
+                                // "manual": started by hand; "unknown": launchctl gave no answer
+  "service_home": "/Users/me/.afterword",  // the home the installed plist runs (null if none)
+  "other_home": false,          // the installed service runs a different home than this daemon
+  "install_command": "afterword install-service",
+  "restart_exit": 75,           // the exit status of a restart from the GUI
+  "logs": {"daemon": "/Users/me/.afterword/afterwordd.log", "service": "/Users/me/.afterword/service.log"},
+  "version": "0.3.4",
+  "pid": 4321,                  // this daemon
+  "started_at": 1795480000.0,
+  "uptime_s": 11520.4,
+  "home": "/Users/me/.afterword",
+  "storage": {
+    "db_path": "/Users/me/.afterword/events.db",
+    "db_bytes": 1258291,        // with its -wal and -shm files
+    "events": 3400,
+    "clips_dir": "/Users/me/.afterword/clips",
+    "clips": 12, "clips_bytes": 3565158,
+    "keep_days": 7, "history": 50,   // [daemon] in config.toml (read-only here)
+    "config": "/Users/me/.afterword/config.toml"
+  }
+}
+```
+
+`POST /api/service` `{"login": true|false}` runs `launchctl enable|disable
+gui/<uid>/io.github.tonyxtyan.afterword` and answers with the shape above.
+It is kept across reboots. `false` does not stop or unload the running
+daemon; launchd just does not load the agent at the next login. 400 for
+another body; 409 when the service is not installed (`afterword
+install-service` first) or the installed plist runs another AfterWord home
+than this daemon's; 502 with launchctl's message when it fails.
+
+`POST /api/service/restart` (no body): under launchd (`mode` "service") it
+answers 202 `{"restarting": true, "pid": 4321, "exit_code": 75}`, then
+shuts down as for SIGTERM and exits 75 (EX_TEMPFAIL). KeepAlive
+(`SuccessfulExit` false) makes launchd start it again, no sooner than 10 s
+(ThrottleInterval) after its last launch. The page waits until `GET
+/api/status` answers with another `pid`, for up to 45 s. 409 `"started by
+hand: restart it in its terminal, or run afterword install-service"` when
+`mode` is "manual", 409 when it is "unknown", 503 while the daemon is
+already stopping. A SIGTERM stop (`afterword stop`, Ctrl-C) still exits 0.
+
+`POST /api/service/prune` (no body) deletes transcript lines older than
+`[daemon] keep_days` now, with their clips (the daemon also does it every
+hour; 0 days keeps everything): `{"pruned": 3, "storage": {…as above…}}`.
+
+`POST /api/service/reveal` (no body) runs `open -R <home>`: AfterWord's home
+selected in a Finder window. The path is always the daemon's home, never one
+from the request. `{"revealed": "/Users/me/.afterword"}`; 502 if `open` fails.
+
+`GET /api/logs/{name}?lines=200`: the last lines of a log. `name` is
+`daemon` (afterwordd.log) or `service` (service.log); anything else is 404.
+`lines` is capped at 1000 (default 200) and at most the last 512 KB of the
+file is read; a symlink is not followed (500).
+```json
+{"name": "daemon", "path": "/Users/me/.afterword/afterwordd.log", "exists": true,
+ "size": 1048576, "lines": ["2026-11-26 17:42:01,790 INFO …", "…"],
+ "truncated": true}             // more before the first line returned
+```
+A missing log is `{"exists": false, "size": 0, "lines": [], "truncated": false}`.
+
 ## Voices
 
 `GET /api/voices` → every voice profile with its usage, in config order (the

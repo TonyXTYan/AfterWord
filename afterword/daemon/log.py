@@ -63,6 +63,9 @@ def _summary_stats(values: list[float]) -> dict[str, Any]:
     return {"n": len(v), "p50": pct(0.5), "p95": pct(0.95), "max": round(v[-1], 3)}
 
 
+LOG_FILE = "afterwordd.log"  # the daemon's own log in AfterWord's home (rotated at 2 MB)
+
+
 def setup_text_logging(home: Path, level: int = logging.INFO, stderr: bool = True,
                        stderr_level: int = logging.NOTSET) -> None:
     root = logging.getLogger("afterword")
@@ -71,7 +74,7 @@ def setup_text_logging(home: Path, level: int = logging.INFO, stderr: bool = Tru
         root.removeHandler(h)
     fmt = logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s")
     fh = logging.handlers.RotatingFileHandler(
-        home / "afterwordd.log", maxBytes=2 * 1024 * 1024, backupCount=3, encoding="utf-8"
+        home / LOG_FILE, maxBytes=2 * 1024 * 1024, backupCount=3, encoding="utf-8"
     )
     fh.setFormatter(fmt)
     root.addHandler(fh)

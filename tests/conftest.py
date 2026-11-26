@@ -20,14 +20,21 @@ HOOK = ROOT / "afterword" / "hooks" / "afterword_hook.py"
 def no_launchd(monkeypatch):
     """No test reaches the real launchctl or ~/Library/LaunchAgents: every
     launchctl call answers "not loaded", and the agents directory is one no
-    test can write to. tests/test_service.py installs its own fake."""
+    test can write to. tests/test_service.py installs its own fake. A daemon
+    a test starts as a subprocess gets a launchctl binary that does not
+    exist, and nothing opens Finder."""
     from afterword import service
 
     def not_loaded(*args):
         return service.Result(service.NOT_FOUND_RC, "", "Bad request.\nCould not find service (test)")
 
+    def no_open(*args):
+        raise AssertionError(f"a test ran `open {' '.join(args)}`; replace service.run_open")
+
     monkeypatch.setattr(service, "launchctl", not_loaded)
+    monkeypatch.setattr(service, "run_open", no_open)
     monkeypatch.setenv(service.AGENTS_DIR_ENV, "/nonexistent/afterword-tests/LaunchAgents")
+    monkeypatch.setenv(service.LAUNCHCTL_ENV, "/nonexistent/afterword-tests/launchctl")
     monkeypatch.delenv(service.SERVICE_ENV, raising=False)
 
 

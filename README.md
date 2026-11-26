@@ -151,6 +151,14 @@ warning, instead of exiting and being restarted every 10 s. The daemon still log
 prints (a crash's traceback), and is cut to its last 1 MB at startup once it
 passes 5 MB.
 
+The UI's Config page starts with a Daemon section: how the daemon was
+started, a Start at login switch, Restart daemon (under launchd only: it
+exits and launchd starts it again), Prune now, the last lines of both logs,
+and Show in Finder. `afterword login off` (or the switch) is `launchctl
+disable`: launchd stops starting the daemon at login, but a running daemon
+keeps running and `afterword start` still works; `afterword login on` undoes
+it, and `afterword login` prints the setting.
+
 ## Voices and profiles
 
 A profile in `~/.afterword/config.toml` picks a voice and how it speaks:

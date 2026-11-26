@@ -1,5 +1,5 @@
 """afterword serve | status | test "text" | models | alerts | voices | install-hooks
-| install-service | start | stop | restart | uninstall-service"""
+| install-service | start | stop | restart | uninstall-service | login"""
 
 from __future__ import annotations
 
@@ -86,7 +86,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         error = f"afterwordd is not running ({common.socket_path()}: {exc})"
     except (OSError, ValueError) as exc:
         error = f"afterwordd did not answer: {exc}"
-    svc = service.service_info()
+    svc = service.service_info(login=True)
     if error:
         if args.json:
             print(json.dumps({"error": error, "service": svc.as_dict()}, indent=2))
@@ -539,6 +539,12 @@ def cmd_service(args: argparse.Namespace) -> int:
             "uninstall-service": service.uninstall}[args.cmd]()
 
 
+def cmd_login(args: argparse.Namespace) -> int:
+    from afterword import service
+
+    return service.login(args.state)
+
+
 SERVICE_HELP = """\
 The service is a per-user LaunchAgent, io.github.tonyxtyan.afterword, in
 ~/Library/LaunchAgents. It runs `afterword serve` with this interpreter,
@@ -555,7 +561,11 @@ or $AFTERWORD_HOME); the daemon's own log is afterwordd.log next to it.
                      with KeepAlive, until the next login or `afterword start`
   restart            SIGTERM, wait for the clean exit, kickstart; starts it
                      if it is not loaded
-  uninstall-service  unload it and delete the plist
+  uninstall-service  unload it and delete the plist (and undo `login off`)
+  login [on|off]     whether launchd loads it at login (launchctl enable /
+                     disable; kept across reboots). Off leaves a running
+                     daemon running. start, install-service and restart
+                     still work while it is off, and keep it off.
 """
 
 
@@ -626,6 +636,10 @@ def build_parser() -> argparse.ArgumentParser:
     ):
         s = sub.add_parser(name, help=text, description=SERVICE_HELP, formatter_class=fmt)
         s.set_defaults(func=cmd_service)
+    s = sub.add_parser("login", help="show or set whether the service starts at login",
+                       description=SERVICE_HELP, formatter_class=fmt)
+    s.add_argument("state", nargs="?", choices=("on", "off"), help="omit to print the current setting")
+    s.set_defaults(func=cmd_login)
     return p
 
 
