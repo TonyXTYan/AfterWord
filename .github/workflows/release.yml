@@ -1,0 +1,100 @@
+name: release
+
+# Every push to main whose afterword/__init__.py carries a version that has
+# no tag yet gets the tag v<version> on that commit and a GitHub release
+# whose notes are that version's CHANGELOG.md section. Installed daemons
+# (`afterword update`) pick up release tags only, so this is what ships a
+# version. Running it again changes nothing: an existing tag is left alone
+# (a missing release for it is created). A version without a CHANGELOG
+# section fails the run and creates nothing.
+#
+# The tag is made with GITHUB_TOKEN, so it does not trigger other workflows
+# (GitHub's rule against recursive runs); nothing here needs it to.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the version
+        id: version
+        run: |
+          version=$(python3 - <<'PY'
+          import re
+          text = open("afterword/__init__.py", encoding="utf-8").read()
+          m = re.search(r'^__version__ = "(\d+\.\d+\.\d+)"$', text, re.M)
+          print(m.group(1) if m else "")
+          PY
+          )
+          if [ -z "$version" ]; then
+            echo "::error file=afterword/__init__.py::no __version__ = \"X.Y.Z\" line"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Look for the tag and its release
+        id: exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null; then
+            echo "tag=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=false" >> "$GITHUB_OUTPUT"
+          fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Release notes from CHANGELOG.md
+        if: steps.exists.outputs.release != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if ! python3 -m afterword.changelog "$VERSION" CHANGELOG.md > notes.md; then
+            echo "::error file=CHANGELOG.md::no section for $VERSION: add '## $VERSION (date)' before releasing; nothing was tagged"
+            exit 1
+          fi
+          cat notes.md
+
+      - name: Create the tag and the release
+        if: steps.exists.outputs.release != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          HAS_TAG: ${{ steps.exists.outputs.tag }}
+        run: |
+          if [ "$HAS_TAG" = "true" ]; then
+            # The tag was pushed by hand: give it its release, on whatever it points at.
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "AfterWord $VERSION" --notes-file notes.md
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "AfterWord $VERSION" --notes-file notes.md
+          fi
+
+      - name: Already released
+        if: steps.exists.outputs.release == 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: echo "$TAG is already tagged and released; nothing to do"

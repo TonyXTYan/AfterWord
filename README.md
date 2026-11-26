@@ -125,12 +125,17 @@ and restart it after a crash, install it as a LaunchAgent:
 uv run afterword install-service
 ```
 
-That writes `~/Library/LaunchAgents/io.github.tonyxtyan.afterword.plist`,
-which runs `afterword serve` with the same Python (keep the clone where it
-is), and loads it. A daemon you started by hand is stopped first. `--dry-run`
-prints the plist and the `launchctl` commands without doing anything. Run
-`install-service` again after moving the clone or changing `AFTERWORD_HOME`;
-it rewrites the plist and reloads it. Then:
+That sets up AfterWord's own copy of a release in `~/.afterword/app/` (see
+[Updates](#updates) below), then writes
+`~/Library/LaunchAgents/io.github.tonyxtyan.afterword.plist`, which runs
+`afterword serve` from that copy, and loads it. The copy is installed and
+tested before the running service is touched, so the clone you run it from
+can go on changing (or move) without affecting the service. A daemon you
+started by hand is stopped first. `--dry-run` prints what it would do, the
+plist and the `launchctl` commands without doing anything. `--dev` runs the
+service with this clone's Python instead (for working on AfterWord itself;
+keep the clone where it is). Run `install-service` again after changing
+`AFTERWORD_HOME`; it rewrites the plist and reloads it. Then:
 
 ```bash
 uv run afterword status    # includes a service line: loaded, pid, last exit
@@ -158,6 +163,50 @@ and Show in Finder. `afterword login off` (or the switch) is `launchctl
 disable`: launchd stops starting the daemon at login, but a running daemon
 keeps running and `afterword start` still works; `afterword login on` undoes
 it, and `afterword login` prints the setting.
+
+#### Updates
+
+Releases are the repository's `vX.Y.Z` tags: a GitHub workflow tags each
+version that reaches `main` with its CHANGELOG entry, and the service picks
+up tags only, never unreleased commits. `install-service` installs the
+release of the code you run it from (or the newest release, if that code is
+not one), with the same optional extras (`qwen`, `kokoro`, `chatterbox`)
+that are installed where you run it. Releases before v0.3.6 cannot update
+themselves, so it refuses them (use `--dev` until then):
+
+```
+~/.afterword/app/repo.git          git objects (fetched tags only)
+~/.afterword/app/releases/v0.3.6/  a checkout of the tag, with its own .venv (uv sync --frozen)
+~/.afterword/app/current        -> releases/v0.3.6   (what the LaunchAgent runs)
+~/.afterword/update.json           the updater's state
+```
+
+About 5 minutes after it starts, and then every `check_every_h` hours, the
+daemon runs `git ls-remote --tags` for a newer release. With `[update] mode
+= "auto"` (the default) it prepares it next to the running one (a checkout,
+`uv sync`, and a smoke test: the new `afterword --version` and an import of
+the daemon), waits until nothing is queued, being said or rendered in the
+voice lab, points `current` at it and restarts (launchd starts it again
+within about 10 s). If the new release does not stay up for a minute, it is
+started at most three times, then `current` goes back to the previous
+release (the newest two are kept), the event log says so, and that tag is
+not tried again by itself. After an update, the Claude Code and Codex
+plugins are refreshed too when their CLIs are on PATH (`claude plugin
+marketplace update` and `claude plugin update afterword@afterword`; `codex
+plugin marketplace upgrade` and `codex plugin add afterword@afterword`):
+restart open Claude Code sessions to load the new hooks, and Codex asks you
+to review changed hooks. `mode = "notify"` only reports new releases, and
+`"off"` does not check. A `--dev` service only reports them too.
+
+```bash
+uv run afterword update            # running version, install, mode, latest release, last check
+uv run afterword update --check    # check now
+uv run afterword update --now      # install the newest release now (--force: don't wait for quiet)
+```
+
+The Config page's Daemon section has the same, with Check now and Update
+now buttons and the new release's CHANGELOG entry. `uv` must be installed
+(the one `install-service` found is used, else the one on PATH).
 
 ## Voices and profiles
 
@@ -571,6 +620,8 @@ it shows the last line. **Mute all** sits in the header.
 | `~/.afterword/daemon.json` | daemon settings changed from the GUI (mute all) |
 | `~/.afterword/seen/` | short-lived markers so each turn is handled once |
 | `~/.afterword/stream/` | the text of messages being written, per session, for early speaking (pruned after 10 minutes) |
+| `~/.afterword/app/` | the service's managed install: `repo.git`, `releases/<tag>/` (the newest two) and the `current` link ([Updates](#updates)) |
+| `~/.afterword/update.json` | the updater's state: last check, newest release, a pending or rolled-back switch, the last plugin refresh |
 
 Environment: `AFTERWORD_HOME` relocates `~/.afterword`; `AFTERWORD_FALLBACK=none`
 disables the `say` fallback; `AFTERWORD_DISABLE=1` makes the hook a no-op;

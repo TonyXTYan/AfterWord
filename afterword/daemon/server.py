@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from afterword import __version__
+from afterword import update as updating
 from afterword.hooks import common, scriptsplit, tags
 
 from . import alerts as alerting
@@ -291,6 +292,7 @@ class Daemon:
         self.supervisor: TaskSupervisor | None = None  # run_daemon's; None in tests that drive worker() directly
         self._afplay_next = False  # a stream timed out: the next line plays with afplay
         self._stuck_stream = None  # that stream's Playback, until its thread ends
+        self.updater = updating.for_daemon(self)  # releases: check, switch when idle, confirm (update.py)
 
     # ------------------------------------------------------------------ #
     # Socket ingest                                                      #
@@ -1440,6 +1442,7 @@ class Daemon:
             "muted_all": self.muted_all,
             "events": self.events.count(),
             "tasks": self.supervisor.snapshot() if self.supervisor is not None else {},
+            "update": self.updater.view(),
         }
 
     async def spool_poller(self) -> None:
@@ -1699,6 +1702,7 @@ async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) 
         supervisor.start("spool", daemon.spool_poller)
         supervisor.start("warm", daemon.warm_models, oneshot=True)
         supervisor.start("retention", daemon.retention_loop)
+        supervisor.start("update", daemon.updater.run_loop)
 
         # Our own SIGINT/SIGTERM handling in both modes, so shutdown always
         # runs the cleanup below (uvicorn's own capture re-raises the signal

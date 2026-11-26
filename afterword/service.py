@@ -575,10 +575,12 @@ def _bootstrap(out=None) -> int:
     return _launch(("bootstrap", domain(), str(plist_path())), out or sys.stdout)
 
 
-def install(dry_run: bool = False, start: bool = True, out=None) -> int:
+def install(dry_run: bool = False, start: bool = True, out=None, python: str | None = None) -> int:
+    """Write the plist for `python` (default: this interpreter; the managed
+    install passes <home>/app/current/.venv/bin/python) and load it."""
     out = out or sys.stdout
     path = plist_path()
-    py = python_executable()
+    py = python or python_executable()
     data = plistlib.dumps(build_plist(py))
     info = service_info()
     if start and info.loaded is None:
