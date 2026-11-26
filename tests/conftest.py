@@ -16,6 +16,21 @@ TIME_SCALE = float(os.environ.get("AFTERWORD_TEST_TIME_SCALE") or (3.0 if os.env
 HOOK = ROOT / "afterword" / "hooks" / "afterword_hook.py"
 
 
+@pytest.fixture(autouse=True)
+def no_launchd(monkeypatch):
+    """No test reaches the real launchctl or ~/Library/LaunchAgents: every
+    launchctl call answers "not loaded", and the agents directory is one no
+    test can write to. tests/test_service.py installs its own fake."""
+    from afterword import service
+
+    def not_loaded(*args):
+        return service.Result(service.NOT_FOUND_RC, "", "Bad request.\nCould not find service (test)")
+
+    monkeypatch.setattr(service, "launchctl", not_loaded)
+    monkeypatch.setenv(service.AGENTS_DIR_ENV, "/nonexistent/afterword-tests/LaunchAgents")
+    monkeypatch.delenv(service.SERVICE_ENV, raising=False)
+
+
 @pytest.fixture
 def aw_home(tmp_path, monkeypatch):
     """An isolated AFTERWORD_HOME. Unix socket paths are limited to ~104

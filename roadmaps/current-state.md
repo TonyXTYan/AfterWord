@@ -48,7 +48,7 @@ README still says "Not built: the optional menu-bar icon", and the outlook label
 | `events` table has no schema version or migrations | `executescript(SCHEMA)` only creates if missing, so new columns silently do nothing on old databases. (Retention is done: `[daemon] keep_days`, 7 days by default, pruned hourly.) | P1 M1. |
 | Turn id is parsed but not stored (`server.py`, `fields`) | The timeline can't group a turn without re-parsing payload JSON. | P1 M1. |
 | Raw prompts and payloads stored with only a length cap | Tool events will carry commands and output that may hold secrets. | Redaction before P1 M3. |
-| No daemon service | No launchd agent, no `afterword start|stop`. When the daemon is down, voices fall back to `say`, and that is logged only after the daemon returns and imports the spool (reason text "daemon down: spoken by say fallback"). P2 and P3 need an always-on service. | P0-6. |
+| Daemon service only half done | `afterword install-service` and `start|stop|restart` exist (0.3.3). When the daemon is down, voices fall back to `say`, and that is logged only after the daemon returns and imports the spool (reason text "daemon down: spoken by say fallback"). P2 and P3 need an always-on service. | P0-6. |
 | No hook/daemon version handshake | A plugin update changes the hook but not a daemon running from a clone. `plugin.json` has no version. | P1 M2. |
 | Hook runtime | Each hook spawns `python3` (about 20-30 ms). Hooks run on stock `python3` 3.9+, the daemon on 3.12. No per-hook p95 is measured. | Measure in P1 M3 before adding tool hooks. |
 | Test runtime | 132 s serial. No fast/slow split, no `pytest-xdist`. Real-time `NullPlayer` and fixed sleeps likely dominate. | Before P1 gets busy; see decision D14. |

@@ -1,4 +1,5 @@
-"""afterword serve | status | test "text" | models | alerts | install-hooks"""
+"""afterword serve | status | test "text" | models | alerts | voices | install-hooks
+| install-service | start | stop | restart | uninstall-service"""
 
 from __future__ import annotations
 
@@ -76,23 +77,33 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
+    from afterword import service
+
+    error = None
     try:
         reply = _request({"type": "ping"})
     except DaemonUnreachable as exc:
-        print(f"afterwordd is not running ({common.socket_path()}: {exc})")
-        return 1
+        error = f"afterwordd is not running ({common.socket_path()}: {exc})"
     except (OSError, ValueError) as exc:
-        print(f"afterwordd did not answer: {exc}")
+        error = f"afterwordd did not answer: {exc}"
+    svc = service.service_info()
+    if error:
+        if args.json:
+            print(json.dumps({"error": error, "service": svc.as_dict()}, indent=2))
+        else:
+            print(error)
+            print(f"  service   {svc.summary()}")
         return 1
     st = reply.get("status", {})
     if args.json:
-        print(json.dumps(st, indent=2))
+        print(json.dumps({**st, "service": svc.as_dict()}, indent=2))
         return 0
     q = st.get("queue", {})
     np = q.get("now_playing")
     print(f"afterwordd {st.get('version')}  pid {st.get('pid')}  up {st.get('uptime_s')}s")
     print(f"  UI        {st.get('http') or '(disabled)'}")
     print(f"  socket    {st.get('socket')}")
+    print(f"  service   {svc.summary()}")
     print(f"  synth     {st.get('synth')}   player {st.get('player')}")
     cfg = st.get("config", {})
     print(f"  config    {cfg.get('path')}  profiles: {', '.join(cfg.get('profiles') or []) or 'none'}")
@@ -515,6 +526,39 @@ def cmd_install_hooks(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_install_service(args: argparse.Namespace) -> int:
+    from afterword import service
+
+    return service.install(dry_run=args.dry_run, start=not args.no_start)
+
+
+def cmd_service(args: argparse.Namespace) -> int:
+    from afterword import service
+
+    return {"start": service.start, "stop": service.stop, "restart": service.restart,
+            "uninstall-service": service.uninstall}[args.cmd]()
+
+
+SERVICE_HELP = """\
+The service is a per-user LaunchAgent, io.github.tonyxtyan.afterword, in
+~/Library/LaunchAgents. It runs `afterword serve` with this interpreter,
+starts at login, and is restarted after a crash (not after a clean exit).
+Its stdout and stderr go to service.log in AfterWord's home (~/.afterword,
+or $AFTERWORD_HOME); the daemon's own log is afterwordd.log next to it.
+
+  install-service    write the plist and load it; a daemon already running
+                     outside launchd is stopped first (SIGTERM). Running it
+                     again rewrites the plist and reloads it.
+  start              load the service (launchctl bootstrap), or start its
+                     daemon if it is loaded (launchctl kickstart)
+  stop               unload it (launchctl bootout): it stays stopped, even
+                     with KeepAlive, until the next login or `afterword start`
+  restart            SIGTERM, wait for the clean exit, kickstart; starts it
+                     if it is not loaded
+  uninstall-service  unload it and delete the plist
+"""
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="afterword", description="Spoken replies for Claude Code.")
     p.add_argument("--version", action="version", version=f"afterword {__version__}")
@@ -567,6 +611,21 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--uninstall", action="store_true", help="remove AfterWord's hooks")
     s.add_argument("--no-command", action="store_true", help="do not install the /afterword-voice and /afterword-describe-voices command files")
     s.set_defaults(func=cmd_install_hooks)
+
+    fmt = argparse.RawDescriptionHelpFormatter
+    s = sub.add_parser("install-service", help="run the daemon as a LaunchAgent: at login, restarted after a crash",
+                       description=SERVICE_HELP, formatter_class=fmt)
+    s.add_argument("--dry-run", action="store_true", help="print the plist and the launchctl commands, write nothing")
+    s.add_argument("--no-start", action="store_true", help="write the plist but do not load it")
+    s.set_defaults(func=cmd_install_service)
+    for name, text in (
+        ("start", "start the service (bootstrap it, or kickstart it if loaded)"),
+        ("stop", "stop the service until the next login or `afterword start` (bootout; the plist stays)"),
+        ("restart", "restart the service's daemon (SIGTERM, then kickstart); start it if not loaded"),
+        ("uninstall-service", "stop the service and delete its plist"),
+    ):
+        s = sub.add_parser(name, help=text, description=SERVICE_HELP, formatter_class=fmt)
+        s.set_defaults(func=cmd_service)
     return p
 
 

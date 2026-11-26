@@ -17,11 +17,11 @@ If a plan file disagrees with `outlook.md`, the outlook wins. Fix the plan, or r
 
 ## Status board
 
-Last updated: 2026-11-25.
+Last updated: 2026-11-26.
 
 | Phase | Status | Next milestone | Plan |
 |---|---|---|---|
-| P0 Voice out | Closing out. 1 of 3 "done when" clauses met (no overlap), 1 mostly (silent-reply explanations), 1 not (distinct voices by default). | P1 M1 (migration runner with the reason columns), then P0-4, then P0-1; see the order in p0-voice-out.md | [p0-voice-out.md](p0-voice-out.md) |
+| P0 Voice out | Closing out. 1 of 3 "done when" clauses met (no overlap), 1 mostly (silent-reply explanations), 1 not (distinct voices by default); P0-2 done and P0-6's service built in 0.3.3. | P1 M1 (migration runner with the reason columns), then P0-4, then P0-1; see the order in p0-voice-out.md | [p0-voice-out.md](p0-voice-out.md) |
 | P1 Context bus | Not started. Nothing recorded for replay yet. | M1: schema versioning and the `bus` table | [p1-context-bus.md](p1-context-bus.md) |
 | P2 Screen context | Not started. | Spike: AX focus helper at a stable signed path | [p2-p6-later.md#p2-screen-context](p2-p6-later.md#p2-screen-context) |
 | P3 Speech in | Not started. | Spike: push-to-talk with SpeechAnalyzer | [p2-p6-later.md#p3-speech-in](p2-p6-later.md#p3-speech-in) |

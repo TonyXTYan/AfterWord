@@ -1,6 +1,6 @@
 [project]
 name = "afterword"
-version = "0.3.2"
+version = "0.3.3"
 description = "Spoken replies for Claude Code, using local TTS on Apple Silicon"
 readme = "README.md"
 requires-python = ">=3.12"

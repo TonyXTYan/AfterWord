@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
+from afterword.hooks import common
+
 from . import alerts as alerting
 from . import state
 from .config import lang_code
@@ -115,6 +117,7 @@ def build_app(daemon: "Daemon", port: int) -> FastAPI:
         return {
             "muted_all": daemon.muted_all,
             "profiles": list(daemon.store.get().profiles),
+            "voice_in_use_s": common.VOICE_IN_USE_S,
             "sessions": state.list_sessions(activity, limit),
         }
 

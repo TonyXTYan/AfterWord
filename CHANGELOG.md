@@ -4,6 +4,20 @@ How versions are numbered: [AGENTS.md](AGENTS.md#versioning). Versions before
 0.3.1 were never tagged; their entries were written afterwards from the git
 history, and the last commit of each is given.
 
+## 0.3.3 (2026-11-26)
+
+- The daemon can run as a LaunchAgent: `afterword install-service` writes and
+  loads `~/Library/LaunchAgents/io.github.tonyxtyan.afterword.plist` (it
+  starts at login and restarts after a crash), with `afterword start`,
+  `stop`, `restart` and `uninstall-service`. `afterword status` shows the
+  service. Its output goes to `~/.afterword/service.log`, trimmed at startup
+  (P0-6, except surfacing "daemon down" replies in Sessions, which waits on
+  P0-4).
+- The Sessions page warns when two live sessions (voice on, not muted, active
+  in the last 2 hours) share a voice, on every row involved, with a
+  "Pick another" button that moves that session to the least recently used
+  free voice. `GET /api/sessions` gains `voice_in_use_s` (P0-2).
+
 ## 0.3.2 (2026-11-26)
 
 - The event log has a retention limit: `[daemon] keep_days` (7 by default,

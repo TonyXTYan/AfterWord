@@ -1502,9 +1502,22 @@ async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) 
             log.info("UI at %s", daemon.http_url)
             if on_ready:
                 loop.call_later(0.3, on_ready, daemon)
-            await daemon._uvicorn.serve()
+            try:
+                await daemon._uvicorn.serve()
+            except SystemExit:  # uvicorn exits (status 3) when it cannot bind
+                pass
             if not daemon._uvicorn.started and not daemon._stop_event.is_set():
-                raise RuntimeError(f"HTTP UI could not start on 127.0.0.1:{port} (port in use?)")
+                msg = f"HTTP UI could not start on 127.0.0.1:{port} (port in use?)"
+                from afterword import service
+
+                if os.environ.get(service.SERVICE_ENV) != "1":
+                    raise RuntimeError(msg)
+                # Under launchd, exiting would only bring the same failure
+                # back every ThrottleInterval. Speech works without the UI:
+                # keep serving the socket until stopped.
+                log.warning("%s; speaking without the UI until the daemon is restarted", msg)
+                daemon.http_url = None
+                await daemon._stop_event.wait()
         else:
             if on_ready:
                 on_ready(daemon)
@@ -1551,11 +1564,33 @@ async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) 
 
 
 def main(port: int | None = None, http: bool = True, verbose: bool = False) -> int:
+    from afterword import service
+
     home = common.ensure_home()
-    setup_text_logging(home, level=logging.DEBUG if verbose else logging.INFO)
+    as_service = os.environ.get(service.SERVICE_ENV) == "1"
+    trimmed = False
+    if as_service:  # only launchd's daemon owns service.log; a manual serve leaves it alone
+        with contextlib.suppress(OSError):
+            trimmed = service.trim_log(home / service.LOG_NAME)
+    # Under launchd, stderr is service.log, which never rotates: only
+    # warnings and errors go there; afterwordd.log has everything.
+    setup_text_logging(home, level=logging.DEBUG if verbose else logging.INFO,
+                       stderr_level=logging.WARNING if as_service else logging.NOTSET)
+    if trimmed:
+        log.info("trimmed %s to its last %d bytes", home / service.LOG_NAME, service.LOG_KEEP)
     try:
         asyncio.run(run_daemon(port=port, http=http))
-    except (AlreadyRunning, RuntimeError) as exc:
+    except AlreadyRunning as exc:
+        if as_service:
+            # A non-zero exit would make launchd (KeepAlive SuccessfulExit =
+            # false) retry every ThrottleInterval for as long as the other
+            # daemon runs.
+            log.warning("%s; started by launchd, so exiting 0 and not retrying "
+                        "(`afterword start` once the other daemon has stopped)", exc)
+            return 0
+        log.error("%s", exc)
+        return 1
+    except RuntimeError as exc:
         log.error("%s", exc)
         return 1
     except KeyboardInterrupt:
