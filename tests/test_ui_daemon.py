@@ -158,3 +158,18 @@ def test_page_script_parses():
     proc = subprocess.run([NODE, "-e", "new Function(require('fs').readFileSync(0, 'utf8'))"], input=script,
                           capture_output=True, text=True, timeout=30)
     assert proc.returncode == 0, proc.stderr
+
+
+def test_review_fixes_are_wired():
+    """PR review of 0.3.4: the restart waits on the pid that answered the
+    POST, a stale flash cannot clear a newer note, and a log response that
+    arrives after another Show or a Hide is dropped."""
+    t = _text()
+    panel = re.search(r"const DaemonPanel = \(\(\) => \{(.*?)\n\}\)\(\);", t, re.S).group(1)
+    assert "r.data && isNum(r.data.pid) ? r.data.pid : old" in panel
+    assert "restarting = {old: going," in panel
+    assert "const my = ++logSeq;" in panel and "if (my !== logSeq) return;" in panel
+    assert "function hideLog() { logSeq++;" in panel
+    assert "the restart did not happen" in panel  # the old pid still answering is not "did not come back"
+    note = re.search(r"function note\(id, text, kind = \"info\"\) \{(.*?)\}\n", t).group(1)
+    assert "el._tok = (el._tok || 0) + 1" in note

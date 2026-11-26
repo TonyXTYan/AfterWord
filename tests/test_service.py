@@ -831,10 +831,45 @@ def test_restart_on_a_disabled_service(launchd, capsys):
     launchd.spawn()
     launchd.disabled = True
     assert cli.main(["restart"]) == 0
-    assert launchd.mutations() == [("kill", "SIGTERM", service.target()), ("enable", service.target()),
+    # Enabled before anything is stopped, so a failed enable stops nothing.
+    assert launchd.mutations() == [("enable", service.target()), ("kill", "SIGTERM", service.target()),
                                    ("kickstart", "-k", service.target()), ("disable", service.target())]
     assert launchd.disabled is True
     assert capsys.readouterr().out.strip().endswith("restarted, pid 4322")
+
+
+def test_restart_with_login_off_stops_nothing_if_enable_fails(launchd, capsys):
+    install_plist()
+    launchd.loaded = True
+    launchd.spawn()
+    pid = launchd.pid
+    launchd.disabled = True
+    launchd.fail["enable"] = service.Result(1, "", "Not privileged to enable service\n")
+    assert cli.main(["restart"]) == 1
+    assert launchd.mutations() == [("enable", service.target())]
+    assert launchd.pid == pid  # still running
+    assert "Not privileged" in capsys.readouterr().err
+
+
+def test_login_window_holds_hangup_until_login_is_off_again(launchd):
+    """A closed terminal mid-start must not leave start at login on: SIGHUP
+    (and Ctrl-C, SIGTERM) wait until the disable has run."""
+    import signal as _signal
+
+    install_plist()
+    launchd.disabled = True
+    seen = {}
+
+    def during(args):
+        if args[0] == "bootstrap":
+            seen["blocked"] = set(_signal.pthread_sigmask(_signal.SIG_BLOCK, []))
+
+    launchd.on_call = during
+    before = set(_signal.pthread_sigmask(_signal.SIG_BLOCK, []))
+    assert cli.main(["start"]) == 0
+    assert {_signal.SIGHUP, _signal.SIGINT, _signal.SIGTERM} <= seen["blocked"]
+    assert set(_signal.pthread_sigmask(_signal.SIG_BLOCK, [])) == before  # restored after
+    assert launchd.disabled is True
 
 
 def test_restart_falls_back_to_start_on_a_disabled_service(launchd, capsys):

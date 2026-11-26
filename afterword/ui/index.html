@@ -2069,7 +2069,9 @@ async function api(method, path, body, opt = {}) {
   if (r.status === 429) msg = `Engine busy, try again in a moment. (${msg})`;
   return {ok: false, status: r.status, data, error: msg};
 }
-function note(id, text, kind = "info") { const el = typeof id === "string" ? $(id) : id; el.className = "msg " + kind; el.textContent = text || ""; }
+// Any new message also cancels a pending flashNote clear (el._tok), so an
+// older flash cannot wipe a newer, lasting note.
+function note(id, text, kind = "info") { const el = typeof id === "string" ? $(id) : id; el._tok = (el._tok || 0) + 1; el.className = "msg " + kind; el.textContent = text || ""; }
 // A short-lived message (cleared after ms unless replaced meanwhile).
 function flashNote(id, text, kind = "info", ms = 5000) {
   const el = typeof id === "string" ? $(id) : id;
@@ -5601,7 +5603,7 @@ function dmStatusText(d) {
 const dmRestarted = (oldPid, pid) => Number.isInteger(pid) && pid > 0 && pid !== oldPid;
 // ---------- end daemon section
 const DaemonPanel = (() => {
-  let data = null, loading = false, restarting = null, pollTimer = null, logName = null;
+  let data = null, loading = false, restarting = null, pollTimer = null, logName = null, logSeq = 0;
   const btns = () => ["dm-login", "dm-restart", "dm-prune"].map($);
   function render(d) {
     data = d;
@@ -5660,8 +5662,11 @@ const DaemonPanel = (() => {
       return load();
     }
     if (Date.now() >= restarting.until) {
+      const stillUp = pid === restarting.old;   // it never went down
       restarting = null;
-      note("dm-msg", "The daemon did not come back within 45 s. Look at service.log, or run afterword start.", "err");
+      note("dm-msg", stillUp
+        ? `The daemon is still running (pid ${pid}): the restart did not happen. Look at afterwordd.log.`
+        : "The daemon did not come back within 45 s. Look at service.log, or run afterword start.", "err");
       if (data) render(data);
       return;
     }
@@ -5675,7 +5680,10 @@ const DaemonPanel = (() => {
     note("dm-msg", "restarting…", "run");
     const r = await api("POST", "/api/service/restart");
     if (!r.ok) { render(data); return flashNote("dm-msg", `Restart failed: ${r.error}`, "err", 8000); }
-    restarting = {old, until: Date.now() + DM_RESTART_WAIT_MS};
+    // The pid that is about to exit is the one that answered the POST; the
+    // panel's may be stale (restarted elsewhere since the last refresh).
+    const going = r.data && isNum(r.data.pid) ? r.data.pid : old;
+    restarting = {old: going, until: Date.now() + DM_RESTART_WAIT_MS};
     schedule(1500);
   }
   async function prune() {
@@ -5706,7 +5714,9 @@ const DaemonPanel = (() => {
   async function showLog(name, toggle = true) {
     if (toggle && logName === name && !$("dm-logbox").hidden) return hideLog();
     logName = name;
+    const my = ++logSeq;   // a later Show or a Hide makes this response stale
     const r = await api("GET", `/api/logs/${name}?lines=200`);
+    if (my !== logSeq) return;
     $("dm-logbox").hidden = false;
     paintLogButtons();
     const pre = $("dm-log");
@@ -5716,7 +5726,7 @@ const DaemonPanel = (() => {
     pre.textContent = !d.exists ? "(no log yet)" : d.lines.length ? d.lines.join("\n") : "(empty)";
     pre.scrollTop = pre.scrollHeight;
   }
-  function hideLog() { $("dm-logbox").hidden = true; paintLogButtons(); }
+  function hideLog() { logSeq++; $("dm-logbox").hidden = true; paintLogButtons(); }
   $("dm-login").addEventListener("click", toggleLogin);
   $("dm-restart").addEventListener("click", restart);
   $("dm-prune").addEventListener("click", prune);

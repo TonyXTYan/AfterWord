@@ -518,27 +518,47 @@ def _disabled_error(r: Result) -> bool:
     return r.returncode == DISABLED_RC or "disabled" in r.error().lower()
 
 
-def _while_enabled(args: tuple[str, ...], out) -> Result:
-    """`launchctl <args>` (a bootstrap or kickstart) with the agent enabled.
-    launchd refuses to load a disabled agent, and `afterword login off`
-    disables it; so it is enabled for this one call and disabled again right
-    after, whatever the call returned: start at login stays off."""
+_HELD_SIGNALS = (signal.SIGHUP, signal.SIGINT, signal.SIGTERM)
+
+
+@contextlib.contextmanager
+def _login_window(out):
+    """With start at login off, enable the agent for the body (launchd
+    refuses to load or kickstart a disabled agent) and disable it again
+    after, whatever the body did: start at login stays off. Yields None when
+    the body may go ahead, or the failed enable's Result (then nothing has
+    changed). A closed terminal (SIGHUP), Ctrl-C or SIGTERM in between would
+    leave login on for good, so those are held until it is off again (they
+    take effect after); only SIGKILL can still cut in."""
     login, _ = login_state()
     if login is not False:
-        return launchctl(*args)
-    r = set_login(True)
-    if not r.ok:
-        return Result(r.returncode, r.stdout, f"{_cmd('enable', target())} failed: {r.error()}")
+        yield None
+        return
+    old_mask = signal.pthread_sigmask(signal.SIG_BLOCK, _HELD_SIGNALS)
     try:
-        result = launchctl(*args)
+        r = set_login(True)
+        if not r.ok:
+            yield Result(r.returncode, r.stdout, f"{_cmd('enable', target())} failed: {r.error()}")
+            return
+        try:
+            yield None
+        finally:
+            back = set_login(False)
+            if back.ok:
+                print("start at login is off (`afterword login on` turns it on)", file=out)
+            else:
+                print(f"warning: {_cmd('disable', target())} failed: {back.error()}; start at login is on "
+                      "now (`afterword login off` turns it off)", file=sys.stderr)
     finally:
-        back = set_login(False)
-        if not back.ok:
-            print(f"warning: {_cmd('disable', target())} failed: {back.error()}; start at login is on "
-                  "now (`afterword login off` turns it off)", file=sys.stderr)
-    if result.ok and back.ok:
-        print("start at login is off (`afterword login on` turns it on)", file=out)
-    return result
+        signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
+
+
+def _while_enabled(args: tuple[str, ...], out) -> Result:
+    """`launchctl <args>` (a bootstrap or kickstart) inside _login_window."""
+    with _login_window(out) as refused:
+        if refused is not None:
+            return refused
+        return launchctl(*args)
 
 
 def _launch(args: tuple[str, ...], out) -> int:
@@ -684,10 +704,20 @@ def restart(out=None) -> int:
     # Then kickstart -k: once the old process is gone it simply starts a new
     # one; if it is somehow still running (the wait timed out), -k ends it,
     # where a plain kickstart would do nothing to a running job.
-    r = launchctl("kill", "SIGTERM", target())
-    if r.ok:
-        _wait_stopped(info.pid)
-    if _launch(("kickstart", "-k", target()), out):
+    # The whole stop-and-start runs inside the login window: if start at
+    # login is off and enabling fails, nothing has been stopped yet.
+    args = ("kickstart", "-k", target())
+    with _login_window(out) as refused:
+        if refused is not None:
+            return _fail(_cmd(*args), refused)
+        r = launchctl("kill", "SIGTERM", target())
+        if r.ok:
+            _wait_stopped(info.pid)
+        r = launchctl(*args)
+    if not r.ok:
+        _fail(_cmd(*args), r)
+        if _disabled_error(r):
+            print("launchd has the service disabled; `afterword login on` enables it", file=sys.stderr)
         return 1
     now = service_info()
     print("restarted" + (f", pid {now.pid}" if now.running else ""), file=out)
