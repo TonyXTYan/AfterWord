@@ -4,6 +4,39 @@ How versions are numbered: [AGENTS.md](AGENTS.md#versioning). Versions before
 0.3.1 were never tagged; their entries were written afterwards from the git
 history, and the last commit of each is given.
 
+## 0.3.5 (2026-11-26)
+
+Hardening, from an audit of the repo.
+
+- Speech keeps going when something inside the daemon fails: a failed event
+  log write no longer ends the playback worker, and the worker, spool,
+  retention and warm-up tasks are restarted with backoff if they stop.
+- Playback has a time limit (the clip's length plus 10 s): a stuck audio
+  device or afplay is stopped, the line is marked "playback timed out", and
+  the next lines use afplay until the device recovers.
+- Crashes leave a trace: native crash stacks go to `service.log`, and a
+  daemon that did not shut down cleanly is noted in the event log at the
+  next start.
+- A corrupt `events.db` is moved aside (`events.db.corrupt-<time>`) and a
+  fresh one started, instead of the service restarting every 10 s; a locked
+  one gives a clear error and is left alone. The WAL file shrinks after a
+  prune.
+- Privacy: the event log keeps only a projection of each hook payload (ids,
+  event names, folder, model, tool name, and the lengths of text fields),
+  never the prompt, the reply or tool inputs. Existing rows are scrubbed once.
+- The `say` fallback (daemon down) takes turns through `~/.afterword/say.lock`,
+  so parallel sessions no longer talk over each other; `afterword test` does
+  too.
+- The hook's tag parser caps message and block sizes, so a crafted reply
+  cannot use up the hook's time budget.
+- The LaunchAgent runs Python with `-P` (run `afterword install-service`
+  again to update the plist); the GUI is served with a strict Content
+  Security Policy (per-response script nonces); state files are written with
+  fsync.
+- Development: tests run in parallel (`pytest -n 4`, about 40 s instead of
+  2.5 min), ruff checks `F`, `E9` and `B` in CI, and hook code is checked to
+  stay Python 3.9 compatible.
+
 ## 0.3.4 (2026-11-26)
 
 - A Daemon section first on the Config page: whether the daemon runs under

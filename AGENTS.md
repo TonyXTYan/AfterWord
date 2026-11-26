@@ -4,6 +4,15 @@ Notes for agents working in this repo. What AfterWord is and how it works:
 [README.md](README.md), [DESIGN.md](DESIGN.md), [docs/](docs/). Where it goes
 next: [roadmaps/](roadmaps/README.md).
 
+## Tests and lint
+
+- `uv run pytest -q` runs the suite in parallel (`-n 4` in pyproject); add
+  `-n0` to debug serially. `uv run ruff check` must pass (CI runs both).
+- Hook code (`afterword/hooks/`) runs under the stock `/usr/bin/python3`
+  (3.9, `-S -I`): stdlib only, Python 3.9 syntax. Tests check both.
+- Tests never touch the real `~/.afterword`, `launchctl`, Finder or port
+  47800: use the `aw_home` fixture and the fakes in `tests/conftest.py`.
+
 ## Versioning
 
 One version for the whole repo (package, daemon, hooks, both plugins), in
