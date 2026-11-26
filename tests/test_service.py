@@ -90,6 +90,26 @@ class FakeLaunchd:
         self.fail = {}  # subcommand -> Result to return instead
         self.on_call = None
         self._next = 4320
+        self.linger = 0  # after kill/bootout, the old process outlives its lock for this many checks
+        self._dying = 0
+        self.bootout_in_progress = 0  # answer 36 (EINPROGRESS) to this many bootouts, then unload
+
+    def alive(self, pid):
+        """service.pid_alive: only the job's own process is alive."""
+        if pid is None or pid != self.pid:
+            return False
+        if self._dying:
+            self._dying -= 1
+            if not self._dying:
+                self.pid, self.last_exit = None, "0"
+            return True
+        return True
+
+    def _term(self):
+        if self.linger:
+            self._dying = self.linger  # still running for a while: print shows it, kickstart ignores it
+        else:
+            self.pid, self.last_exit = None, "0"
 
     def spawn(self):
         self._next += 1
@@ -120,13 +140,16 @@ class FakeLaunchd:
             assert args[1:] == (service.target(),)
             if not self.loaded:
                 return service.Result(3, "", "Boot-out failed: 3: No such process\n")
+            if self.bootout_in_progress:
+                self.bootout_in_progress -= 1
+                return service.Result(36, "", "Boot-out failed: 36: Operation now in progress\n")
             self.loaded, self.pid, self.last_exit = False, None, "0"
         elif cmd == "kickstart":
             if "-k" in args or self.pid is None:
                 self.spawn()
         elif cmd == "kill":
             assert args[1:] == ("SIGTERM", service.target())
-            self.pid, self.last_exit = None, "0"
+            self._term()
         return service.Result(0)
 
 
@@ -134,6 +157,7 @@ class FakeLaunchd:
 def launchd(aw_home, tmp_path, monkeypatch):
     fake = FakeLaunchd()
     monkeypatch.setattr(service, "launchctl", fake)
+    monkeypatch.setattr(service, "pid_alive", fake.alive)
     monkeypatch.setenv(service.AGENTS_DIR_ENV, str(tmp_path / "LaunchAgents"))
     return fake
 
@@ -381,8 +405,51 @@ def test_restart_terms_then_kickstarts(launchd, capsys):
     launchd.loaded = True
     launchd.spawn()
     assert cli.main(["restart"]) == 0
-    assert launchd.mutations() == [("kill", "SIGTERM", service.target()), ("kickstart", service.target())]
+    assert launchd.mutations() == [("kill", "SIGTERM", service.target()), ("kickstart", "-k", service.target())]
     assert capsys.readouterr().out.strip() == "restarted, pid 4322"
+
+
+def test_restart_waits_for_the_old_process_not_just_its_lock(launchd, capsys):
+    """The daemon releases its lock tens of ms before its process exits; a
+    kickstart in that window would hit a job that is still running."""
+    install_plist()
+    launchd.loaded = True
+    launchd.spawn()
+    old = launchd.pid
+    launchd.linger = 3
+    assert cli.main(["restart"]) == 0
+    assert launchd.pid not in (None, old)
+    assert capsys.readouterr().out.strip() == f"restarted, pid {launchd.pid}"
+
+
+def test_stop_treats_bootout_in_progress_as_stopping(launchd, capsys):
+    install_plist()
+    launchd.loaded = True
+    launchd.spawn()
+    launchd.bootout_in_progress = 1
+    assert cli.main(["stop"]) == 0
+    assert [c[0] for c in launchd.mutations()] == ["bootout", "bootout"]
+    assert not launchd.loaded
+    assert capsys.readouterr().out.startswith("stopped;")
+
+
+def test_stop_fails_if_the_job_stays_loaded(launchd, monkeypatch, capsys):
+    monkeypatch.setattr(service, "STOP_WAIT_S", 0.3)
+    install_plist()
+    launchd.loaded = True
+    launchd.spawn()
+    launchd.bootout_in_progress = 10**6
+    assert cli.main(["stop"]) == 1
+    assert "still loaded" in capsys.readouterr().err
+
+
+def test_plist_passes_model_and_claude_locations(launchd, monkeypatch):
+    monkeypatch.setenv("HF_HOME", "/Volumes/models/hf")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/Users/x/.claude-alt")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-copied")
+    env = service.build_plist("/venv/bin/python")["EnvironmentVariables"]
+    assert env["HF_HOME"] == "/Volumes/models/hf" and env["CLAUDE_CONFIG_DIR"] == "/Users/x/.claude-alt"
+    assert "ANTHROPIC_API_KEY" not in env
 
 
 def test_restart_falls_back_to_kickstart_k(launchd, capsys):
@@ -501,6 +568,50 @@ def test_already_running_exit_code(aw_home, as_service, code):
     assert p.returncode == code
     assert "another afterwordd is running" in p.stderr
     assert ("started by launchd" in p.stderr) is as_service
+
+
+@pytest.mark.parametrize("as_service", [True, False])
+def test_ui_port_in_use(aw_home, as_service):
+    """Under launchd a taken UI port must not make the daemon exit (KeepAlive
+    would relaunch it every 10 s): it keeps speaking over the socket. By
+    hand, `afterword serve` still fails with exit 1."""
+    import socket as _socket
+    import time as _time
+
+    busy = _socket.socket()
+    busy.bind(("127.0.0.1", 0))
+    busy.listen(1)
+    port = busy.getsockname()[1]
+    env = dict(os.environ, AFTERWORD_SYNTH="null", AFTERWORD_PLAYER="null")
+    env.pop("AFTERWORD_SERVICE", None)
+    if as_service:
+        env["AFTERWORD_SERVICE"] = "1"
+    p = subprocess.Popen([sys.executable, "-m", "afterword.cli", "serve", "--port", str(port)], env=env,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        if not as_service:
+            _, err = p.communicate(timeout=30)
+            assert p.returncode == 1 and "could not start" in err
+            return
+        log = aw_home / "afterwordd.log"
+        end = _time.monotonic() + 20
+        while _time.monotonic() < end:
+            assert p.poll() is None, p.communicate()
+            if log.exists() and "speaking without the UI" in log.read_text(errors="replace"):
+                break
+            _time.sleep(0.1)
+        else:
+            pytest.fail("the daemon never reported running without the UI")
+        assert p.poll() is None
+        assert service._ping_pid() == p.pid
+        p.terminate()
+        p.communicate(timeout=20)
+        assert p.returncode == 0
+    finally:
+        busy.close()
+        if p.poll() is None:
+            p.kill()
+            p.communicate()
 
 
 def test_trim_log_keeps_the_tail_in_place(tmp_path):

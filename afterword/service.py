@@ -53,6 +53,11 @@ STOP_WAIT_S = 15.0
 THROTTLE_S = 10
 SYSTEM_PATH = ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin")
 NOT_FOUND_RC = 113  # `launchctl print` of a service that is not loaded
+IN_PROGRESS_RC = 36  # `launchctl bootout` while the job is still exiting (EINPROGRESS)
+# Passed from the installing shell into the plist when set: where the models
+# were downloaded (Hugging Face honours these) and which Claude config
+# `claude -p` uses for alert phrases. Never secrets: the plist is 0644.
+PASS_ENV = ("HF_HOME", "HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "XDG_CACHE_HOME", "HF_HUB_OFFLINE", "CLAUDE_CONFIG_DIR")
 
 
 # --------------------------------------------------------------------------- #
@@ -149,6 +154,9 @@ def build_plist(python: str | None = None) -> dict[str, Any]:
         env["AFTERWORD_HOME"] = str(home)
     if os.environ.get("LANG"):
         env["LANG"] = os.environ["LANG"]  # `say` and `claude` get the same locale as from a shell
+    for key in PASS_ENV:
+        if os.environ.get(key):
+            env[key] = os.environ[key]
     log = str(home / LOG_NAME)
     return {
         "Label": LABEL,
@@ -311,12 +319,27 @@ def daemon_pid() -> tuple[bool, int | None]:
     return _lock_holder()
 
 
+def pid_alive(pid: int) -> bool:
+    """Whether process `pid` still exists (tests replace this)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def _wait_stopped(pid: int | None, timeout: float | None = None) -> bool:
-    """Wait until no daemon (or a different one) holds the socket and lock."""
+    """Wait until no daemon (or a different one) holds the socket and lock,
+    and process `pid` has exited. The daemon lets go of the lock tens of ms
+    before its process ends (asyncio teardown, interpreter exit), and
+    launchd still counts the job as running until then."""
     end = time.monotonic() + (STOP_WAIT_S if timeout is None else timeout)
     while True:
         running, now = daemon_pid()
-        if not running or (pid is not None and now is not None and now != pid):
+        released = not running or (pid is not None and now is not None and now != pid)
+        if released and (pid is None or not pid_alive(pid)):
             return True
         if time.monotonic() >= end:
             return False
@@ -369,6 +392,29 @@ def _manual_daemon(info: ServiceInfo) -> tuple[bool, int | None]:
     return False, None
 
 
+def _bootout(info: ServiceInfo) -> Result:
+    """Unload the job and wait until launchd has let go of it, so a
+    bootstrap right after does not fail with "5: Input/output error".
+    bootout may answer 36 (EINPROGRESS) while the job is still exiting:
+    that is a stop under way, not a failure."""
+    r = launchctl("bootout", target())
+    if not r.ok and r.returncode != IN_PROGRESS_RC:
+        return r
+    end = time.monotonic() + STOP_WAIT_S
+    while True:
+        now = service_info()
+        if now.loaded is False:
+            break
+        if time.monotonic() >= end:
+            return Result(1, "", f"{LABEL} is still loaded {STOP_WAIT_S:.0f} s after bootout")
+        if r.returncode == IN_PROGRESS_RC:
+            r = launchctl("bootout", target())  # as `brew services stop` does
+        time.sleep(0.1)
+    if info.pid:
+        _wait_stopped(info.pid)
+    return Result(0)
+
+
 def _bootstrap() -> int:
     r = launchctl("bootstrap", domain(), str(plist_path()))
     if not r.ok:
@@ -409,11 +455,9 @@ def install(dry_run: bool = False, start: bool = True, out=None) -> int:
         return 0
     was_loaded = bool(info.loaded)
     if was_loaded:  # reload, so launchd reads the new plist
-        r = launchctl("bootout", target())
+        r = _bootout(info)
         if not r.ok:
             return _fail(_cmd("bootout", target()), r)
-        if info.pid:
-            _wait_stopped(info.pid)
         info = service_info()
     manual, pid = _manual_daemon(info)
     if manual and not _stop_manual(pid, out):
@@ -468,10 +512,10 @@ def stop(out=None) -> int:
         note = f"; afterwordd pid {pid} is running outside launchd" if manual else ""
         print(f"not running (the service is not loaded){note}", file=out)
         return 0
-    r = launchctl("bootout", target())
+    r = _bootout(info)
     if not r.ok:
         return _fail(_cmd("bootout", target()), r)
-    if info.pid and not _wait_stopped(info.pid):
+    if info.pid and pid_alive(info.pid):
         print(f"stopped the service; pid {info.pid} is still shutting down", file=out)
         return 0
     print("stopped; it starts again at the next login, or with `afterword start`", file=out)
@@ -490,13 +534,14 @@ def restart(out=None) -> int:
         return start(out)
     # SIGTERM first so the daemon's own shutdown runs; it then exits 0,
     # which KeepAlive (SuccessfulExit = false) does not restart by itself.
+    # Then kickstart -k: once the old process is gone it simply starts a new
+    # one; if it is somehow still running (the wait timed out), -k ends it,
+    # where a plain kickstart would do nothing to a running job.
     r = launchctl("kill", "SIGTERM", target())
-    if r.ok and _wait_stopped(info.pid):
-        r = launchctl("kickstart", target())
-        args = ("kickstart", target())
-    else:
-        r = launchctl("kickstart", "-k", target())
-        args = ("kickstart", "-k", target())
+    if r.ok:
+        _wait_stopped(info.pid)
+    args = ("kickstart", "-k", target())
+    r = launchctl(*args)
     if not r.ok:
         return _fail(_cmd(*args), r)
     now = service_info()
@@ -509,11 +554,9 @@ def uninstall(out=None) -> int:
     path = plist_path()
     info = service_info()
     if info.loaded:
-        r = launchctl("bootout", target())
+        r = _bootout(info)
         if not r.ok:
             return _fail(_cmd("bootout", target()), r)
-        if info.pid:
-            _wait_stopped(info.pid)
     if not path.exists() and not info.loaded:
         print("the service is not installed", file=out)
         return 0
@@ -534,15 +577,19 @@ def trim_log(path: Path, limit: int = LOG_TRIM_OVER, keep: int = LOG_KEEP) -> bo
     O_APPEND, so its writes keep landing at the new end; renaming the file
     away would leave launchd writing to the old one. True if trimmed."""
     try:
-        size = path.stat().st_size
+        if path.stat().st_size <= limit:
+            return False
     except OSError:
         return False
-    if size <= limit or size <= keep:
-        return False
     with open(path, "r+b") as fh:
+        size = os.fstat(fh.fileno()).st_size  # the size now, not at the stat above
+        if size <= limit or size <= keep:
+            return False
         fh.seek(size - keep - 1)
         before = fh.read(1)
         tail = fh.read(keep)
+        if len(tail) < keep:  # shrank under us (another trim): leave it
+            return False
         nl = tail.find(b"\n")
         if before != b"\n" and 0 <= nl < len(tail) - 1:
             tail = tail[nl + 1:]  # drop the partial first line

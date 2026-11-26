@@ -1502,9 +1502,20 @@ async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) 
             log.info("UI at %s", daemon.http_url)
             if on_ready:
                 loop.call_later(0.3, on_ready, daemon)
-            await daemon._uvicorn.serve()
+            try:
+                await daemon._uvicorn.serve()
+            except SystemExit:  # uvicorn exits (status 3) when it cannot bind
+                pass
             if not daemon._uvicorn.started and not daemon._stop_event.is_set():
-                raise RuntimeError(f"HTTP UI could not start on 127.0.0.1:{port} (port in use?)")
+                msg = f"HTTP UI could not start on 127.0.0.1:{port} (port in use?)"
+                if os.environ.get("AFTERWORD_SERVICE") != "1":
+                    raise RuntimeError(msg)
+                # Under launchd, exiting would only bring the same failure
+                # back every ThrottleInterval. Speech works without the UI:
+                # keep serving the socket until stopped.
+                log.warning("%s; speaking without the UI until the daemon is restarted", msg)
+                daemon.http_url = None
+                await daemon._stop_event.wait()
         else:
             if on_ready:
                 on_ready(daemon)
@@ -1556,8 +1567,9 @@ def main(port: int | None = None, http: bool = True, verbose: bool = False) -> i
     home = common.ensure_home()
     as_service = os.environ.get(service.SERVICE_ENV) == "1"
     trimmed = False
-    with contextlib.suppress(OSError):
-        trimmed = service.trim_log(home / service.LOG_NAME)
+    if as_service:  # only launchd's daemon owns service.log; a manual serve leaves it alone
+        with contextlib.suppress(OSError):
+            trimmed = service.trim_log(home / service.LOG_NAME)
     # Under launchd, stderr is service.log, which never rotates: only
     # warnings and errors go there; afterwordd.log has everything.
     setup_text_logging(home, level=logging.DEBUG if verbose else logging.INFO,

@@ -141,7 +141,12 @@ uv run afterword uninstall-service
 ```
 
 `stop` unloads the agent (`launchctl bootout`), so launchd does not restart
-it; the plist stays. The daemon still logs to `~/.afterword/afterwordd.log`;
+it; the plist stays. launchd does not read your shell profile: the plist
+copies `PATH`, `LANG`, `AFTERWORD_HOME` and, when set, `HF_HOME` /
+`HF_HUB_CACHE` (where the models are) and `CLAUDE_CONFIG_DIR` from the shell
+you install from, so run `install-service` again if you change them. If the
+UI port is taken, the service keeps speaking without the UI and logs a
+warning, instead of exiting and being restarted every 10 s. The daemon still logs to `~/.afterword/afterwordd.log`;
 `~/.afterword/service.log` gets its warnings, errors and anything else it
 prints (a crash's traceback), and is cut to its last 1 MB at startup once it
 passes 5 MB.
