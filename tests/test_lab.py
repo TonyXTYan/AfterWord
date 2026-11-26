@@ -16,8 +16,8 @@ import pytest
 
 from afterword.daemon import lab as labmod
 from afterword.daemon import qwen, voices
-from afterword.daemon.config import ConfigStore, Profile, build_config
-from afterword.daemon.lab import Lab, LabError, delete_profile, write_profile
+from afterword.daemon.config import ConfigStore, build_config
+from afterword.daemon.lab import LabError, delete_profile, write_profile
 from conftest import TIME_SCALE
 
 SR = 24000
@@ -83,23 +83,6 @@ class FakeEngine(qwen.QwenEngine):
         self.models_made[kind] = model
         self.loads.append((kind, str(path)))
         return model
-
-
-@pytest.fixture
-def home(aw_home):
-    return aw_home
-
-
-@pytest.fixture
-def make_lab(home):
-    def make(engine=None, config_text=None):
-        if config_text is not None:
-            (home / "config.toml").write_text(config_text)
-        store = ConfigStore()
-        store.ensure_default_file()
-        return Lab(home, store, engine or FakeEngine(), voices.ClipStore(home / "voices"))
-
-    return make
 
 
 def wav_bytes(seconds, rate=SR, channels=1):
@@ -738,7 +721,12 @@ def test_lab_http_routes(home, monkeypatch):
 # Live (real Qwen3-TTS)                                                        #
 # --------------------------------------------------------------------------- #
 
-live = pytest.mark.skipif(os.environ.get("AFTERWORD_LIVE_QWEN") != "1", reason="set AFTERWORD_LIVE_QWEN=1")
+_live_skip = pytest.mark.skipif(os.environ.get("AFTERWORD_LIVE_QWEN") != "1", reason="set AFTERWORD_LIVE_QWEN=1")
+
+
+def live(fn):
+    """Mark a test `live` (selectable with -m live) and skip it unless opted in."""
+    return pytest.mark.live(_live_skip(fn))
 
 
 @live

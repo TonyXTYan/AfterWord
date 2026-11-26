@@ -3,7 +3,6 @@ never fails (exit 0, no stdout, bounded time) whatever it is fed."""
 
 import json
 import os
-import shutil
 import socket
 import sys
 import threading

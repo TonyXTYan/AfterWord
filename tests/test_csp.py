@@ -4,7 +4,6 @@ no inline event handlers left in the page for it to break."""
 import re
 from pathlib import Path
 
-from test_gui_api import gui  # noqa: F401  (fixture)
 
 UI = Path(__file__).resolve().parent.parent / "afterword" / "ui" / "index.html"
 

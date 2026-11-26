@@ -48,7 +48,7 @@ def spans(record, n, timeout=15):
 
 def assert_no_overlap(lines):
     lines = sorted(lines)
-    for (_s0, end0, text0), (start1, _e1, text1) in zip(lines, lines[1:]):
+    for (_s0, end0, text0), (start1, _e1, text1) in zip(lines, lines[1:], strict=False):
         assert start1 >= end0, "%r started before %r ended" % (text1, text0)
 
 

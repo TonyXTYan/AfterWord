@@ -589,14 +589,19 @@ uv run pytest -q
 ```
 
 The tests fake every model, so they need mlx-audio (the `qwen` extra) but no
-weights and none of the other extras. CI (`.github/workflows/tests.yml`) runs
-the same thing on an Apple Silicon macOS runner for every pull request and
-push to `main`.
+weights and none of the other extras. They run in parallel (pytest-xdist, four
+workers, set in `addopts`) and take about 40 seconds. To debug one test, run
+it in the foreground with `uv run pytest -n0 tests/test_hook.py -k name -s`
+(or `-p no:xdist -o addopts=""` to leave xdist out entirely). Lint with
+`uv run ruff check` (pyflakes, syntax errors and bugbear only; the hooks are
+checked against Python 3.9). CI (`.github/workflows/tests.yml`) runs ruff and
+then pytest on an Apple Silicon macOS runner for every pull request and push
+to `main`.
 
 Tests that need the real models are skipped unless you opt in:
 
 ```bash
-AFTERWORD_LIVE_QWEN=1 uv run pytest -q -k live
+AFTERWORD_LIVE_QWEN=1 uv run pytest -q -m live
 ```
 
 The hooks (`afterword/hooks/`) are stdlib-only and run on Python 3.9+, so they

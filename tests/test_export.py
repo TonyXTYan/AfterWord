@@ -1,7 +1,6 @@
 """GET /api/export and the per-voice stats of GET /api/voices."""
 import time
 
-from test_gui_api import gui, hook_msg  # noqa: F401
 
 
 def speak(d, sid, text, profile="nova", ts=None, timings=None):

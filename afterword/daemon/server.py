@@ -140,7 +140,7 @@ class _Feed:
         span's samples at its pace (gaps in real time)."""
         total = 0.0
         ends = [start for _, start in self.spans[1:]] + [len(self.clip)]
-        for (pace, start), end in zip(self.spans, ends):
+        for (pace, start), end in zip(self.spans, ends, strict=False):  # no spans: ends still holds the clip end
             n = sum(len(c) for c in self.clip[start:end])
             total += n / SAMPLE_RATE / (pace or 1.0)
         return total

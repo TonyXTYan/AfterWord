@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import math
-import os
 import secrets
 import threading
 import time

@@ -2,7 +2,6 @@ import json
 import os
 import stat
 
-import pytest
 
 from afterword import cli
 from conftest import wait_for

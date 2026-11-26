@@ -3,7 +3,6 @@ voices through the Swift helper, and the model fallback chain."""
 
 import asyncio
 import json
-import struct
 import sys
 import threading
 import time
