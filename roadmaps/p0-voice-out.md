@@ -10,7 +10,7 @@ No overlap is met. Explaining silence is mostly met. Distinct voices is opt-in o
   Add `[daemon] auto_assign = "distinct" | "off"`. On a session's first speech, if it has no voice from `AFTERWORD_VOICE`, `/afterword:voice` or the GUI, pick the least-recently-used free profile, using the same ranking as `/afterword:voice pick` (`afterword/hooks/afterword_hook.py`, `afterword/hooks/common.py` `VOICE_IN_USE_S`). Default: see decision D7.
   *Done when:* with `auto_assign = "distinct"` and at least three free profiles, three new sessions with no voice set each get a different profile, and the choice shows in Sessions with "auto" as its source.
 
-- [ ] **P0-2 Warn when two live sessions share a voice.**
+- [x] **P0-2 Warn when two live sessions share a voice.** (0.3.3)
   Today the only hint is the "used by" dots in `afterword/ui/index.html`.
   *Done when:* Sessions shows a warning on both rows when two sessions active within `VOICE_IN_USE_S` use the same profile, with a one-click "pick another" action; a `tests/test_ui_*.py` test covers it.
 
@@ -25,7 +25,7 @@ No overlap is met. Explaining silence is mostly met. Distinct voices is opt-in o
   Separate "voice off, so no tag was asked for" from "voice on, Claude replied without `<say>`". The second is a real failure.
   *Done when:* the second case gets `reason_code = "no_tag_while_on"`, shows with a warning style in the Transcript, and has its own count in "By reason".
 
-- [ ] **P0-6 Run the daemon as a service.**
+- [ ] **P0-6 Run the daemon as a service.** The service half is built in 0.3.3 (`afterword install-service`, `start`, `stop`, `restart`, `uninstall-service`, a service line in `afterword status`). Still open: `daemon_unreachable` in the Transcript and the fallback warning in Sessions, which need P0-4's `reason_code`.
   Add `afterword install-service` (writes a LaunchAgent plist for `afterword serve`) and `afterword start | stop | restart | uninstall-service`. Today the spool import in `afterword/daemon/log.py` already records "daemon down: spoken by say fallback" (or "say fallback failed", or "fallback disabled") as the reason, but only once the daemon is back, and Sessions doesn't surface it. This item keeps that text as `reason_detail` under `reason_code = daemon_unreachable` and surfaces it in Sessions. See decision D12.
   *Done when:* after `afterword install-service`, the daemon starts at login and restarts after a crash; `afterword status` reports the service state; a reply sent while the daemon was down shows `daemon_unreachable` with the existing "spoken by say fallback" detail in the Transcript once the daemon is back and imports the spool, and Sessions shows a fallback warning for that session.
 
