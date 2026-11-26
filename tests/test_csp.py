@@ -18,7 +18,9 @@ def test_page_sends_the_policy_with_a_nonce_on_every_script(gui):
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/html")
     csp = csp_of(r)
     assert csp["default-src"] == ["'none'"]
-    assert csp["connect-src"] == ["'self'"]
+    # <aw-audio> plays through Web Audio: it fetch()es its src, which is a
+    # blob: URL for the voice lab's recording preview (connect-src, not media-src).
+    assert csp["connect-src"] == ["'self'", "blob:"]
     assert csp["media-src"] == ["'self'", "blob:"]
     assert csp["img-src"] == ["'self'", "data:"]
     assert csp["style-src"] == ["'self'", "'unsafe-inline'"]

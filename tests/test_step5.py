@@ -328,7 +328,7 @@ BAD = [b"", b"not json", b"[]", b'{"session_id": 5, "prompt": ["x"]}', b'{"promp
 @pytest.mark.parametrize("stdin", BAD, ids=range(len(BAD)))
 def test_new_events_never_fail(home, event, stdin):
     proc, elapsed = run_hook(stdin, args=(event,), env={"AFTERWORD_VOICE": "nova"})
-    assert proc.returncode == 0 and proc.stderr == b"" and elapsed < 2.0
+    assert proc.returncode == 0 and proc.stderr == b"" and elapsed < 2.0 * TIME_SCALE
     if proc.stdout:
         json.loads(proc.stdout)  # anything printed is valid hook JSON
 

@@ -17,7 +17,7 @@ from afterword.daemon import alerts
 from afterword.daemon.config import DEFAULT_CONFIG_TOML, build_config
 from afterword.daemon.queue import PlaybackQueue, QueueItem
 from afterword.hooks import alerting, common
-from conftest import hook_log, run_hook, stop_payload, wait_for, SYSTEM_PYTHON, needs_system_python
+from conftest import TIME_SCALE, hook_log, run_hook, stop_payload, wait_for, SYSTEM_PYTHON, needs_system_python
 
 H = {"X-AfterWord": "1"}
 
@@ -456,7 +456,7 @@ BAD = [b"", b"not json", b"[]", b'{"session_id": 5, "tool_name": ["x"], "tool_in
 @pytest.mark.parametrize("stdin", BAD, ids=range(len(BAD)))
 def test_alert_hooks_never_fail(home, say_stub, event, stdin):
     proc, elapsed = run_hook(stdin, args=(event,))
-    assert proc.returncode == 0 and proc.stdout == b"" and proc.stderr == b"" and elapsed < 3.0
+    assert proc.returncode == 0 and proc.stdout == b"" and proc.stderr == b"" and elapsed < 3.0 * TIME_SCALE
 
 
 @pytest.mark.parametrize("event", ["permission-request", "notification"])

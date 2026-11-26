@@ -44,7 +44,7 @@ SSE_HEARTBEAT_S = 15.0
 # fetch and EventSource (connect-src), clips from /clips (media-src), blob:
 # URLs for the voice lab's recording, data: images and fonts.
 PAGE_CSP = (
-    "default-src 'none'; script-src 'nonce-{nonce}'; connect-src 'self'; img-src 'self' data:; "
+    "default-src 'none'; script-src 'nonce-{nonce}'; connect-src 'self' blob:; img-src 'self' data:; "
     "media-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; base-uri 'none'; "
     "form-action 'none'; object-src 'none'; frame-ancestors 'none'"
 )

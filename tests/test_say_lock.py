@@ -15,7 +15,7 @@ import pytest
 
 from afterword import cli
 from afterword.hooks import afterword_hook
-from conftest import HOOK, SYSTEM_PYTHON, hook_log, require_system_python, run_hook, stop_payload, wait_for
+from conftest import HOOK, SYSTEM_PYTHON, TIME_SCALE, hook_log, require_system_python, run_hook, stop_payload, wait_for
 
 SPEAK_S = 0.4
 
@@ -37,7 +37,7 @@ def timed_say(tmp_path, monkeypatch):
     return record
 
 
-def spans(record, n, timeout=15):
+def spans(record, n, timeout=15 * TIME_SCALE):
     def got():
         if not record.exists():
             return None
@@ -75,7 +75,7 @@ def test_parallel_stops_with_the_daemon_down_do_not_overlap(aw_home, timed_say, 
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
         procs.append((p, payload))
     for p, payload in procs:
-        p.communicate(payload.encode(), timeout=15)
+        p.communicate(payload.encode(), timeout=15 * TIME_SCALE)
     lines = spans(timed_say, 3)
     assert sorted(text.strip() for _s, _e, text in lines) == ["line 0", "line 1", "line 2"]
     assert_no_overlap(lines)
