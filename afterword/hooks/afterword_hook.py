@@ -431,9 +431,60 @@ def _spawn_detached(argv: list, data: bytes) -> None:
 # is retried with the system voice. A `say` killed by a signal (`killall
 # say`) ends the whole run, and one that runs past its time limit (generous:
 # about 3x the time the text takes to speak) is not retried.
+#
+# One line at a time: before its first part the runner takes an exclusive
+# flock on <home>/say.lock and holds it until its last part is done, so
+# parallel Stops (and alerts) with the daemon down speak one after another,
+# not over each other. A runner that waited SAY_LOCK_WAIT_S for the lock
+# drops its line (stale by then) and logs that to hook.log. A lock file that
+# cannot be opened or locked never silences a line: it is spoken anyway.
+# The daemon does not take this lock, so a fallback line started while the
+# daemon was down can overlap the daemon's first line once it is back.
+#
+# stdin: {"jobs": [...], "lock": path, "wait": s, "hooks": dir}, or a bare
+# list of jobs (no lock).
 _SAY_RUNNER = r"""
-import json, subprocess, sys
-for job in json.loads(sys.stdin.read()):
+import fcntl, json, os, signal, stat, subprocess, sys, time
+req = json.loads(sys.stdin.read())
+if isinstance(req, list):
+    req = {"jobs": req}
+jobs = req["jobs"]
+lock = req.get("lock")
+class Late(Exception):
+    pass
+def late(*_args):
+    raise Late()
+if lock:
+    t0 = time.time()
+    fd = None
+    try:
+        os.makedirs(os.path.dirname(lock), 0o700, exist_ok=True)
+        fd = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            fd = None
+    except OSError:
+        fd = None
+    if fd is not None:
+        signal.signal(signal.SIGALRM, late)
+        try:
+            signal.setitimer(signal.ITIMER_REAL, max(0.01, float(req.get("wait") or 60)))
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            signal.setitimer(signal.ITIMER_REAL, 0)
+        except Late:
+            try:
+                sys.path.insert(0, req["hooks"])
+                import common
+                common.append_jsonl(common.hook_log_path(), {
+                    "ts": time.time(), "pid": os.getpid(), "level": "warn",
+                    "msg": "say fallback dropped: waited too long for say.lock",
+                    "waited_s": round(time.time() - t0, 1), "parts": len(jobs),
+                    "chars": sum(len(j["text"]) for j in jobs)}, common.HOOK_LOG_MAX_BYTES, rotate=True)
+            except Exception:
+                pass
+            sys.exit(0)
+        except OSError:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+for job in jobs:
     data = job["text"].encode("utf-8", "replace")
     limit = job.get("limit") or 60 + 0.2 * len(job["text"])
     for argv in job["argvs"]:
@@ -450,12 +501,15 @@ for job in json.loads(sys.stdin.read()):
             break
 """
 
+SAY_LOCK_NAME = "say.lock"  # in <home>; `afterword test` takes it too
+SAY_LOCK_WAIT_S = 60.0
+
 
 def _say_fallback(parts: list) -> None:
-    """Speak [(text, macOS voice or None)] with `say`, in order, detached.
-    Text goes over stdin so a leading '-' can never be read as an option;
-    `say`'s embedded [[commands]] are stripped first. One part without a
-    voice runs `say` directly; anything else goes through _SAY_RUNNER."""
+    """Speak [(text, macOS voice or None)] with `say`, in order, detached,
+    always through _SAY_RUNNER (which waits its turn on say.lock). Text goes
+    over stdin so a leading '-' can never be read as an option; `say`'s
+    embedded [[commands]] are stripped first."""
     import json
     import shutil
     import tags
@@ -470,13 +524,11 @@ def _say_fallback(parts: list) -> None:
         jobs.append({"argvs": argvs, "text": text})
     if not jobs:
         return
-    if len(jobs) == 1 and len(jobs[0]["argvs"]) == 1:
-        _spawn_detached(base, jobs[0]["text"].encode("utf-8", "replace"))
-        return
     if not base or shutil.which(base[0]) is None:
         raise FileNotFoundError("say command not found: %r" % (base[:1],))
+    request = {"jobs": jobs, "lock": str(_common.home() / SAY_LOCK_NAME), "wait": SAY_LOCK_WAIT_S, "hooks": _HERE}
     python = sys.executable or "/usr/bin/python3"
-    _spawn_detached([python, "-I", "-c", _SAY_RUNNER], json.dumps(jobs).encode("utf-8", "replace"))
+    _spawn_detached([python, "-I", "-c", _SAY_RUNNER], json.dumps(request).encode("utf-8", "replace"))
 
 
 def _lang_code(value: object):

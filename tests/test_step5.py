@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import TIME_SCALE, ROOT, hook_log, run_hook, stop_payload, wait_for
+from conftest import TIME_SCALE, ROOT, hook_log, run_hook, stop_payload, wait_for, SYSTEM_PYTHON, needs_system_python, require_system_python
 
 CONFIG = """
 [profiles.nova]
@@ -351,10 +351,9 @@ def test_prompt_hook_with_corrupt_config_and_closed_stdout(home):
     assert proc.returncode == 0
 
 
-SYSTEM_PYTHON = "/usr/bin/python3"
 
 
-@pytest.mark.skipif(not os.path.exists(SYSTEM_PYTHON), reason="no system python3")
+@needs_system_python
 def test_prompt_hook_on_system_python(home):
     proc, _ = run_hook({"session_id": "s9", "prompt": "/afterword:voice nova"}, args=("user-prompt-submit",),
                        python=SYSTEM_PYTHON)
@@ -589,8 +588,7 @@ def test_dotted_profile_names_on_system_python(home):
     import tomllib  # noqa: F401  (3.12 test runner)
 
     (home / "config.toml").write_text('[profiles."nova.v2"]\nvoice = "builtin:Serena"\n[profiles.plain]\nvoice = "builtin:Ryan"\n')
-    if not os.path.exists(SYSTEM_PYTHON):
-        pytest.skip("no system python3")
+    require_system_python()
     proc, _ = run_hook({"session_id": "d1", "prompt": "/afterword:voice nova.v2"}, args=("user-prompt-submit",),
                        python=SYSTEM_PYTHON)
     assert "profile nova.v2" in proc.stdout.decode()

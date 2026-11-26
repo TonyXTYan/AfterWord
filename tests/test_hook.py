@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import TIME_SCALE, HOOK, hook_log, run_hook, stop_payload, wait_for
+from conftest import TIME_SCALE, HOOK, hook_log, run_hook, stop_payload, wait_for, SYSTEM_PYTHON, needs_system_python
 
 # The hook must not wait on a slow daemon or a FIFO (which would take 3 s or
 # forever): 1 s locally, scaled on CI but kept well below that.
@@ -658,10 +658,9 @@ def test_in_process_errors_are_swallowed(aw_home, monkeypatch, capsys):
     assert capsys.readouterr().out == ""
 
 
-SYSTEM_PYTHON = "/usr/bin/python3"
 
 
-@pytest.mark.skipif(not os.path.exists(SYSTEM_PYTHON), reason="no system python3")
+@needs_system_python
 def test_runs_on_system_python(aw_home, say_stub):
     """Hooks are stdlib-only and must work on macOS's stock python3 (3.9)."""
     proc, elapsed = run_hook(
@@ -672,7 +671,7 @@ def test_runs_on_system_python(aw_home, say_stub):
     assert hook_log(aw_home)[-1]["decision"] == "speak"
 
 
-@pytest.mark.skipif(not os.path.exists(SYSTEM_PYTHON), reason="no system python3")
+@needs_system_python
 def test_system_python_reads_config(aw_home, say_stub):
     """Without tomllib (3.9/3.10) the hook still honours fallback = "none"
     and max_chars via its small TOML reader."""

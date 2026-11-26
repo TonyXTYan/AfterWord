@@ -12,9 +12,9 @@ from pathlib import Path
 import pytest
 
 from afterword.hooks import tags
-from conftest import TIME_SCALE, HOOK, hook_log, run_hook, stop_payload, wait_for
+from conftest import TIME_SCALE, HOOK, hook_log, run_hook, stop_payload, wait_for, SYSTEM_PYTHON, needs_system_python
 from test_daemon import RunningDaemon
-from test_hook import SYSTEM_PYTHON, FakeDaemon, assert_clean_exit
+from test_hook import FakeDaemon, assert_clean_exit
 
 from afterword.hooks import earlysay
 
@@ -583,7 +583,7 @@ def test_held_lock_does_not_block_the_hook(aw_home):
     assert any(r.get("reason") == "stream file busy" for r in hook_log(aw_home))
 
 
-@pytest.mark.skipif(not os.path.exists(SYSTEM_PYTHON), reason="no system python3")
+@needs_system_python
 def test_message_display_runs_on_system_python(aw_home, daemon):
     voice_on(aw_home)
     md(0, "Hi.\n", python=SYSTEM_PYTHON)

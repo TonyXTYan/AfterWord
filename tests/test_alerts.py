@@ -18,9 +18,8 @@ from afterword.daemon import alerts
 from afterword.daemon.config import DEFAULT_CONFIG_TOML, build_config
 from afterword.daemon.queue import PlaybackQueue, QueueItem
 from afterword.hooks import alerting, common
-from conftest import hook_log, run_hook, stop_payload, wait_for
+from conftest import hook_log, run_hook, stop_payload, wait_for, SYSTEM_PYTHON, needs_system_python
 
-SYSTEM_PYTHON = "/usr/bin/python3"
 H = {"X-AfterWord": "1"}
 
 CONFIG = """
@@ -470,7 +469,7 @@ def test_alert_hooks_never_fail_with_corrupt_state_and_config(home, say_stub, ev
     assert proc.returncode == 0 and proc.stdout == b""
 
 
-@pytest.mark.skipif(not os.path.exists(SYSTEM_PYTHON), reason="no system python3")
+@needs_system_python
 def test_alert_hooks_on_system_python(home, say_stub):
     """Python 3.9 reads [alerts] with the mini parser (events: the defaults)."""
     proc, _ = run_hook(perm(), args=("permission-request",), python=SYSTEM_PYTHON)
@@ -1056,7 +1055,7 @@ def test_mini_toml_arrays_match_tomllib():
     assert mini == {}  # unreadable: left out (d swallows the broken line after it)
 
 
-@pytest.mark.skipif(not os.path.exists(SYSTEM_PYTHON), reason="no system python3")
+@needs_system_python
 def test_system_python_fallback_honours_the_events_setting(home, say_stub):
     """Review finding: Python 3.9 could not read `events`, so the `say`
     fallback spoke "done" although the user had turned it off."""

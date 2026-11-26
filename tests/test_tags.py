@@ -137,7 +137,7 @@ def test_nested_say_keeps_only_the_outer_block():
 def test_to_dict_previews_long_blocks():
     from afterword.hooks import tags
 
-    long = "word " * 2000
+    long = "word " * 1500  # under MAX_SAY_CHARS, so nothing is cut
     d = parse("<say>%s</say><say>%s</say>" % (long, long)).to_dict()
     assert all(len(s["text"]) == tags.SEGMENT_PREVIEW for s in d["segments"])
     assert d["segments"][0]["chars"] == len(long.strip())
@@ -357,9 +357,11 @@ def test_unmatched_backtick_does_not_cross_paragraphs():
 def test_blank_line_flood_is_linear():
     import time
 
-    for body in ("\n" * 60000, " \n" * 60000):
+    # Within MAX_MESSAGE_CHARS; the block is cut to MAX_SAY_CHARS, so the
+    # word goes first.
+    for body in ("\n" * 60000, " \n" * 30000):
         t = time.time()
-        assert parse("<say>" + body + "x</say>").say.text == "x"
+        assert parse("<say>x" + body + "</say>").say.text == "x"
         assert time.time() - t < 1.0
 
 
@@ -384,3 +386,100 @@ def test_say_embedded_commands_are_stripped():
     r = parse("<say>Done. [[slnc 3600000]] [[inpt PHON]] ok [[ rate 50 ]]</say>")
     assert r.say.text == "Done. ok"
     assert "[[" not in clean_text("a [[ b") and "]]" not in clean_text("a ]] b")
+
+
+# --------------------------------------------------------------------------- #
+# Size caps: a crafted reply cannot burn the hook's deadline                  #
+# --------------------------------------------------------------------------- #
+
+PATHOLOGICAL_BLOCKS = {
+    "emphasis": "**a " * 3000,
+    "underline": "__a~~b " * 2000,
+    "link text": "[" * 12000,
+    "link target": "[a](" * 3000,
+    "mixed": "**[*`<b " * 1500,
+    "single stars": "*a " * 4000,
+    "tags": "<b " * 4000,
+    "entities": "&#x" * 4000,
+}
+
+
+@pytest.mark.parametrize("name", sorted(PATHOLOGICAL_BLOCKS))
+def test_pathological_blocks_parse_fast(name):
+    import time
+
+    from conftest import TIME_SCALE
+
+    body = PATHOLOGICAL_BLOCKS[name]
+    # As many full blocks as fit in the message cap, then a 16 MB tail.
+    block = "<say>%s</say>\n\n" % body
+    msg = block * (tags.MAX_MESSAGE_CHARS // len(block)) + body * (16 * 1024 * 1024 // len(body))
+    t = time.perf_counter()
+    r = parse(msg)
+    elapsed = time.perf_counter() - t
+    assert elapsed < 0.2 * TIME_SCALE, "%s: %.0f ms" % (name, elapsed * 1000)
+    assert 1 <= len(r.says) <= tags.MAX_SAYS
+
+
+def test_deeply_nested_says_parse_fast():
+    import time
+
+    from conftest import TIME_SCALE
+
+    for msg in ("<say>" * 6000 + "x" + "</say>" * 6000,
+                ("<say>" + "y" * 50) * 1000 + "</say>" * 1000,
+                "<say>a</say>" * 5000):
+        t = time.perf_counter()
+        r = parse(msg)
+        assert time.perf_counter() - t < 0.2 * TIME_SCALE
+        assert 1 <= len(r.says) <= tags.MAX_SAYS
+
+
+def test_nesting_is_resolved_before_cleaning():
+    r = parse("<say>outer <say>inner</say> end</say><say>two</say>")
+    assert [t.text for t in r.says] == ["outer inner end", "two"]
+    assert "say: 1 nested tag(s) ignored" in r.warnings
+    # Extra blocks are counted, not cleaned.
+    r = parse("<say>a</say>" * 7)
+    assert len(r.says) == tags.MAX_SAYS
+    assert "say: 3 extra tag(s) dropped (at most 4 per reply)" in r.warnings
+    # An empty outer block does not use up a place.
+    r = parse("<say> </say>" + "<say>b</say>" * 4)
+    assert [t.text for t in r.says] == ["b"] * 4
+
+
+def test_message_is_cut_at_the_cap():
+    head = "<say>first</say>"
+    filler = "x" * (tags.MAX_MESSAGE_CHARS - len(head) - 5)
+    r = parse(head + filler + "<say>past the cap</say>")
+    assert [t.text for t in r.says] == ["first"]
+    assert any("rest is ignored" in w for w in r.warnings)
+    # A block straddling the cap is unclosed (early speaking keeps waiting).
+    assert r.open_says == [len(head) + len(filler)]
+    # Positions are those of the original message.
+    assert r.says[0].start == 0 and r.says[0].raw == head
+
+
+def test_say_block_is_cut_before_cleaning():
+    r = parse("<say>%s</say>" % ("word " * 4000))
+    assert len(r.says[0].text) <= tags.MAX_SAY_CHARS
+    assert any("cut" in w for w in r.warnings)
+
+
+def test_hook_with_a_huge_crafted_reply_stays_fast(aw_home, say_stub):
+    from conftest import TIME_SCALE, hook_log, run_hook, stop_payload, wait_for
+
+    msg = '<voice set="nova"/><say>Still heard.</say>' + ("<say>" + "**[a](" * 2000 + "</say>") * 3
+    msg += ("<say>" * 50 + "**a [" * 1000) * 40
+    proc, _ = run_hook(stop_payload(msg))
+    assert proc.returncode == 0 and proc.stderr == b""
+    row = hook_log(aw_home)[-1]
+    assert row["decision"] == "speak" and row["elapsed_ms"] < 500 * TIME_SCALE
+    assert wait_for(lambda: say_stub.exists() and "Still heard." in say_stub.read_text())
+
+
+def test_emphasis_and_links_are_bounded():
+    assert clean_text("**%s**" % ("a" * 300)) == "a" * 300
+    assert clean_text("**%s**" % ("a" * 301)) == "**%s**" % ("a" * 301)  # too long to be emphasis
+    assert clean_text("[%s](u)" % ("t" * 300)) == "t" * 300
+    assert clean_text("see [docs](%s)" % ("u" * 1000)) == "see docs"

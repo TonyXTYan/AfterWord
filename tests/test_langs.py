@@ -19,8 +19,8 @@ from afterword.daemon.synth import NullSynth, StreamResult
 from afterword.hooks import scriptsplit, tags
 from afterword.hooks.scriptsplit import split
 
-from conftest import HOOK, hook_log, run_hook, stop_payload, wait_for
-from test_hook import SYSTEM_PYTHON, FakeDaemon, assert_clean_exit
+from conftest import HOOK, hook_log, run_hook, stop_payload, wait_for, SYSTEM_PYTHON, needs_system_python, require_system_python
+from test_hook import FakeDaemon, assert_clean_exit
 from test_stream import make_daemon, read_wav
 
 SR = SAMPLE_RATE
@@ -138,7 +138,7 @@ def test_split_caps_the_number_of_parts():
     assert parts[-1][1].endswith("第19句。")
 
 
-@pytest.mark.skipif(not os.path.exists(SYSTEM_PYTHON), reason="no system python3")
+@needs_system_python
 def test_splitter_runs_on_system_python():
     code = "import sys; sys.path.insert(0, %r); import scriptsplit; print(scriptsplit.split(%r, 'en'))" % (
         str(HOOK.parent), MIXED)
@@ -591,8 +591,8 @@ def _said(record, n):
 
 @pytest.mark.parametrize("python", [None, SYSTEM_PYTHON])
 def test_say_fallback_speaks_each_part_in_order_with_its_say_voice(aw_home, tmp_path, monkeypatch, python):
-    if python and not os.path.exists(python):
-        pytest.skip("no system python3")
+    if python:
+        require_system_python()
     record = _argv_stub(tmp_path, monkeypatch)
     (aw_home / "config.toml").write_text(TUTOR)
     msg = '<voice set="tutor"/><say>%s</say><say lang="ja">はい。</say>' % MIXED
@@ -686,8 +686,8 @@ langs.ja.say_voice = "Kyoko"
 
 @pytest.mark.parametrize("python", [None, SYSTEM_PYTHON])
 def test_hook_reads_inline_and_dotted_langs(aw_home, tmp_path, monkeypatch, python):
-    if python and not os.path.exists(python):
-        pytest.skip("no system python3")
+    if python:
+        require_system_python()
     from afterword.hooks import common
 
     (aw_home / "config.toml").write_text(INLINE_LANGS)
@@ -724,8 +724,8 @@ def test_say_fallback_without_voices_speaks_every_say_in_order(aw_home, say_stub
 
 @pytest.mark.parametrize("python", [None, SYSTEM_PYTHON])
 def test_prompt_note_lists_languages_for_a_profile_with_langs(aw_home, python):
-    if python and not os.path.exists(python):
-        pytest.skip("no system python3")
+    if python:
+        require_system_python()
     from afterword.hooks import common
 
     (aw_home / "config.toml").write_text(TUTOR + '\n[profiles."x.y"]\nvoice = "builtin:Ryan"\n'

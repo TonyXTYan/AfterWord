@@ -5,7 +5,6 @@ stdlib-only on the oldest supported Python, every write route is guarded,
 and every hook event survives type-confused payloads in a "busy" home."""
 
 import json
-import os
 import subprocess
 import sys
 import time
@@ -15,10 +14,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from conftest import ROOT, run_hook
+from conftest import ROOT, run_hook, SYSTEM_PYTHON, needs_system_python, require_system_python
 
 HOOKS_DIR = ROOT / "afterword" / "hooks"
-SYSTEM_PYTHON = "/usr/bin/python3"
 EVENT_ARGS = ("session-start", "user-prompt-submit", "message-display", "stop", "permission-request", "notification")
 
 
@@ -77,7 +75,7 @@ def test_fresh_home_default_config_loads_clean_on_both_sides(aw_home):
     assert common.profile_max_chars(mini, "nova") == cfg.profile("nova").max_chars
 
 
-@pytest.mark.skipif(not os.path.exists(SYSTEM_PYTHON), reason="no system python3")
+@needs_system_python
 def test_system_python_reads_the_default_config_like_tomllib(aw_home):
     from afterword.daemon import config
 
@@ -101,15 +99,10 @@ def _hook_modules():
     return sorted(p.stem for p in HOOKS_DIR.glob("*.py") if p.stem != "__init__")
 
 
-def _pythons():
-    found = [sys.executable]
-    if os.path.exists(SYSTEM_PYTHON):
-        found.append(SYSTEM_PYTHON)
-    return found
-
-
-@pytest.mark.parametrize("python", _pythons())
+@pytest.mark.parametrize("python", [sys.executable, SYSTEM_PYTHON])
 def test_every_hook_module_imports_without_site_packages(python):
+    if python == SYSTEM_PYTHON:
+        require_system_python()
     mods = _hook_modules()
     assert {"afterword_hook", "alerting", "common", "earlysay", "pronounce", "scriptsplit", "tags"} <= set(mods)
     code = "import sys; sys.path.insert(0, %r)\n" % str(HOOKS_DIR)
@@ -117,6 +110,33 @@ def test_every_hook_module_imports_without_site_packages(python):
     code += "print(sys.version_info[:2] >= (3, 9))"
     out = subprocess.run([python, "-S", "-I", "-c", code], capture_output=True, text=True, timeout=30)
     assert out.returncode == 0 and out.stdout.strip() == "True", out.stderr
+
+
+def test_missing_system_python_fails_on_ci(monkeypatch):
+    import conftest
+
+    monkeypatch.setattr(conftest, "SYSTEM_PYTHON", "/nonexistent/python3")
+    monkeypatch.setenv("CI", "true")
+    with pytest.raises(pytest.fail.Exception):
+        conftest.require_system_python()
+    monkeypatch.delenv("CI")
+    with pytest.raises(pytest.skip.Exception):
+        conftest.require_system_python()
+
+
+def test_every_hook_file_is_python_3_9_syntax():
+    """Static check that runs even where /usr/bin/python3 is missing: no
+    match statements, parenthesised context managers or other 3.10+ syntax
+    in any file the hook can load (including the say runner's source)."""
+    import ast
+
+    from afterword.hooks import afterword_hook
+
+    files = sorted(HOOKS_DIR.glob("*.py"))
+    assert len(files) >= 8
+    for path in files:
+        ast.parse(path.read_text(encoding="utf-8"), filename=str(path), feature_version=(3, 9))
+    ast.parse(afterword_hook._SAY_RUNNER, filename="_SAY_RUNNER", feature_version=(3, 9))
 
 
 # --------------------------------------------------------------------------- #

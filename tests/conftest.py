@@ -15,6 +15,32 @@ ROOT = Path(__file__).resolve().parent.parent
 TIME_SCALE = float(os.environ.get("AFTERWORD_TEST_TIME_SCALE") or (3.0 if os.environ.get("CI") else 1.0))
 HOOK = ROOT / "afterword" / "hooks" / "afterword_hook.py"
 
+# macOS's stock python3 (3.9), which runs the hooks for most users.
+SYSTEM_PYTHON = "/usr/bin/python3"
+
+
+def require_system_python():
+    """Skip a test that needs SYSTEM_PYTHON when it is missing, except on CI
+    (CI set), where that fails: the 3.9 checks must not quietly stop running."""
+    if os.path.exists(SYSTEM_PYTHON):
+        return SYSTEM_PYTHON
+    if os.environ.get("CI"):
+        pytest.fail("%s is missing on CI; the Python 3.9 hook tests cannot run" % SYSTEM_PYTHON)
+    pytest.skip("no system python3")
+
+
+# Marks a test that runs SYSTEM_PYTHON (see require_system_python).
+needs_system_python = pytest.mark.system_python
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "system_python: runs the hook code on /usr/bin/python3")
+
+
+def pytest_runtest_setup(item):
+    if item.get_closest_marker("system_python") is not None:
+        require_system_python()
+
 
 @pytest.fixture(autouse=True)
 def no_launchd(monkeypatch):
