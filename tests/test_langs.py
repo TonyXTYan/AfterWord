@@ -18,7 +18,7 @@ from afterword.daemon.synth import NullSynth, StreamResult
 from afterword.hooks import scriptsplit, tags
 from afterword.hooks.scriptsplit import split
 
-from conftest import HOOK, hook_log, run_hook, stop_payload, wait_for, SYSTEM_PYTHON, needs_system_python, require_system_python
+from conftest import HOOK, TIME_SCALE, hook_log, run_hook, stop_payload, wait_for, SYSTEM_PYTHON, needs_system_python, require_system_python
 from test_hook import FakeDaemon, assert_clean_exit
 from test_stream import make_daemon, read_wav
 
@@ -654,7 +654,7 @@ def test_say_runner_does_not_retry_a_part_that_ran_out_of_time(tmp_path):
     t0 = time.time()
     proc = _run_runner([{"argvs": [base + ["-v", "X"], base], "text": "one", "limit": 0.5},
                         {"argvs": [base], "text": "two", "limit": 0.5}])
-    assert proc.returncode == 0 and time.time() - t0 < 4
+    assert proc.returncode == 0 and time.time() - t0 < 4 * TIME_SCALE
     lines = [json.loads(x) for x in record.read_text().splitlines()]
     assert lines == [[["-v", "X"], "one"], [[], "two"]]  # no restart of "one" in the system voice
 

@@ -14,7 +14,7 @@ import pytest
 
 from afterword.daemon.log import EventLog, EventLogError, _import_record, ingest_spool
 from afterword.hooks import common
-from conftest import run_hook, stop_payload, wait_for
+from conftest import SYSTEM_PYTHON, TIME_SCALE, needs_system_python, run_hook, stop_payload, wait_for
 
 SECRET = "hunter2-private-words"
 
@@ -89,7 +89,7 @@ def test_a_locked_database_fails_clearly_and_is_left_alone(tmp_path):
         t = time.monotonic()
         with pytest.raises(EventLogError, match="locked.*left as it is"):
             EventLog(db)
-        assert time.monotonic() - t < 10
+        assert time.monotonic() - t < 10 * TIME_SCALE
     finally:
         other.execute("ROLLBACK")
         other.close()
@@ -166,14 +166,63 @@ def test_projection_is_idempotent_and_reads_old_caps():
     assert common.project_payload(None) is None and common.project_payload(["x"]) is None
 
 
-@pytest.mark.skipif(not Path("/usr/bin/python3").exists(), reason="no stock python3")
+def _wide_payload(size, rng):
+    """`size` fields of every kind project_payload handles, in a random order."""
+    kinds = [
+        lambda i: ("n%d" % i, rng.choice([i, 1.5, True, None])),
+        lambda i: ("s%d" % i, "text " * rng.randrange(4)),
+        lambda i: ("l%d" % i, [1, "two"]),
+        lambda i: ("d%d" % i, {"a": 1}),
+        lambda i: ("s%d_len" % i, i),  # collides with a projected "s<i>"
+        lambda i: (rng.choice(sorted(common.PAYLOAD_KEEP)), "kept " * 3),
+        lambda i: ("transcript_path", "/p/%d.jsonl" % i),
+        lambda i: ("k" * rng.choice([59, 60, 64, 65]), "x"),
+        lambda i: (rng.choice(common.PAYLOAD_KEYS_OF), {"z%d" % j: j for j in range(rng.randrange(60))}),
+        lambda i: (rng.choice(common.PAYLOAD_KEYS_OF) + "_keys", ["c", 3, "a" * 70] * 20),
+    ]
+    out = {}
+    i = 0
+    while len(out) < size:
+        key, value = rng.choice(kinds)(i)
+        out[key] = value
+        i += 1
+    return out
+
+
+@pytest.mark.parametrize("size", range(95, 106))
+def test_projection_is_idempotent_at_the_field_cap(size):
+    """98 scalars plus tool_input and tool_response once projected to 102
+    fields, and the second pass (the daemon's) dropped the last two."""
+    import random
+
+    tail = {"tool_input": {"command": "ls"}, "tool_response": {"stdout": "x"}}
+    edge = {"f%d" % i: i for i in range(size - 2)}
+    edge.update(tail)
+    cases = [edge, dict(list(tail.items()) + list(edge.items()))]
+    rng = random.Random(size)
+    cases += [_wide_payload(size, rng) for _ in range(40)]
+    for d in cases:
+        once = common.project_payload(d)
+        assert len(once) <= common.PAYLOAD_FIELDS
+        twice = common.project_payload(once)
+        assert twice == once, sorted(set(once) ^ set(twice))
+    if size <= 100:  # nothing within the cap is lost
+        assert all(k in common.project_payload(edge) for k in edge if k.startswith("f"))
+
+
+@needs_system_python
 def test_projection_runs_on_the_hooks_python():
     code = ("import json, sys; sys.path.insert(0, %r); import common; "
-            "print(json.dumps(common.project_payload({'prompt': 'abc', 'session_id': 's'})))"
+            "print(json.dumps(common.project_payload({'prompt': 'abc', 'session_id': 's'})));"
+            "d = dict(('f%%d' %% i, i) for i in range(98)); d['tool_input'] = {'a': 1}; d['tool_response'] = {'b': 2};"
+            "p = common.project_payload(d); print(json.dumps([len(p), common.project_payload(p) == p]))"
             % str(Path(common.__file__).parent))
-    out = subprocess.run(["/usr/bin/python3", "-S", "-I", "-c", code], capture_output=True, text=True, timeout=20)
+    out = subprocess.run([SYSTEM_PYTHON, "-S", "-I", "-c", code], capture_output=True, text=True,
+                         timeout=20 * TIME_SCALE)
     assert out.returncode == 0, out.stderr
-    assert json.loads(out.stdout) == {"prompt_len": 3, "session_id": "s"}
+    first, second = out.stdout.splitlines()
+    assert json.loads(first) == {"prompt_len": 3, "session_id": "s"}
+    assert json.loads(second) == [100, True]
 
 
 # --------------------------------------------------------------------------- #

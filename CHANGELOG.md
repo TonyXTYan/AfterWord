@@ -42,10 +42,13 @@ Hardening, from an audit of the repo.
 
 - Speech keeps going when something inside the daemon fails: a failed event
   log write no longer ends the playback worker, and the worker, spool,
-  retention and warm-up tasks are restarted with backoff if they stop.
+  retention and warm-up tasks are restarted with backoff if they stop (one
+  that fails 8 times in a row, each within 2 minutes of starting, is given up
+  on until the daemon restarts).
 - Playback has a time limit (the clip's length plus 10 s): a stuck audio
   device or afplay is stopped, the line is marked "playback timed out", and
-  the next lines use afplay until the device recovers.
+  the next lines use afplay until the device recovers. A skipped or stopped
+  line waits only those 10 s for a stuck device, not its whole length.
 - Crashes leave a trace: native crash stacks go to `service.log`, and a
   daemon that did not shut down cleanly is noted in the event log at the
   next start.

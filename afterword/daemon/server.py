@@ -79,6 +79,9 @@ class Segment:
         return clamp_pace(self.attrs.get("pace") or self.profile.pace or 1.0)
 
 
+STREAM_WAIT_TICK_S = 0.1  # how often a stream's end wait looks for a skip
+
+
 class _DeviceGone(RenderCancelled):
     """The audio device failed or stalled after audio was heard: stop the
     render (nobody would hear the rest)."""
@@ -1042,6 +1045,26 @@ class Daemon:
             merge_timings={"first_audio_ms": round((playback.first_audio_at - origin) * 1000, 1)},
         )
 
+    @staticmethod
+    async def _wait_stream_done(done: asyncio.Event, cancel: threading.Event, feed: _Feed,
+                                aborted: bool) -> float | None:
+        """Wait for a stream to end: within the clip's length, or only the
+        slack (play_timeout_s(0)) once it is aborted, here or by a skip or
+        stop during the wait. Returns the bound it gave up at, else None."""
+        loop = asyncio.get_running_loop()
+        bound = play_timeout_s(0.0 if aborted else feed.play_seconds())
+        start = loop.time()
+        while not done.is_set():
+            if not aborted and cancel.is_set():  # skipped or stopped while it played
+                aborted = True
+                bound = min(bound, loop.time() - start + play_timeout_s(0.0))
+            left = start + bound - loop.time()
+            if left <= 0:
+                return bound
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(done.wait(), min(left, STREAM_WAIT_TICK_S))
+        return None
+
     async def _play_streaming(self, item: QueueItem, cfg, segments: list[Segment]) -> bool:
         """Render the segments chunk by chunk into one audio stream. Returns
         False (nothing done) when the device cannot be opened, so the caller
@@ -1079,6 +1102,7 @@ class Daemon:
         notes: list[str] = []
         failure: Exception | None = None
         timed_out: float | None = None
+        device_gone = False
         try:
             for i, seg in enumerate(segments):
                 if cancel.is_set():
@@ -1087,6 +1111,7 @@ class Daemon:
                 try:
                     res, note = await asyncio.to_thread(self._stream_segment, seg, feed, cancel)
                 except RenderCancelled as exc:
+                    device_gone = isinstance(exc, _DeviceGone)
                     part = partial_result(exc)
                     if part is not None:
                         rendered.append(part)
@@ -1107,18 +1132,17 @@ class Daemon:
                 metas.append(self._segment_meta(seg, res, feed.samples))
                 if note:
                     notes.append(note)
-            if cancel.is_set():
+            aborted = cancel.is_set() or device_gone
+            if aborted:
                 playback.abort()
             else:
                 playback.finish()
             # Everything is rendered: the stream ends within the clip's
-            # length (at its paces) unless the device or its thread is
-            # stuck. Then give up on it rather than block the queue.
-            bound = play_timeout_s(feed.play_seconds())
-            try:
-                await asyncio.wait_for(done.wait(), bound)
-            except asyncio.TimeoutError:
-                timed_out = bound
+            # length (at its paces), or at once once aborted, unless the
+            # device or its thread is stuck. Then give up on it rather than
+            # block the queue.
+            timed_out = await self._wait_stream_done(done, cancel, feed, aborted)
+            if timed_out is not None:
                 cancel.set()
                 playback.abort()
         except BaseException:
@@ -1488,14 +1512,14 @@ class TaskSupervisor:
     loop, model warm-up) running. A task that ends while the daemon is not
     stopping is logged, recorded as a system row and started again after a
     backoff (RESTART_FIRST_S doubling to RESTART_MAX_S). One that keeps
-    failing within STABLE_S of being started is given up on after
-    MAX_RAPID_FAILURES. A one-shot task (warm-up) is restarted only when it
-    raised."""
+    failing within STABLE_S of being started is given up on at its
+    GIVE_UP_AFTER-th failure in a row (restarted GIVE_UP_AFTER - 1 times).
+    A one-shot task (warm-up) is restarted only when it raised."""
 
     RESTART_FIRST_S = 1.0
     RESTART_MAX_S = 60.0
     STABLE_S = 120.0  # a task that ran this long before failing starts the backoff afresh
-    MAX_RAPID_FAILURES = 8
+    GIVE_UP_AFTER = 8  # failures in a row, each within STABLE_S of its start
 
     def __init__(self, stopping, events=None):
         self._stopping = stopping  # () -> bool
@@ -1539,7 +1563,7 @@ class TaskSupervisor:
         failures = 1 if ran >= self.STABLE_S else self._failures.get(name, 0) + 1
         self._failures[name] = failures
         exc_info = (type(exc), exc, exc.__traceback__) if exc is not None else None
-        if failures > self.MAX_RAPID_FAILURES:
+        if failures >= self.GIVE_UP_AFTER:
             self.given_up.add(name)
             log.critical("daemon task %r %s; it failed %d times in a row, so it is not restarted again "
                          "(restart the daemon)", name, what, failures, exc_info=exc_info)
@@ -1602,9 +1626,7 @@ def _read_run_marker(path: Path) -> dict[str, Any] | None:
 
 
 def _write_run_marker(path: Path) -> None:
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps({"pid": os.getpid(), "started_at": time.time(), "version": __version__}))
-    os.replace(tmp, path)
+    common.atomic_write(path, json.dumps({"pid": os.getpid(), "started_at": time.time(), "version": __version__}))
 
 
 def _unclean_message(marker: dict[str, Any]) -> str:
@@ -1671,15 +1693,22 @@ async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) 
         _clear_stale_socket(sock_path)
         # daemon.run exists only while a daemon runs: one left behind by
         # another pid means that daemon crashed or was killed (a clean
-        # shutdown removes it below).
+        # shutdown removes it below). One with this pid was written by
+        # update.startup_check for this start.
         previous = _read_run_marker(marker_path)
         if previous is not None and previous.get("pid") == os.getpid():
             previous = None
-        try:
-            _write_run_marker(marker_path)
-            marker_written = True
-        except OSError as exc:
-            log.warning("could not write %s: %s", marker_path, exc)
+
+        def write_marker() -> None:
+            nonlocal marker_written
+            try:
+                _write_run_marker(marker_path)
+                marker_written = True
+            except OSError as exc:
+                log.warning("could not write %s: %s", marker_path, exc)
+
+        if previous is None:
+            write_marker()  # nothing to lose: mark this run at once
         store = ConfigStore()
         if store.ensure_default_file():
             log.info("wrote default config to %s", store.path)
@@ -1687,10 +1716,18 @@ async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) 
         events.bind_loop(loop)
         recovered = events.recover_unfinished("daemon restarted")
         if previous is not None:
+            # Only once the previous run's marker is in the event log does
+            # this run's replace it: a start that fails before here (a
+            # locked events.db, say) leaves it for the next start to
+            # report. Not recorded, it stays, and this run writes none.
             unclean = _unclean_message(previous)
             log.warning("%s (any crash trace is in %s)", unclean, home / "service.log")
-            with contextlib.suppress(Exception):
+            try:
                 events.insert(kind="system", status="error", reason=unclean)
+            except Exception as exc:
+                log.warning("could not record that; keeping %s for the next start: %s", marker_path, exc)
+            else:
+                write_marker()
         imported = ingest_spool(events)
         daemon = Daemon(home, store, events)
 

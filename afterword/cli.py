@@ -10,6 +10,7 @@ import os
 import shlex
 import shutil
 import socket
+import stat
 import sys
 import time
 from pathlib import Path
@@ -176,10 +177,17 @@ def _say_lock():
     from afterword.hooks.afterword_hook import SAY_LOCK_NAME, SAY_LOCK_WAIT_S
 
     path = common.home() / SAY_LOCK_NAME
+    fd = None
     try:
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         fd = os.open(str(path), os.O_RDWR | os.O_CREAT | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        regular = stat.S_ISREG(os.fstat(fd).st_mode)
     except OSError:
+        regular = False
+    if not regular:  # cannot be opened (a symlink, a directory) or a FIFO: no lock, as the runner does
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
         yield True
         return
     try:

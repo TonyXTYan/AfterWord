@@ -135,7 +135,7 @@ def test_abort_stops_at_once():
     t = time.time()
     pb.abort()
     assert pb.wait(1) and time.time() - t < 0.5 * TIME_SCALE
-    assert pb.aborted and not pb.completed and pb.played_s < 2
+    assert pb.aborted and not pb.completed and pb.played_s < 2 * TIME_SCALE
 
 
 def test_device_open_failure_raises_player_unavailable():
@@ -246,7 +246,7 @@ def test_portaudio_is_not_reinitialised_while_a_timed_out_open_is_still_running(
     assert _until(lambda: not any(not pb.done.is_set() for pb in player._playbacks))
     pb = player.open(1.0)  # nothing in flight any more: refresh again
     pb.abort()
-    assert pb.wait(2)
+    assert pb.wait(2 * TIME_SCALE)
     assert state["terminated_while_inside"] == 0 and state["terminates"] == 2
 
 
@@ -258,7 +258,7 @@ def test_make_stream_player_without_sounddevice(monkeypatch):
     assert isinstance(player, NullStreamPlayer) and why is None
 
 
-def _until(pred, timeout=3.0):
+def _until(pred, timeout=3.0 * TIME_SCALE):
     end = time.time() + timeout
     while time.time() < end:
         if pred():
@@ -821,7 +821,7 @@ def test_device_dying_mid_line_stops_the_render(aw_home, monkeypatch):
     t0 = time.time()
     ev = run(play_one(d))
     assert ev["status"] == "error" and "stopped responding" in ev["error"], ev
-    assert synth.cancelled and synth.sent < 20 and time.time() - t0 < 1.8
+    assert synth.cancelled and synth.sent < 20 and time.time() - t0 < 1.8 * TIME_SCALE
     assert 0 < len(read_wav(ev["clip"])) < len(chunks) * SR // 2
     assert ev["timings"]["segments"][0]["cancelled"] is True
 

@@ -415,8 +415,8 @@ def test_cancel_running_ends_a_generate_in_progress(tmp_path):
     th.start()
     assert wait_for(lambda: alerts._RUNNING or None, timeout=5)
     assert alerts.cancel_running() == 1
-    th.join(10)
-    assert not th.is_alive() and got["s"] < 5
+    th.join(10 * TIME_SCALE)
+    assert not th.is_alive() and got["s"] < 5 * TIME_SCALE
     assert isinstance(got["error"], alerts.GenerateFailed) and "shutting down" in str(got["error"])
     assert not (tmp_path / "alerts.json").exists() and not alerts._RUNNING
 
@@ -1001,7 +1001,7 @@ def test_state_writes_do_not_undo_a_gui_change(home):
         th.start()
         time.sleep(0.2)
         assert not done
-    th.join(5)
+    th.join(5 * TIME_SCALE)
     assert done and done[0]["muted"] is False and done[0]["pending_permissions"]
 
 
@@ -1010,7 +1010,7 @@ def test_state_lock_gives_up_instead_of_hanging(home):
         t0 = time.monotonic()
         with common.state_lock(wait=0.2) as again:
             assert held and not again
-        assert 0.15 < time.monotonic() - t0 < 2
+        assert 0.15 < time.monotonic() - t0 < 2 * TIME_SCALE
     (home / "state" / ".lock").unlink()
     os.mkfifo(home / "state" / ".lock")
     with common.state_lock() as held:  # not a regular file: no lock, no hang

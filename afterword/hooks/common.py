@@ -826,6 +826,7 @@ PAYLOAD_KEEP = {
     "agent_id": 256, "agent_type": 128,
 }
 PAYLOAD_KEYS_OF = ("tool_input", "tool_response")  # dicts whose keys are kept as well
+PAYLOAD_FIELDS = 100  # fields read from a payload, and the most a projection has
 _TRUNCATED = re.compile(r"…\[truncated (\d+) chars\]$")
 
 
@@ -853,20 +854,27 @@ def project_payload(d: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(d, dict):
         return None
     out = {}  # type: Dict[str, Any]
-    # At most 100 fields in, so at most 102 out: a second pass sees them all.
-    for key, value in list(d.items())[:100]:
+    # The first PAYLOAD_FIELDS fields are read, and at most PAYLOAD_FIELDS
+    # come out: a field whose entries (one, or two with `_keys`) would take
+    # the projection past that is left out. Every field of a projection
+    # projects to itself, so a second pass reads them all and keeps them all.
+    for key, value in list(d.items())[:PAYLOAD_FIELDS]:
         if not isinstance(key, str) or not key or len(key) > 64:
             continue
+        entries = {}  # type: Dict[str, Any]
         if value is None or isinstance(value, (bool, int, float)):
-            out[key] = value
+            entries[key] = value
         elif key in PAYLOAD_KEEP and isinstance(value, str):
-            out[key] = value[:PAYLOAD_KEEP[key]]
+            entries[key] = value[:PAYLOAD_KEEP[key]]
         elif key == "transcript_path" and isinstance(value, str):
-            out[key] = os.path.basename(value)[:256]
+            entries[key] = os.path.basename(value)[:256]
         elif key.endswith("_keys") and key[:-5] in PAYLOAD_KEYS_OF and isinstance(value, list):
-            out[key] = [k[:64] for k in value[:50] if isinstance(k, str)]
+            entries[key] = [k[:64] for k in value[:50] if isinstance(k, str)]
         elif len(key) <= 59:  # room for the suffix, so a second pass keeps the key
-            out[key + "_len"] = _payload_len(value)
+            entries[key + "_len"] = _payload_len(value)
             if key in PAYLOAD_KEYS_OF and isinstance(value, dict):
-                out[key + "_keys"] = sorted(str(k)[:64] for k in list(value)[:50])
+                entries[key + "_keys"] = sorted(str(k)[:64] for k in list(value)[:50])
+        if len(out) + sum(1 for k in entries if k not in out) > PAYLOAD_FIELDS:
+            continue
+        out.update(entries)
     return out

@@ -2,6 +2,7 @@ import pytest
 
 from afterword.hooks import tags
 from afterword.hooks.tags import clean_text, parse, truncate
+from conftest import TIME_SCALE
 
 
 # --------------------------------------------------------------------------- #
@@ -289,7 +290,7 @@ def test_pathological_input_is_fast():
     msg = ("<say " * 20000) + ("`" * 5000) + ("<voice " * 20000)
     t = time.time()
     parse(msg)
-    assert time.time() - t < 2.0
+    assert time.time() - t < 2.0 * TIME_SCALE
 
 
 @pytest.mark.parametrize(
@@ -309,7 +310,7 @@ def test_adversarial_inputs_are_linear(msg):
 
     t = time.time()
     parse(msg)
-    assert time.time() - t < 1.0
+    assert time.time() - t < 1.0 * TIME_SCALE
 
 
 def test_say_with_selfclosing_then_real():
@@ -362,7 +363,7 @@ def test_blank_line_flood_is_linear():
     for body in ("\n" * 60000, " \n" * 30000):
         t = time.time()
         assert parse("<say>x" + body + "</say>").say.text == "x"
-        assert time.time() - t < 1.0
+        assert time.time() - t < 1.0 * TIME_SCALE
 
 
 def test_unpaired_emphasis_markers_are_kept():

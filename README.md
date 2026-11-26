@@ -665,7 +665,8 @@ it in the foreground with `uv run pytest -n0 tests/test_hook.py -k name -s`
 `uv run ruff check` (pyflakes, syntax errors and bugbear only; the hooks are
 checked against Python 3.9). CI (`.github/workflows/tests.yml`) runs ruff and
 then pytest on an Apple Silicon macOS runner for every pull request and push
-to `main`.
+to `main`, with three workers (one per vCPU there) and the tests' time
+budgets scaled 3x (`CI` set; `AFTERWORD_TEST_TIME_SCALE` sets the factor).
 
 Tests that need the real models are skipped unless you opt in:
 

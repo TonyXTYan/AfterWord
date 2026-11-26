@@ -1346,9 +1346,7 @@ def _previous_run_failed(home: Path) -> bool:
         data = json.loads(common.read_regular_file(path, 4096).decode("utf-8"))
     except FileNotFoundError:
         with contextlib.suppress(OSError):
-            tmp = path.with_name(path.name + ".tmp")
-            tmp.write_text(json.dumps({"pid": os.getpid(), "started_at": time.time(), "by": "startup_check"}))
-            os.replace(tmp, path)
+            common.atomic_write(path, json.dumps({"pid": os.getpid(), "started_at": time.time(), "by": "startup_check"}))
         return False
     except (OSError, ValueError):
         return True  # unreadable: as the daemon reads it, not a clean shutdown

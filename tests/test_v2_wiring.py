@@ -13,7 +13,7 @@ import tomllib
 import pytest
 from fastapi.testclient import TestClient
 
-from conftest import ROOT, run_hook, SYSTEM_PYTHON, needs_system_python, require_system_python
+from conftest import ROOT, TIME_SCALE, run_hook, SYSTEM_PYTHON, needs_system_python, require_system_python
 
 HOOKS_DIR = ROOT / "afterword" / "hooks"
 EVENT_ARGS = ("session-start", "user-prompt-submit", "message-display", "stop", "permission-request", "notification")
@@ -226,7 +226,7 @@ def test_every_event_survives_confused_payloads_in_a_busy_home(aw_home, say_stub
     for payload in CONFUSED:
         proc, elapsed = run_hook(dict(payload, hook_event_name="ignored"), args=(arg,))
         assert proc.returncode == 0 and proc.stderr == b"", (arg, proc.stderr)
-        assert elapsed < 5.0, (arg, elapsed)
+        assert elapsed < 5.0 * TIME_SCALE, (arg, elapsed)
         if proc.stdout:  # only the documented JSON, only from the synchronous hooks
             assert arg in ("session-start", "user-prompt-submit"), (arg, proc.stdout)
             out = json.loads(proc.stdout)

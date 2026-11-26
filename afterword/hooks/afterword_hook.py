@@ -461,8 +461,13 @@ if lock:
         os.makedirs(os.path.dirname(lock), 0o700, exist_ok=True)
         fd = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0), 0o600)
         if not stat.S_ISREG(os.fstat(fd).st_mode):
-            fd = None
+            raise OSError("not a regular file")
     except OSError:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
         fd = None
     if fd is not None:
         signal.signal(signal.SIGALRM, late)

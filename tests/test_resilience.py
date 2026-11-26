@@ -98,12 +98,27 @@ class FakeEvents:
         return fields
 
 
-def fast_supervisor(events, stopping=lambda: False, max_rapid=8):
+def fast_supervisor(events, stopping=lambda: False, give_up_after=None):
     sup = server.TaskSupervisor(stopping, events)
     sup.RESTART_FIRST_S = 0.01
     sup.RESTART_MAX_S = 0.04
-    sup.MAX_RAPID_FAILURES = max_rapid
+    if give_up_after is not None:
+        sup.GIVE_UP_AFTER = give_up_after
     return sup
+
+
+def spy_restarts(loop):
+    """The delays the supervisor schedules restarts with (no timing)."""
+    delays = []
+    real = loop.call_later
+
+    def call_later(delay, callback, *args, **kw):
+        if getattr(callback, "__name__", "") == "_respawn":
+            delays.append(delay)
+        return real(delay, callback, *args, **kw)
+
+    loop.call_later = call_later
+    return delays
 
 
 def test_a_task_that_raises_is_restarted_with_a_system_row():
@@ -111,29 +126,55 @@ def test_a_task_that_raises_is_restarted_with_a_system_row():
     runs = []
 
     async def flaky():
-        runs.append(time.monotonic())
+        runs.append(1)
         if len(runs) <= 2:
             raise RuntimeError(f"boom {len(runs)}")
         await asyncio.sleep(30)
 
     async def go():
+        delays = spy_restarts(asyncio.get_running_loop())
         sup = fast_supervisor(events)
         sup.start("worker", flaky)
-        await _until(lambda: len(runs) == 3, 3)
+        await _until(lambda: len(runs) == 3, 3 * TIME_SCALE)
         await asyncio.sleep(0.05)
         snap = sup.snapshot()
         for t in sup.close():
             t.cancel()
-        return sup, snap
+        return sup, snap, delays
 
-    sup, snap = run(go())
+    sup, snap, delays = run(go())
     assert len(runs) == 3 and sup.restarts == {"worker": 2}
     assert snap == {"worker": "running"}
     assert [r["kind"] for r in events.rows] == ["system", "system"]
     assert all(r["status"] == "error" for r in events.rows)
     assert "daemon task worker failed: RuntimeError: boom 1; restarting it in 0 s" == events.rows[0]["reason"]
-    # The backoff doubles (capped): the second wait is no shorter than the first.
-    assert runs[2] - runs[1] >= runs[1] - runs[0] - 0.005
+    assert delays == [0.01, 0.02]  # the backoff doubles
+
+
+def test_supervisor_gives_up_at_the_eighth_failure_in_a_row():
+    events = FakeEvents()
+    runs = []
+
+    async def always():
+        runs.append(1)
+        raise ValueError("bad config")
+
+    async def go():
+        delays = spy_restarts(asyncio.get_running_loop())
+        sup = fast_supervisor(events)
+        assert sup.GIVE_UP_AFTER == 8
+        sup.start("retention", always)
+        await _until(lambda: "retention" in sup.given_up, 5 * TIME_SCALE)
+        snap = sup.snapshot()
+        sup.close()
+        return sup, snap, delays
+
+    sup, snap, delays = run(go())
+    assert len(runs) == 8 and sup.restarts == {"retention": 7}
+    assert delays == [0.01, 0.02, 0.04, 0.04, 0.04, 0.04, 0.04]  # doubling, capped at RESTART_MAX_S
+    assert snap == {"retention": "failed"}
+    assert "gave up after 8 failures in a row" in events.rows[-1]["reason"]
+    assert len(events.rows) == 8
 
 
 def test_a_loop_that_returns_is_restarted_and_a_failed_record_is_tolerated():
@@ -166,18 +207,18 @@ def test_supervisor_gives_up_after_rapid_failures():
         raise ValueError("bad config")
 
     async def go():
-        sup = fast_supervisor(events, max_rapid=3)
+        sup = fast_supervisor(events, give_up_after=3)
         sup.start("retention", always)
-        await _until(lambda: "retention" in sup.given_up, 3)
+        await _until(lambda: "retention" in sup.given_up, 3 * TIME_SCALE)
         await asyncio.sleep(0.1)
         snap = sup.snapshot()
         sup.close()
         return sup, snap
 
     sup, snap = run(go())
-    assert len(runs) == 4  # the first run and three restarts
+    assert len(runs) == 3  # the first run and two restarts
     assert snap == {"retention": "failed"}
-    assert "gave up after 4 failures in a row" in events.rows[-1]["reason"]
+    assert "gave up after 3 failures in a row" in events.rows[-1]["reason"]
 
 
 def test_oneshot_that_finishes_is_left_alone_and_stopping_stops_restarts():
@@ -303,7 +344,7 @@ def test_stuck_stream_times_out_and_later_lines_use_afplay(aw_home, monkeypatch)
     first, second, third, fourth, elapsed, stream_error = run(go())
     assert first["status"] == "error" and first["reason"] == "playback timed out", first
     assert "did not finish within" in first["error"] and first["clip"]
-    assert elapsed < 5
+    assert elapsed < 5 * TIME_SCALE
     # The next line plays with afplay (the null player here), and so does
     # the one after: the stuck stream's thread had not ended.
     for ev in (second, third):
@@ -339,6 +380,37 @@ def test_line_after_a_timeout_uses_afplay_even_once_the_stream_ends(aw_home, mon
     first, second, third = run(go())
     assert first["reason"] == "playback timed out"
     assert second["timings"]["stream"] is False and third["timings"]["stream"] is True
+
+
+LONG_CLIP_S = 60.0  # far longer than any slack, so a wait bounded by it shows
+
+
+@pytest.mark.parametrize("when", ["rendering", "playing out"])
+def test_an_aborted_stuck_stream_frees_the_queue_within_the_slack(aw_home, monkeypatch, when):
+    """A skip of a line whose stream then never ends (the device stuck in
+    stop/abort) used to hold the queue for the whole clip's length plus
+    the slack; once aborted, only the slack is left."""
+    monkeypatch.setattr(players, "PLAY_SLACK_S", 0.3 * TIME_SCALE)
+    release = threading.Event()
+    n = 20
+    chunks = ramp_chunks(n=n, size=int(stream.SAMPLE_RATE * LONG_CLIP_S / n))
+    synth = ChunkSynth(chunks, delay=0.05 if when == "rendering" else 0.0)
+    d = make_daemon(aw_home, monkeypatch, synth)
+    d.stream_player = HangingPlayer(release, speed=1.0)  # plays in real time: never done in the test
+
+    if when == "rendering":
+        ready = lambda ev: ev["status"] == "playing" and n * 3 // 4 <= synth.sent < n  # noqa: E731
+    else:
+        ready = lambda ev: ev["status"] == "playing" and synth.sent == n  # noqa: E731
+    t0 = time.time()
+    try:
+        first, second = run(play_many(d, ["first", "second"], during=(ready, d.skip), timeout=LONG_CLIP_S * 2))
+    finally:
+        release.set()
+    elapsed = time.time() - t0
+    assert first["status"] == "skipped", first
+    assert second["status"] == "spoken", second
+    assert elapsed < LONG_CLIP_S / 4, elapsed  # the slack (0.3 s, scaled), not 60 s of clip
 
 
 def _stub(tmp_path, body):
@@ -422,6 +494,84 @@ def test_unreadable_marker_still_counts(aw_home, monkeypatch):
                    for e in d.events())
     finally:
         d.stop()
+
+
+def _unclean_rows(d):
+    return [e for e in d.events() if "did not shut down cleanly" in (e.get("reason") or "")]
+
+
+def test_a_failed_start_keeps_the_previous_marker_until_it_is_recorded(aw_home, monkeypatch):
+    """events.db failing to open (locked by another process) used to come
+    after daemon.run was replaced: the previous crash was never reported."""
+    from afterword.daemon import log as eventlog
+
+    previous = {"pid": 999999, "started_at": time.time() - 60}
+    marker = aw_home / server.RUN_MARKER
+    marker.write_text(json.dumps(previous))
+
+    def locked(path):
+        raise eventlog.EventLogError("events.db is locked")
+
+    with monkeypatch.context() as m:
+        m.setattr(server, "EventLog", locked)
+        with pytest.raises(eventlog.EventLogError):
+            asyncio.run(server.run_daemon(http=False))
+    assert json.loads(marker.read_text()) == previous
+
+    d = RunningDaemon(aw_home, monkeypatch)  # the next start reports it, once
+    try:
+        rows = _unclean_rows(d)
+        assert len(rows) == 1 and "pid 999999" in rows[0]["reason"], rows
+        assert json.loads(marker.read_text())["pid"] == os.getpid()
+    finally:
+        d.stop()
+    assert not marker.exists()
+    d = RunningDaemon(aw_home, monkeypatch)  # and only once
+    try:
+        assert len(_unclean_rows(d)) == 1
+    finally:
+        d.stop()
+
+
+def test_a_marker_that_could_not_be_recorded_is_kept(aw_home, monkeypatch):
+    from afterword.daemon.log import EventLog
+
+    marker = aw_home / server.RUN_MARKER
+    marker.write_text(json.dumps({"pid": 999999, "started_at": 1}))
+    real_insert = EventLog.insert
+
+    def insert(self, **fields):
+        if "did not shut down cleanly" in (fields.get("reason") or ""):
+            raise sqlite3.OperationalError("database is locked")
+        return real_insert(self, **fields)
+
+    with monkeypatch.context() as m:
+        m.setattr(EventLog, "insert", insert)
+        d = RunningDaemon(aw_home, monkeypatch)
+        try:
+            assert json.loads(marker.read_text())["pid"] == 999999
+        finally:
+            d.stop()
+    # A clean stop removes only this run's own marker: the next start reports it.
+    assert json.loads(marker.read_text())["pid"] == 999999
+    d = RunningDaemon(aw_home, monkeypatch)
+    try:
+        assert len(_unclean_rows(d)) == 1
+    finally:
+        d.stop()
+    assert not marker.exists()
+
+
+def test_the_run_marker_is_written_atomically(aw_home, monkeypatch):
+    from afterword.hooks import common
+
+    calls = []
+    real = common.atomic_write
+    monkeypatch.setattr(common, "atomic_write", lambda path, data, **kw: (calls.append(path), real(path, data, **kw)))
+    server._write_run_marker(aw_home / server.RUN_MARKER)
+    assert calls == [aw_home / server.RUN_MARKER]
+    assert json.loads((aw_home / server.RUN_MARKER).read_text())["pid"] == os.getpid()
+    assert not list(aw_home.glob("*.tmp"))
 
 
 def test_crash_handlers_trace_native_crashes_and_thread_exceptions():
