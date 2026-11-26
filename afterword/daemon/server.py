@@ -1382,9 +1382,7 @@ class Daemon:
         self.muted_all = bool(muted)
         state = self._load_daemon_state()
         state["muted_all"] = self.muted_all
-        tmp = self._daemon_state_path().with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(state))
-        os.replace(tmp, self._daemon_state_path())
+        common.atomic_write(self._daemon_state_path(), json.dumps(state))
         if self.muted_all:
             self.stop_all()
         self.events.publish("mute", {"muted_all": self.muted_all})

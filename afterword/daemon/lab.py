@@ -11,7 +11,6 @@ import asyncio
 import math
 import os
 import secrets
-import tempfile
 import threading
 import time
 from collections import OrderedDict
@@ -736,15 +735,7 @@ def _write_doc(path: Path, doc) -> None:
     path = path.resolve() if path.is_symlink() else path  # keep a dotfiles symlink intact
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     mode = (path.stat().st_mode & 0o777) if path.exists() else 0o600
-    fd, tmp = tempfile.mkstemp(prefix=".config-", suffix=".toml", dir=str(path.parent))
-    try:
-        os.fchmod(fd, mode)
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text)
-        os.replace(tmp, path)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
+    common.atomic_write(path, text, mode=mode, durable=True)
 
 
 def write_profile(path: Path, name: str, fields: dict[str, Any], overwrite: bool,

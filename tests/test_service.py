@@ -243,7 +243,7 @@ def test_plist_content(launchd, aw_home, tmp_path, monkeypatch):
     plist = plistlib.loads(path.read_bytes())
     py = os.path.abspath(sys.executable)
     assert plist["Label"] == "io.github.tonyxtyan.afterword"
-    assert plist["ProgramArguments"] == [py, "-m", "afterword.cli", "serve"]
+    assert plist["ProgramArguments"] == [py, "-P", "-m", "afterword.cli", "serve"]
     assert plist["RunAtLoad"] is True
     assert plist["KeepAlive"] == {"SuccessfulExit": False}
     assert plist["ThrottleInterval"] == 10
@@ -279,10 +279,20 @@ def test_python_is_the_venv_link_not_the_base_interpreter(tmp_path, monkeypatch)
 
 
 def test_python_m_cli_runs():
-    """ProgramArguments run `python -m afterword.cli`."""
-    p = subprocess.run([sys.executable, "-m", "afterword.cli", "--version"], capture_output=True, text=True,
-                       cwd="/")
+    """ProgramArguments run `python -P -m afterword.cli`."""
+    args = service.build_plist()["ProgramArguments"]
+    p = subprocess.run([sys.executable, *args[1:-1], "--version"], capture_output=True, text=True, cwd="/")
     assert p.returncode == 0 and p.stdout.startswith("afterword ")
+
+
+def test_cwd_python_file_does_not_shadow_stdlib(tmp_path):
+    """The LaunchAgent's WorkingDirectory holds user files; -P keeps a stray .py there off sys.path."""
+    (tmp_path / "json.py").write_text("raise RuntimeError('shadowed')\n")
+    args = service.build_plist()["ProgramArguments"]
+    assert args[1] == "-P"
+    p = subprocess.run([sys.executable, "-P", "-c", "import json; print('ok')"], capture_output=True, text=True,
+                       cwd=str(tmp_path))
+    assert p.stdout.strip() == "ok", p.stderr
 
 
 def test_dry_run_writes_nothing(launchd, aw_home, tmp_path, capsys):
