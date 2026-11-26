@@ -6,21 +6,11 @@ import os
 import time
 
 import pytest
-from fastapi.testclient import TestClient
 
 from afterword.hooks import common
 from test_lab import FakeEngine, _daemon, run
 
 H = {"X-AfterWord": "1"}
-
-
-@pytest.fixture
-def gui(aw_home, monkeypatch):
-    from afterword.daemon.web import build_app
-
-    d = _daemon(aw_home, monkeypatch, FakeEngine())
-    client = TestClient(build_app(d, 47800), base_url="http://127.0.0.1:47800", raise_server_exceptions=False)
-    return d, client
 
 
 def hook_msg(sid, text="hi", decision="speak", profile="nova", state_changed=False):

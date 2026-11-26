@@ -31,5 +31,11 @@ jobs:
       - name: Install
         run: uv sync --frozen --extra qwen
 
+      - name: Lint
+        run: uv run --frozen --no-sync ruff check
+
+      # One worker per vCPU (the macos-15 runner has 3): pyproject's -n 4 is
+      # for developer Macs, and a fourth worker here only takes CPU from the
+      # timing tests. (CI is set, so their budgets are scaled 3x as well.)
       - name: Test
-        run: uv run --frozen --no-sync pytest -q
+        run: uv run --frozen --no-sync pytest -q -n 3

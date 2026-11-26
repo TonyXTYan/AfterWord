@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import re
+import secrets
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -37,6 +38,17 @@ if TYPE_CHECKING:
 
 UI_INDEX = Path(__file__).resolve().parent.parent / "ui" / "index.html"
 SSE_HEARTBEAT_S = 15.0
+# The page's CSP. Scripts need the per-response nonce; styles may be inline
+# (the page sets style attributes and builds a <style> for the speaker colours
+# and one inside <aw-audio>'s shadow root). Everything else is same-origin:
+# fetch and EventSource (connect-src), clips from /clips (media-src), blob:
+# URLs for the voice lab's recording, data: images and fonts.
+PAGE_CSP = (
+    "default-src 'none'; script-src 'nonce-{nonce}'; connect-src 'self' blob:; img-src 'self' data:; "
+    "media-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; base-uri 'none'; "
+    "form-action 'none'; object-src 'none'; frame-ancestors 'none'"
+)
+_SCRIPT_TAG_RE = re.compile(r"<script(?=[\s>])", re.IGNORECASE)
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 SPEAK_MAX_CHARS = 2000  # POST /api/speak, after trimming
 SPEAK_SESSION = "gui"  # the session id of lines typed in the GUI
@@ -102,7 +114,10 @@ def build_app(daemon: "Daemon", port: int) -> FastAPI:
 
     @app.get("/")
     async def index():
-        return FileResponse(UI_INDEX, media_type="text/html")
+        nonce = secrets.token_urlsafe(18)
+        page = await asyncio.to_thread(UI_INDEX.read_text, "utf-8")
+        page = _SCRIPT_TAG_RE.sub(f'<script nonce="{nonce}"', page)
+        return Response(page, media_type="text/html", headers={"Content-Security-Policy": PAGE_CSP.format(nonce=nonce)})
 
     @app.get("/api/status")
     async def status():
@@ -452,6 +467,38 @@ def build_app(daemon: "Daemon", port: int) -> FastAPI:
         except OSError as exc:
             raise LabError(500, f"could not read {path.name}: {exc.strerror or exc}") from None
         return {"name": name, **body}
+
+    # -- updates (contract: docs/gui-api.md, "Updates"; afterword/update.py) --
+
+    @app.get("/api/update")
+    async def update_get():
+        return await asyncio.to_thread(daemon.updater.view)
+
+    @app.post("/api/update/check")
+    async def update_check():
+        return await daemon.updater.check_now()
+
+    @app.post("/api/update/apply")
+    async def update_apply(request: Request):
+        from afterword.update import MAX_WAIT_S, UpdateError, parse_wait
+
+        can_queue()  # 503 while stopping
+        body = await json_body(request) if (await request.body()).strip() else {}
+        usage = f"send {{\"force\": true|false, \"wait_s\": 0 to {MAX_WAIT_S:.0f} seconds}} (both optional)"
+        if not isinstance(body, dict) or not isinstance(body.get("force", False), bool):
+            raise LabError(400, usage)
+        wait_s = body.get("wait_s")
+        if wait_s is not None:
+            try:
+                wait_s = parse_wait(wait_s)
+            except UpdateError as exc:
+                raise LabError(400, f"{exc}: {usage}") from None
+        try:
+            tag = daemon.updater.start_apply(force=body.get("force", False), wait_s=wait_s)
+        except UpdateError as exc:
+            raise LabError(409, str(exc)) from None
+        return JSONResponse({"started": True, "tag": tag, "pid": os.getpid(), "update": daemon.updater.view()},
+                            status_code=202)
 
     @app.get("/api/queue")
     async def queue():

@@ -3,7 +3,6 @@ splitter, and turns in the queue (part of E)."""
 
 import asyncio
 import json
-import os
 import random
 import subprocess
 import sys
@@ -13,14 +12,14 @@ import tomllib
 import numpy as np
 import pytest
 
-from afterword.daemon.config import ConfigStore, LangVoice, Profile, build_config, lang_code
-from afterword.daemon.stream import SAMPLE_RATE, NullStreamPlayer
+from afterword.daemon.config import LangVoice, build_config, lang_code
+from afterword.daemon.stream import SAMPLE_RATE
 from afterword.daemon.synth import NullSynth, StreamResult
 from afterword.hooks import scriptsplit, tags
 from afterword.hooks.scriptsplit import split
 
-from conftest import HOOK, hook_log, run_hook, stop_payload, wait_for
-from test_hook import SYSTEM_PYTHON, FakeDaemon, assert_clean_exit
+from conftest import HOOK, TIME_SCALE, hook_log, run_hook, stop_payload, wait_for, SYSTEM_PYTHON, needs_system_python, require_system_python
+from test_hook import FakeDaemon, assert_clean_exit
 from test_stream import make_daemon, read_wav
 
 SR = SAMPLE_RATE
@@ -123,7 +122,7 @@ def test_split_parts_are_substrings_in_order_and_never_raise():
         parts = split(text, rng.choice(["en", "zh", None, "auto"]), rng.choice([None, "en"]))
         assert len(parts) <= scriptsplit.MAX_PARTS
         pos = 0
-        for lang, part in parts:
+        for _lang, part in parts:
             assert part and part == part.strip()
             i = text.find(part, pos)
             assert i >= 0, (text, parts)
@@ -138,7 +137,7 @@ def test_split_caps_the_number_of_parts():
     assert parts[-1][1].endswith("第19句。")
 
 
-@pytest.mark.skipif(not os.path.exists(SYSTEM_PYTHON), reason="no system python3")
+@needs_system_python
 def test_splitter_runs_on_system_python():
     code = "import sys; sys.path.insert(0, %r); import scriptsplit; print(scriptsplit.split(%r, 'en'))" % (
         str(HOOK.parent), MIXED)
@@ -591,8 +590,8 @@ def _said(record, n):
 
 @pytest.mark.parametrize("python", [None, SYSTEM_PYTHON])
 def test_say_fallback_speaks_each_part_in_order_with_its_say_voice(aw_home, tmp_path, monkeypatch, python):
-    if python and not os.path.exists(python):
-        pytest.skip("no system python3")
+    if python:
+        require_system_python()
     record = _argv_stub(tmp_path, monkeypatch)
     (aw_home / "config.toml").write_text(TUTOR)
     msg = '<voice set="tutor"/><say>%s</say><say lang="ja">はい。</say>' % MIXED
@@ -655,7 +654,7 @@ def test_say_runner_does_not_retry_a_part_that_ran_out_of_time(tmp_path):
     t0 = time.time()
     proc = _run_runner([{"argvs": [base + ["-v", "X"], base], "text": "one", "limit": 0.5},
                         {"argvs": [base], "text": "two", "limit": 0.5}])
-    assert proc.returncode == 0 and time.time() - t0 < 4
+    assert proc.returncode == 0 and time.time() - t0 < 4 * TIME_SCALE
     lines = [json.loads(x) for x in record.read_text().splitlines()]
     assert lines == [[["-v", "X"], "one"], [[], "two"]]  # no restart of "one" in the system voice
 
@@ -686,8 +685,8 @@ langs.ja.say_voice = "Kyoko"
 
 @pytest.mark.parametrize("python", [None, SYSTEM_PYTHON])
 def test_hook_reads_inline_and_dotted_langs(aw_home, tmp_path, monkeypatch, python):
-    if python and not os.path.exists(python):
-        pytest.skip("no system python3")
+    if python:
+        require_system_python()
     from afterword.hooks import common
 
     (aw_home / "config.toml").write_text(INLINE_LANGS)
@@ -724,8 +723,8 @@ def test_say_fallback_without_voices_speaks_every_say_in_order(aw_home, say_stub
 
 @pytest.mark.parametrize("python", [None, SYSTEM_PYTHON])
 def test_prompt_note_lists_languages_for_a_profile_with_langs(aw_home, python):
-    if python and not os.path.exists(python):
-        pytest.skip("no system python3")
+    if python:
+        require_system_python()
     from afterword.hooks import common
 
     (aw_home / "config.toml").write_text(TUTOR + '\n[profiles."x.y"]\nvoice = "builtin:Ryan"\n'
@@ -761,7 +760,7 @@ def test_hook_never_fails_on_odd_langs_config(aw_home, say_stub):
 # Voice lab: profiles with langs                                               #
 # --------------------------------------------------------------------------- #
 
-from test_lab import FakeEngine, home, make_lab  # noqa: E402,F401  (fixtures)
+from test_lab import FakeEngine  # noqa: E402
 
 
 def test_catalog_lists_langs(make_lab):

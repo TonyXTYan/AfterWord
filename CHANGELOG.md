@@ -4,6 +4,74 @@ How versions are numbered: [AGENTS.md](AGENTS.md#versioning). Versions before
 0.3.1 were never tagged; their entries were written afterwards from the git
 history, and the last commit of each is given.
 
+## 0.3.6 (2026-11-26)
+
+Updates by themselves: merge a version bump on GitHub (from a cloud session,
+say) and every Mac running the service picks it up.
+
+- A GitHub Action tags each merged version (`vX.Y.Z`) and makes a release
+  from its CHANGELOG entry.
+- `afterword install-service` now runs the daemon from its own managed copy
+  in `~/.afterword/app` (a release per tag, each with its own venv, and a
+  `current` link), not from the checkout you run it in; `--dev` keeps the old
+  behaviour for development. Run it once to move over.
+- The daemon checks for new release tags (5 minutes after starting, then
+  every 6 hours), installs and smoke-tests a new one in the background,
+  switches to it once nothing has been spoken or queued for 30 s, and
+  restarts. If the new version crashes or fails at startup three times
+  before it has run for a minute (time asleep does not count, and neither
+  do clean restarts), it goes back to the last confirmed version and does
+  not retry that tag by itself.
+- Only tags whose commit is on `main` are installed. The release the
+  service runs, and the one it would go back to, are never re-synced in
+  place: changed extras come with the next release. With Kokoro, the UniDic
+  dictionary is carried over into each release.
+- After an update is confirmed, the Claude Code and Codex plugins are
+  refreshed too (open Claude Code sessions load the new hooks after a
+  restart; a disabled Codex plugin is left alone; a failed refresh is tried
+  again at the next checks).
+- `[update]` in config.toml: `mode = "auto"` (default), `"notify"` or
+  `"off"`, and `check_every_h`. `afterword update` shows the state, `--check`
+  checks now and `--now` updates now (and takes over an update waiting for
+  quiet); the Config page's Daemon section has the same, with the new
+  release's notes.
+
+## 0.3.5 (2026-11-26)
+
+Hardening, from an audit of the repo.
+
+- Speech keeps going when something inside the daemon fails: a failed event
+  log write no longer ends the playback worker, and the worker, spool,
+  retention and warm-up tasks are restarted with backoff if they stop (one
+  that fails 8 times in a row, each within 2 minutes of starting, is given up
+  on until the daemon restarts).
+- Playback has a time limit (the clip's length plus 10 s): a stuck audio
+  device or afplay is stopped, the line is marked "playback timed out", and
+  the next lines use afplay until the device recovers. A skipped or stopped
+  line waits only those 10 s for a stuck device, not its whole length.
+- Crashes leave a trace: native crash stacks go to `service.log`, and a
+  daemon that did not shut down cleanly is noted in the event log at the
+  next start.
+- A corrupt `events.db` is moved aside (`events.db.corrupt-<time>`) and a
+  fresh one started, instead of the service restarting every 10 s; a locked
+  one gives a clear error and is left alone. The WAL file shrinks after a
+  prune.
+- Privacy: the event log keeps only a projection of each hook payload (ids,
+  event names, folder, model, tool name, and the lengths of text fields),
+  never the prompt, the reply or tool inputs. Existing rows are scrubbed once.
+- The `say` fallback (daemon down) takes turns through `~/.afterword/say.lock`,
+  so parallel sessions no longer talk over each other; `afterword test` does
+  too.
+- The hook's tag parser caps message and block sizes, so a crafted reply
+  cannot use up the hook's time budget.
+- The LaunchAgent runs Python with `-P` (run `afterword install-service`
+  again to update the plist); the GUI is served with a strict Content
+  Security Policy (per-response script nonces); state files are written with
+  fsync.
+- Development: tests run in parallel (`pytest -n 4`, about 40 s instead of
+  2.5 min), ruff checks `F`, `E9` and `B` in CI, and hook code is checked to
+  stay Python 3.9 compatible.
+
 ## 0.3.4 (2026-11-26)
 
 - A Daemon section first on the Config page: whether the daemon runs under

@@ -4,7 +4,6 @@ GET/POST /api/pronounce."""
 
 import asyncio
 import json
-import os
 import subprocess
 import time
 import tomllib
@@ -14,11 +13,10 @@ from fastapi.testclient import TestClient
 
 from afterword.daemon.config import DEFAULT_CONFIG_TOML, build_config
 from afterword.hooks import common, pronounce
-from conftest import TIME_SCALE, ROOT, run_hook, stop_payload, wait_for
-from test_lab import FakeEngine, _daemon, make_lab, home  # noqa: F401  (fixtures)
+from conftest import TIME_SCALE, ROOT, run_hook, stop_payload, wait_for, SYSTEM_PYTHON, needs_system_python
+from test_lab import FakeEngine, _daemon
 
 H = {"X-AfterWord": "1"}
-SYSTEM_PYTHON = "/usr/bin/python3"
 
 
 def say(text, table):
@@ -178,7 +176,7 @@ def test_merged_tables_with_every_key_present_stay_fast():
     assert time.perf_counter() - t < 0.3 * TIME_SCALE
 
 
-@pytest.mark.skipif(not os.path.exists(SYSTEM_PYTHON), reason="no system python3")
+@needs_system_python
 def test_module_runs_on_system_python():
     code = (
         "import sys; sys.path.insert(0, %r)\n"
@@ -307,7 +305,7 @@ def test_mini_toml_reads_dotted_keys_the_gui_keeps(tmp_path):
     assert dict(pronounce.pairs_from_config(common._mini_toml(text), "tutor")) == {"GIF": "jif", "uv": "you vee"}
 
 
-@pytest.mark.skipif(not os.path.exists(SYSTEM_PYTHON), reason="no system python3")
+@needs_system_python
 def test_hook_say_fallback_on_system_python_with_dotted_keys_and_odd_values(aw_home, say_stub):
     (aw_home / "config.toml").write_text(DOTTED)
     proc, _ = run_hook(stop_payload('<voice set="tutor"/><say>Make a GIF in C++ with uv.</say>'), python=SYSTEM_PYTHON)
@@ -326,7 +324,7 @@ def test_hook_say_fallback_speaks_the_pronounced_text(aw_home, say_stub):
     assert spool[-1]["text"] == "Run uv on the GIF, SQLite too."  # the log keeps the original
 
 
-@pytest.mark.skipif(not os.path.exists(SYSTEM_PYTHON), reason="no system python3")
+@needs_system_python
 def test_hook_say_fallback_on_system_python(aw_home, say_stub):
     (aw_home / "config.toml").write_text(CONFIG)
     proc, _ = run_hook(stop_payload('<voice set="nova"/><say>张三 uses uv and C++.</say>'), python=SYSTEM_PYTHON)

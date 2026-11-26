@@ -3,7 +3,6 @@ PermissionRequest / Notification hooks, pending permissions, "done" at Stop,
 queue rules, phrase pools and picking, the `say` fallback, `afterword alerts
 generate` (with a fake runner: claude is never called here) and the HTTP API."""
 
-import asyncio
 import json
 import os
 import random
@@ -18,9 +17,8 @@ from afterword.daemon import alerts
 from afterword.daemon.config import DEFAULT_CONFIG_TOML, build_config
 from afterword.daemon.queue import PlaybackQueue, QueueItem
 from afterword.hooks import alerting, common
-from conftest import hook_log, run_hook, stop_payload, wait_for
+from conftest import TIME_SCALE, hook_log, run_hook, stop_payload, wait_for, SYSTEM_PYTHON, needs_system_python
 
-SYSTEM_PYTHON = "/usr/bin/python3"
 H = {"X-AfterWord": "1"}
 
 CONFIG = """
@@ -234,7 +232,7 @@ def test_small_pool_still_varies(tmp_path):
     (tmp_path / "alerts.json").write_text(json.dumps({"en": {"idle": ["one {project}", "two {project}"]}}))
     p = alerts.AlertPhrases(tmp_path / "alerts.json")
     got = [p.pick("idle", "en", {"project": "x"})[1] for _ in range(6)]
-    assert all(a != b for a, b in zip(got, got[1:]))
+    assert all(a != b for a, b in zip(got, got[1:], strict=False))
 
 
 def test_file_pools_override_builtin_and_bad_entries_are_dropped(tmp_path):
@@ -417,8 +415,8 @@ def test_cancel_running_ends_a_generate_in_progress(tmp_path):
     th.start()
     assert wait_for(lambda: alerts._RUNNING or None, timeout=5)
     assert alerts.cancel_running() == 1
-    th.join(10)
-    assert not th.is_alive() and got["s"] < 5
+    th.join(10 * TIME_SCALE)
+    assert not th.is_alive() and got["s"] < 5 * TIME_SCALE
     assert isinstance(got["error"], alerts.GenerateFailed) and "shutting down" in str(got["error"])
     assert not (tmp_path / "alerts.json").exists() and not alerts._RUNNING
 
@@ -458,7 +456,7 @@ BAD = [b"", b"not json", b"[]", b'{"session_id": 5, "tool_name": ["x"], "tool_in
 @pytest.mark.parametrize("stdin", BAD, ids=range(len(BAD)))
 def test_alert_hooks_never_fail(home, say_stub, event, stdin):
     proc, elapsed = run_hook(stdin, args=(event,))
-    assert proc.returncode == 0 and proc.stdout == b"" and proc.stderr == b"" and elapsed < 3.0
+    assert proc.returncode == 0 and proc.stdout == b"" and proc.stderr == b"" and elapsed < 3.0 * TIME_SCALE
 
 
 @pytest.mark.parametrize("event", ["permission-request", "notification"])
@@ -470,7 +468,7 @@ def test_alert_hooks_never_fail_with_corrupt_state_and_config(home, say_stub, ev
     assert proc.returncode == 0 and proc.stdout == b""
 
 
-@pytest.mark.skipif(not os.path.exists(SYSTEM_PYTHON), reason="no system python3")
+@needs_system_python
 def test_alert_hooks_on_system_python(home, say_stub):
     """Python 3.9 reads [alerts] with the mini parser (events: the defaults)."""
     proc, _ = run_hook(perm(), args=("permission-request",), python=SYSTEM_PYTHON)
@@ -1003,7 +1001,7 @@ def test_state_writes_do_not_undo_a_gui_change(home):
         th.start()
         time.sleep(0.2)
         assert not done
-    th.join(5)
+    th.join(5 * TIME_SCALE)
     assert done and done[0]["muted"] is False and done[0]["pending_permissions"]
 
 
@@ -1012,7 +1010,7 @@ def test_state_lock_gives_up_instead_of_hanging(home):
         t0 = time.monotonic()
         with common.state_lock(wait=0.2) as again:
             assert held and not again
-        assert 0.15 < time.monotonic() - t0 < 2
+        assert 0.15 < time.monotonic() - t0 < 2 * TIME_SCALE
     (home / "state" / ".lock").unlink()
     os.mkfifo(home / "state" / ".lock")
     with common.state_lock() as held:  # not a regular file: no lock, no hang
@@ -1056,7 +1054,7 @@ def test_mini_toml_arrays_match_tomllib():
     assert mini == {}  # unreadable: left out (d swallows the broken line after it)
 
 
-@pytest.mark.skipif(not os.path.exists(SYSTEM_PYTHON), reason="no system python3")
+@needs_system_python
 def test_system_python_fallback_honours_the_events_setting(home, say_stub):
     """Review finding: Python 3.9 could not read `events`, so the `say`
     fallback spoke "done" although the user had turned it off."""

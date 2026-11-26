@@ -8,7 +8,6 @@ import json
 import sys
 import threading
 import time
-import wave
 from pathlib import Path
 
 import numpy as np
@@ -19,7 +18,7 @@ from afterword.daemon import pitch, qwen, voices
 from afterword.daemon.config import ConfigStore
 from afterword.daemon.lab import Lab, LabError
 
-from test_lab import SR, FakeEngine, FakeModel, _daemon, home, make_lab, run  # noqa: F401  (fixtures)
+from test_lab import SR, FakeEngine, FakeModel, _daemon, run
 from conftest import TIME_SCALE
 
 
@@ -85,6 +84,17 @@ class ToneEngine(FakeEngine):
 DESIGN = {"text": "Hello there.", "voice": "design:A calm narrator.", "lang": "en", "pace": 1.1}
 
 
+@pytest.fixture
+def short_live_quiet(monkeypatch):
+    """The explorer waits LIVE_QUIET_S after live speech; set it here so
+    tests that cross that wait know it. Tests using it keep their gaps
+    between live segments (0.05 s) far under it, scaled for slow runners, so
+    a loaded one does not stretch a gap past it."""
+    quiet = 0.6 * TIME_SCALE
+    monkeypatch.setattr(exploremod, "LIVE_QUIET_S", quiet)
+    return quiet
+
+
 def make(home, engine=None, events=None):
     store = ConfigStore()
     store.ensure_default_file()
@@ -93,7 +103,7 @@ def make(home, engine=None, events=None):
                publish=lambda kind, data: sink.append((kind, data)))
 
 
-async def until(pred, timeout=10.0):
+async def until(pred, timeout=10.0 * TIME_SCALE):
     end = time.monotonic() + timeout
     while time.monotonic() < end:
         if pred():
@@ -170,10 +180,12 @@ def test_live_render_preempts_a_preemptible_lab_render():
     live = eng.submit_render(_req("live", "builtin"), limit=False, priority=qwen.LIVE)
     with pytest.raises(qwen.RenderPreempted) as info:
         lab.result(5)
-    assert time.monotonic() - t0 < 0.3 * TIME_SCALE  # at its next chunk, not after the ~4.9 s it had left
+    # Stopped well before its natural end (~4.9 s left), not at it. A fixed
+    # "next chunk" bound was too tight for a loaded CI runner.
+    assert time.monotonic() - t0 < 2.5
     assert isinstance(info.value, qwen.RenderCancelled)
     assert info.value.partial.seed == 7  # its timings are kept, as for a skip
-    live.result(15)  # the live render itself is ~5 s here
+    live.result(30 * TIME_SCALE)  # the live render itself is ~5 s here
     assert eng.preemptions == 1
     eng.shutdown()
 
@@ -449,18 +461,18 @@ def test_explorer_reports_a_render_error(home):
     assert "unknown speaker" in st["reason"] and st["count"] == 0
 
 
-def test_live_speech_preempts_the_explorer(home, monkeypatch):
+def test_live_speech_preempts_the_explorer(home, monkeypatch, short_live_quiet):
     """A line the daemon speaks while the explorer renders stops that render
     at its next chunk; the seed is rendered again afterwards."""
-    eng = ToneEngine(chunks=12, chunk_s=0.2, delay=0.05)  # ~0.6 s per take
+    eng = ToneEngine(chunks=12, chunk_s=0.1, delay=0.1)  # 1.2 s per take (and per live line), 1.2 s of audio
 
     async def main():
         d = _daemon(home, monkeypatch, eng)
         worker = asyncio.create_task(d.worker())
-        await d.lab.explore_start({"settings": DESIGN, "start_seed": 1, "ahead": 3})
+        await d.lab.explore_start({"settings": DESIGN, "start_seed": 1, "ahead": 1})
         x = d.lab.explorer.x
         await until(lambda: x.count >= 1 and x.rendering is not None and eng._busy)
-        await asyncio.sleep(0.12)  # inside a take's render
+        await asyncio.sleep(0.1)  # inside a take's render, with about 1.1 s of it left
         seed = x.rendering
         t0 = time.time()
         ack = d.dispatch(json.dumps({"type": "test", "text": "hi", "profile": "ember"}).encode(), t0)
@@ -472,11 +484,12 @@ def test_live_speech_preempts_the_explorer(home, monkeypatch):
 
     ev, seed, preempted, view = run(main())
     assert ev["status"] == "spoken", ev
-    # Rendering started long before the explore take would have finished.
-    assert ev["timings"]["first_audio_ms"] < 400
-    assert preempted >= 1
+    assert preempted >= 1 and eng.preemptions >= 1
+    # Heard after a chunk of each (0.2 s here), not after the ~1.1 s the
+    # take had left and a chunk (1.2 s): the margin is for a loaded runner.
+    assert ev["timings"]["first_audio_ms"] < 800 * TIME_SCALE
     seeds = [t["seed"] for t in view["takes"]]
-    assert seeds == [1, 2, 3, 4] and seed in seeds  # the pre-empted seed came back
+    assert seeds == [1, 2] and seed in seeds  # the pre-empted seed came back
     assert view["state"]["preempted"] == preempted
 
 
@@ -501,27 +514,27 @@ def test_explorer_holds_back_while_live_speech_is_busy(home):
     assert after["count"] == 3 and after["reason"] != exploremod.LIVE_HOLD
 
 
-def test_explorer_does_not_start_a_take_between_live_segments(home):
+def test_explorer_does_not_start_a_take_between_live_segments(home, short_live_quiet):
     """A reply's segments reach the engine one at a time. Before this, the
     pre-empted take was queued again at once, started in the gap after each
     segment and was pre-empted again by the next one (a model load and a
     first chunk in front of every segment)."""
-    eng = ToneEngine(chunks=20, chunk_s=0.1, delay=0.05)
+    eng = ToneEngine(chunks=10, chunk_s=0.1, delay=0.05)  # 0.5 s per render
 
     async def main():
         lab = make(home, engine=eng)
         await asyncio.wrap_future(eng.submit_render(_req("warm", "builtin"), limit=False, priority=qwen.LIVE))
-        await asyncio.sleep(exploremod.LIVE_QUIET_S + 0.1)
+        await asyncio.sleep(short_live_quiet + 0.1)
         await lab.explore_start({"settings": DESIGN, "start_seed": 1, "ahead": 5})
         x = lab.explorer.x
         await until(lambda: x.rendering is not None and eng._busy)
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.05)  # inside the take, with about 0.45 s of it left
         for i in range(3):  # three segments, each submitted when the last is done
             await asyncio.wrap_future(eng.submit_render(_req(f"segment {i}", "builtin"), limit=False,
                                                         priority=qwen.LIVE))
             await asyncio.sleep(0.05)  # the pipeline's gap before the next segment
         segments_done = eng.preemptions
-        await until(lambda: x.count >= 2, timeout=15)
+        await until(lambda: x.count >= 2, timeout=15 * TIME_SCALE)
         return segments_done, x.preempted
 
     segments_done, preempted = run(main())
@@ -752,7 +765,7 @@ def test_close_ends_a_running_exploration(home):
             await x.task
         except asyncio.CancelledError:
             pass
-        await until(lambda: not eng._busy, timeout=3)
+        await until(lambda: not eng._busy, timeout=3 * TIME_SCALE)
         return x
 
     x = run(main())

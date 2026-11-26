@@ -11,7 +11,7 @@ import urllib.request
 
 import pytest
 
-from conftest import run_hook, stop_payload, wait_for
+from conftest import TIME_SCALE, run_hook, stop_payload, wait_for
 
 
 def free_port():
@@ -43,8 +43,8 @@ class RunningDaemon:
 
         self.thread = threading.Thread(target=target, daemon=True)
         self.thread.start()
-        assert ready.wait(10), "daemon did not start"
-        assert wait_for(lambda: self._http_up(), 5)
+        assert ready.wait(10 * TIME_SCALE), "daemon did not start"
+        assert wait_for(lambda: self._http_up(), 5 * TIME_SCALE)
         self.base = f"http://127.0.0.1:{self.port}"
 
     def _http_up(self):
@@ -56,12 +56,12 @@ class RunningDaemon:
 
     def get(self, path, headers=None):
         req = urllib.request.Request(self.base + path, headers=headers or {})
-        with urllib.request.urlopen(req, timeout=3) as r:
+        with urllib.request.urlopen(req, timeout=3 * TIME_SCALE) as r:
             return json.load(r)
 
     def post(self, path, headers=None):
         req = urllib.request.Request(self.base + path, data=b"", method="POST", headers=headers or {})
-        with urllib.request.urlopen(req, timeout=3) as r:
+        with urllib.request.urlopen(req, timeout=3 * TIME_SCALE) as r:
             return json.load(r)
 
     def events(self):
@@ -70,11 +70,11 @@ class RunningDaemon:
     def call(self, fn, *args):
         """Run fn in the daemon's loop thread and return its result."""
         fut = asyncio.run_coroutine_threadsafe(_wrap(fn, *args), self.loop)
-        return fut.result(5)
+        return fut.result(5 * TIME_SCALE)
 
     def stop(self):
         self.loop.call_soon_threadsafe(self.daemon.request_shutdown)
-        self.thread.join(10)
+        self.thread.join(10 * TIME_SCALE)
 
 
 async def _wrap(fn, *args):
@@ -110,7 +110,10 @@ def test_hook_event_is_spoken_and_logged(daemon, aw_home, say_stub):
     for key in ("hook_ms", "hook_to_daemon_ms", "queue_wait_ms", "synth_ms", "audio_s", "rtf", "first_audio_ms"):
         assert key in ev["timings"], key
     full = daemon.get(f"/api/events/{ev['id']}")
-    assert full["payload"]["last_assistant_message"].startswith("<voice")
+    # The stored payload is the projection: the reply's length, not its text.
+    assert "last_assistant_message" not in full["payload"]
+    assert full["payload"]["last_assistant_message_len"] == len('<voice set="nova"/><say mood="dry">Through the daemon.</say>')
+    assert full["payload"]["transcript_path"] == "transcript.jsonl"
     assert full["parsed"]["voice"] == {"set": "nova"}
     time.sleep(0.2)
     assert not say_stub.exists()  # the daemon spoke, not the fallback
@@ -204,7 +207,7 @@ def test_post_requires_header_and_host_is_checked(daemon):
 
 
 def test_ui_page_and_sse_stream(daemon):
-    with urllib.request.urlopen(daemon.base + "/", timeout=3) as r:
+    with urllib.request.urlopen(daemon.base + "/", timeout=3 * TIME_SCALE) as r:
         html = r.read().decode()
     assert "AfterWord" in html and "/api/stream" in html
 
@@ -270,7 +273,7 @@ def test_cross_site_and_wrong_port_refused(daemon):
         assert e.value.code == 403, headers
     ok = daemon.get("/api/status", headers={"Sec-Fetch-Site": "same-origin", "Origin": daemon.base})
     assert ok["pid"]
-    with urllib.request.urlopen(daemon.base + "/", timeout=3) as r:
+    with urllib.request.urlopen(daemon.base + "/", timeout=3 * TIME_SCALE) as r:
         assert r.headers["X-Frame-Options"] == "DENY"
 
 
@@ -377,7 +380,7 @@ def test_shutdown_with_open_sse_stream_is_prompt(aw_home, monkeypatch):
     assert opened.wait(5)
     t = time.time()
     d.stop()
-    assert time.time() - t < 1.5
+    assert time.time() - t < 1.5 * TIME_SCALE
 
 
 def test_sigterm_runs_cleanup(aw_home, tmp_path):

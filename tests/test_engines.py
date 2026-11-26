@@ -3,7 +3,6 @@ voices through the Swift helper, and the model fallback chain."""
 
 import asyncio
 import json
-import struct
 import sys
 import threading
 import time
@@ -18,6 +17,7 @@ from afterword.daemon.config import ConfigStore, Profile, build_config
 from afterword.daemon.stream import SAMPLE_RATE, StreamResampler, resample
 from afterword.daemon.synth import QwenSynth, StreamResult
 
+from conftest import TIME_SCALE
 from test_lab import FakeEngine, FakeModel, _Result
 from test_langs import drain, hook_msg
 from test_stream import make_daemon
@@ -332,7 +332,7 @@ def test_apple_errors_and_cancel(apple_stub, monkeypatch):
     t = time.perf_counter()
     with pytest.raises(qwen.RenderCancelled):
         apple.AppleSynth().stream("x", Profile(name="p", voice="apple:"), {}, lambda c: None, cancel)
-    assert time.perf_counter() - t < 5
+    assert time.perf_counter() - t < 5 * TIME_SCALE
 
 
 def test_apple_list_and_availability(apple_stub, monkeypatch):
@@ -640,7 +640,7 @@ def test_a_noisy_helper_never_blocks_on_stderr(apple_stub, monkeypatch):
     t = time.perf_counter()
     got = []
     res = apple.AppleSynth().stream("Hi", Profile(name="p", voice="apple:"), {}, got.append, threading.Event())
-    assert res.audio_s > 0 and got and time.perf_counter() - t < 10
+    assert res.audio_s > 0 and got and time.perf_counter() - t < 10 * TIME_SCALE
 
 
 def test_startup_warms_light_models_beyond_keep_loaded(aw_home, monkeypatch):

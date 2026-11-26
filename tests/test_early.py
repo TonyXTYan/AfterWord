@@ -12,9 +12,9 @@ from pathlib import Path
 import pytest
 
 from afterword.hooks import tags
-from conftest import TIME_SCALE, HOOK, hook_log, run_hook, stop_payload, wait_for
+from conftest import TIME_SCALE, HOOK, hook_log, run_hook, stop_payload, wait_for, SYSTEM_PYTHON, needs_system_python
 from test_daemon import RunningDaemon
-from test_hook import SYSTEM_PYTHON, FakeDaemon, assert_clean_exit
+from test_hook import FakeDaemon, assert_clean_exit
 
 from afterword.hooks import earlysay
 
@@ -577,13 +577,13 @@ def test_held_lock_does_not_block_the_hook(aw_home):
     try:
         t = time.time()
         md(0, "<say>Waiting.</say>\n", final=True)
-        assert time.time() - t < earlysay.LOCK_WAIT_S + 1.0
+        assert time.time() - t < earlysay.LOCK_WAIT_S + 1.0 * TIME_SCALE
     finally:
         os.close(fd)
     assert any(r.get("reason") == "stream file busy" for r in hook_log(aw_home))
 
 
-@pytest.mark.skipif(not os.path.exists(SYSTEM_PYTHON), reason="no system python3")
+@needs_system_python
 def test_message_display_runs_on_system_python(aw_home, daemon):
     voice_on(aw_home)
     md(0, "Hi.\n", python=SYSTEM_PYTHON)
@@ -598,10 +598,15 @@ def test_message_display_runs_on_system_python(aw_home, daemon):
 def test_message_display_is_fast(aw_home, daemon):
     """Timing budget. The fast path (voice off, or a whole message without
     <say>) reads one small state file; the full path parses and talks to the
-    daemon. Times are after interpreter start (the hook's own clock)."""
+    daemon. Times are after interpreter start (the hook's own clock), the
+    best of several runs. That clock still counts the CPU the other test
+    workers take, so in parallel the budgets get half as much again; what
+    they guard against (an import of the daemon's modules, a parse of a
+    whole message on the fast path) costs several times more."""
     env = {"AFTERWORD_HOOK_LOG_ALL": "1"}
+    budget = TIME_SCALE * (1.5 if os.environ.get("PYTEST_XDIST_WORKER") else 1.0)
 
-    def best(payload, n=5):
+    def best(payload, n=8):
         start = len(hook_log(aw_home))
         for _ in range(n):
             proc, _el = run_hook(payload, args=("message-display",), env=env)
@@ -611,9 +616,11 @@ def test_message_display_is_fast(aw_home, daemon):
     off = best(md_payload(0, "<say>x</say>\n" + "words " * 2000, session="off"))
     voice_on(aw_home)
     no_say = best(md_payload(0, "plain line\n" * 200, final=True))
-    full = min(best(md_payload(0, "<say>Line %d.</say>\n" % i, final=True, message="F%d" % i), n=1) for i in range(5))
+    full = min(best(md_payload(0, "<say>Line %d.</say>\n" % i, final=True, message="F%d" % i), n=1) for i in range(8))
     print("MessageDisplay in-hook: voice off %.1f ms, no <say> %.1f ms, early say %.1f ms" % (off, no_say, full))
-    assert off < 15 * TIME_SCALE and no_say < 20 * TIME_SCALE and full < 60 * TIME_SCALE
+    assert off < 15 * budget, off
+    assert no_say < 20 * budget, no_say
+    assert full < 60 * budget, full
 
 
 def test_a_reply_spoken_only_early_still_counts_as_voice_use(aw_home, daemon):

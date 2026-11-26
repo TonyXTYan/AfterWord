@@ -2,7 +2,7 @@
 
 As of 2026-11-25. AfterWord is a voice-out daemon for Claude Code and Codex: replies tagged with `<say>` are spoken in a per-session voice, one at a time, with a local GUI that shows what was said and why anything wasn't. It is not a context bus yet.
 
-Test suite: 970 passed, 2 skipped, about 130 s (`uv run pytest -q`), on the PR #3 branch after its review fixes. CI runs on every push (`.github/workflows/tests.yml`).
+Tests: `uv run pytest -q` (parallel, `-n 4` from pyproject, about 40 s; `-n0` for serial), and `uv run ruff check`. CI runs both on every push (`.github/workflows/tests.yml`).
 
 ## What has shipped
 
@@ -47,10 +47,10 @@ README still says "Not built: the optional menu-bar icon", and the outlook label
 | `afterword/hooks/afterword_hook.py` is 1,658 lines | Tool hooks will run on every tool call; they should be a small separate entry point. | P1 M3. |
 | `events` table has no schema version or migrations | `executescript(SCHEMA)` only creates if missing, so new columns silently do nothing on old databases. (Retention is done: `[daemon] keep_days`, 7 days by default, pruned hourly.) | P1 M1. |
 | Turn id is parsed but not stored (`server.py`, `fields`) | The timeline can't group a turn without re-parsing payload JSON. | P1 M1. |
-| Raw prompts and payloads stored with only a length cap | Tool events will carry commands and output that may hold secrets. | Redaction before P1 M3. |
+| Hook payloads are stored as a projection (0.3.5): ids, names, lengths, never prompt, reply or tool text | P1's bus will want more of the payload; anything beyond the projection needs redaction first. | Redaction before P1 M3. |
 | Daemon service only half done | `afterword install-service` and `start|stop|restart` exist (0.3.3). When the daemon is down, voices fall back to `say`, and that is logged only after the daemon returns and imports the spool (reason text "daemon down: spoken by say fallback"). P2 and P3 need an always-on service. | P0-6. |
 | No hook/daemon version handshake | A plugin update changes the hook but not a daemon running from a clone. `plugin.json` has no version. | P1 M2. |
 | Hook runtime | Each hook spawns `python3` (about 20-30 ms). Hooks run on stock `python3` 3.9+, the daemon on 3.12. No per-hook p95 is measured. | Measure in P1 M3 before adding tool hooks. |
-| Test runtime | 132 s serial. No fast/slow split, no `pytest-xdist`. Real-time `NullPlayer` and fixed sleeps likely dominate. | Before P1 gets busy; see decision D14. |
+| Test runtime | About 40 s with `pytest-xdist -n 4` (0.3.5), 140 s serial. Real-time `NullPlayer` and fixed sleeps still dominate the slowest tests. | See decision D14 for a fast tier. |
 | Writes under one lock on the event loop (`log.py`, `server.py`) | Tool-event volume could stall playback scheduling. | P1 M3 (writer thread). |
 | Swift helper binaries are hash-named and unsigned (`afterword/daemon/apple.py`) | Fine for AVSpeech. Wrong for `afterword-sense`: TCC grants would reset on every rebuild. | Start of P2. |

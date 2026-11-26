@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS events (
     text        TEXT,
     attrs       TEXT,                       -- JSON
     parsed      TEXT,                       -- JSON
-    payload     TEXT,                       -- JSON (raw hook payload, strings capped)
+    payload     TEXT,                       -- JSON (hook payload through common.project_payload)
     timings     TEXT,                       -- JSON
     delivery    TEXT,                       -- socket | spool
     clip        TEXT,                       -- path of the rendered audio
@@ -102,17 +102,177 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     return d
 
 
+BUSY_TIMEOUT_MS = 2000  # wait this long for another process's lock, then fail
+JOURNAL_SIZE_LIMIT = 8 * 1024 * 1024  # the WAL is cut back to this after a checkpoint
+QUICK_CHECK_BUDGET_S = 2.0  # a quick_check that runs longer is given up (the file is kept)
+# PRAGMA user_version once stored hook payloads went through
+# common.project_payload (0.3.5): older rows held prompts and replies raw.
+SCRUBBED_VERSION = 1
+
+
+class EventLogError(RuntimeError):
+    """events.db could not be opened, and was left where it is (locked by
+    another process, unreadable, ...)."""
+
+
+def _is_corrupt(exc: sqlite3.DatabaseError) -> bool:
+    """The file is not a database or is malformed (SQLITE_NOTADB /
+    SQLITE_CORRUPT), as opposed to locked, busy or unopenable."""
+    name = getattr(exc, "sqlite_errorname", None)
+    if name:
+        return name == "SQLITE_NOTADB" or name.startswith("SQLITE_CORRUPT")
+    msg = str(exc).lower()
+    return "not a database" in msg or "malformed" in msg
+
+
+def _quick_check(db: sqlite3.Connection) -> str | None:
+    """None if PRAGMA quick_check passes (or runs out of time: a slow check
+    is no proof of damage), else what it found."""
+    deadline = time.monotonic() + QUICK_CHECK_BUDGET_S
+    db.set_progress_handler(lambda: 1 if time.monotonic() > deadline else 0, 10_000)
+    try:
+        found = [str(r[0]) for r in db.execute("PRAGMA quick_check(5)").fetchall()]
+    except sqlite3.OperationalError as exc:
+        if "interrupt" not in str(exc).lower():
+            raise
+        log.warning("events.db quick_check took over %.0f s; skipped it", QUICK_CHECK_BUDGET_S)
+        return None
+    finally:
+        db.set_progress_handler(None, 0)
+    return None if found == ["ok"] else "; ".join(found)[:500]
+
+
+def _connect(db_path: Path) -> tuple[sqlite3.Connection, str | None]:
+    """Open events.db and check it. Returns the connection and None, or the
+    connection (still open, so SQLite does not clean up its -wal and -shm
+    before they are moved aside) and why the file is corrupt. Any other
+    failure (locked past BUSY_TIMEOUT_MS, unopenable, I/O) raises
+    EventLogError: the file may be fine, so it is left where it is."""
+    try:
+        db = sqlite3.connect(str(db_path), check_same_thread=False, isolation_level=None,
+                             timeout=BUSY_TIMEOUT_MS / 1000)
+    except sqlite3.Error as exc:
+        raise EventLogError(f"could not open the event log {db_path}: {exc}") from exc
+    try:
+        db.row_factory = sqlite3.Row
+        db.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("PRAGMA synchronous=NORMAL")
+        db.execute(f"PRAGMA journal_size_limit={JOURNAL_SIZE_LIMIT}")
+        problem = _quick_check(db)
+        if problem is None:
+            db.executescript(SCHEMA)
+            # Take the write lock once, so a database another process holds
+            # locked fails here (SQLITE_BUSY after BUSY_TIMEOUT_MS), clearly.
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("ROLLBACK")
+    except sqlite3.DatabaseError as exc:
+        if _is_corrupt(exc):
+            return db, str(exc) or type(exc).__name__
+        db.close()
+        held = " (another process holds it)" if "locked" in str(exc) or "busy" in str(exc) else ""
+        raise EventLogError(f"could not open the event log {db_path}: {exc}{held}; "
+                            "the file was left as it is") from exc
+    except BaseException:
+        db.close()
+        raise
+    return db, problem
+
+
+def _quarantine(db_path: Path) -> Path:
+    """Move events.db and its -wal / -shm aside as
+    events.db.corrupt-<UTC time>(-wal/-shm); never deletes them. Returns the
+    new path of the database file."""
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    suffixes = ("", "-wal", "-shm")
+    base, n = db_path.with_name(f"{db_path.name}.corrupt-{stamp}"), 1
+    while any(base.with_name(base.name + s).exists() for s in suffixes):
+        base, n = db_path.with_name(f"{db_path.name}.corrupt-{stamp}-{n}"), n + 1
+    for s in suffixes:
+        src = db_path.with_name(db_path.name + s)
+        if src.exists() or src.is_symlink():
+            src.rename(base.with_name(base.name + s))
+    return base
+
+
 class EventLog:
     def __init__(self, db_path: Path):
         self.db_path = db_path
         self._lock = threading.Lock()
-        self._db = sqlite3.connect(str(db_path), check_same_thread=False, isolation_level=None)
-        self._db.row_factory = sqlite3.Row
-        self._db.execute("PRAGMA journal_mode=WAL")
-        self._db.execute("PRAGMA synchronous=NORMAL")
-        self._db.executescript(SCHEMA)
         self._subscribers: set[asyncio.Queue] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
+        self.quarantined: Path | None = None  # where an unreadable events.db was moved
+        self._db, problem = _connect(db_path)
+        if problem is not None:
+            # A corrupt events.db would fail every start (launchd restarts
+            # the daemon every 10 s): move it aside and start a new one. The
+            # files are renamed before the connection closes, so SQLite's
+            # cleanup on close cannot delete or rewrite them in place.
+            try:
+                self.quarantined = _quarantine(db_path)
+            except OSError as exc:
+                raise EventLogError(f"the event log {db_path} is unreadable ({problem}) "
+                                    f"and could not be moved aside: {exc}") from exc
+            finally:
+                self._db.close()
+            log.error("the event log %s is unreadable (%s); moved it to %s and started a new one",
+                      db_path, problem, self.quarantined)
+            self._db, again = _connect(db_path)
+            if again is not None:
+                self._db.close()
+                raise EventLogError(f"a new event log at {db_path} fails its check too: {again}")
+        self.scrub_payloads()
+        if self.quarantined is not None:
+            self.insert(kind="system", status="error", decision=None,
+                        reason=f"{db_path.name} was unreadable; moved it to {self.quarantined.name} "
+                               "and started a new event log",
+                        error=problem[:1000])
+
+    def scrub_payloads(self) -> int:
+        """Once per database: rewrite the payloads of hook and alert rows
+        stored before 0.3.5 (prompts, replies and tool commands verbatim)
+        through common.project_payload, then VACUUM so the old text leaves
+        the file. Guarded by PRAGMA user_version; projecting is idempotent,
+        so running it again changes nothing. Returns how many rows changed."""
+        with self._lock:
+            if self._db.execute("PRAGMA user_version").fetchone()[0] >= SCRUBBED_VERSION:
+                return 0
+            changed, last_id = 0, 0
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                while True:
+                    rows = self._db.execute(
+                        "SELECT id, payload FROM events WHERE id > ? AND payload IS NOT NULL "
+                        "AND kind IN ('hook', 'alert') ORDER BY id LIMIT 500", (last_id,)).fetchall()
+                    if not rows:
+                        break
+                    for r in rows:
+                        last_id = r["id"]
+                        try:
+                            new = _dump(common.project_payload(json.loads(r["payload"])))
+                        except ValueError:
+                            new = None  # not JSON: nothing of it is worth keeping
+                        if new != r["payload"]:
+                            self._db.execute("UPDATE events SET payload = ? WHERE id = ?", (new, r["id"]))
+                            changed += 1
+                self._db.execute(f"PRAGMA user_version={SCRUBBED_VERSION}")
+                self._db.execute("COMMIT")
+            except BaseException:
+                self._db.execute("ROLLBACK")
+                raise
+            if changed:
+                log.info("removed prompt, reply and tool text from %d stored hook payload(s)", changed)
+                self._vacuum()
+        return changed
+
+    def _vacuum(self) -> None:
+        """VACUUM, then empty the WAL (VACUUM writes the whole database
+        through it). Caller holds the lock."""
+        try:
+            self._db.execute("VACUUM")
+            self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.OperationalError:
+            log.warning("VACUUM of the event log failed", exc_info=True)
 
     def close(self) -> None:
         with self._lock:
@@ -240,8 +400,8 @@ class EventLog:
     def prune_before(self, cutoff_ts: float, vacuum_at: int = 100) -> tuple[int, list[str]]:
         """Delete events older than `cutoff_ts` (rows still in flight stay).
         Returns how many went and the clip paths they pointed at, for the
-        caller to delete. A large prune is followed by VACUUM, so the file
-        shrinks too."""
+        caller to delete. A large prune is followed by VACUUM and a WAL
+        checkpoint, so the file and its -wal shrink too."""
         with self._lock:
             clips = [r["clip"] for r in self._db.execute(
                 "SELECT clip FROM events WHERE ts < ? AND clip IS NOT NULL "
@@ -252,10 +412,7 @@ class EventLog:
                 (cutoff_ts,),
             ).rowcount
             if n >= vacuum_at:
-                try:
-                    self._db.execute("VACUUM")
-                except sqlite3.OperationalError:
-                    log.warning("VACUUM after pruning failed", exc_info=True)
+                self._vacuum()
         return n, clips
 
     def forget_clip(self, event_id: int) -> None:
@@ -492,7 +649,7 @@ def _import_record(events: EventLog, rec: dict[str, Any]) -> bool:
         attrs=rec.get("attrs") if isinstance(rec.get("attrs"), dict) else None,
         parsed=rec.get("parsed") if isinstance(rec.get("parsed"), dict) else ({"alert": common.cap_strings(alert)}
                                                                               if alert is not None else None),
-        payload=common.cap_strings(rec.get("payload")),
+        payload=common.project_payload(rec.get("payload")),
         delivery="spool",
         error=_s(rec.get("fallback_error")),
     )

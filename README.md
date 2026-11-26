@@ -97,7 +97,8 @@ uv run afterword models pull kokoro chatterbox
 ```
 
 Kokoro is about 0.4 GB. Its Japanese text handling needs the UniDic
-dictionary, one time (about 0.5 GB): `uv run python -m unidic download`.
+dictionary, one time (about 0.5 GB): `uv run python -m unidic download`
+(before `install-service`, which copies it into the service's install).
 Chatterbox Multilingual is about 2.7 GB, plus its speech tokenizer. Apple
 voices need nothing extra: a small Swift helper is compiled on first use
 (Xcode command line tools). For better Apple voices, download Premium or
@@ -125,12 +126,17 @@ and restart it after a crash, install it as a LaunchAgent:
 uv run afterword install-service
 ```
 
-That writes `~/Library/LaunchAgents/io.github.tonyxtyan.afterword.plist`,
-which runs `afterword serve` with the same Python (keep the clone where it
-is), and loads it. A daemon you started by hand is stopped first. `--dry-run`
-prints the plist and the `launchctl` commands without doing anything. Run
-`install-service` again after moving the clone or changing `AFTERWORD_HOME`;
-it rewrites the plist and reloads it. Then:
+That sets up AfterWord's own copy of a release in `~/.afterword/app/` (see
+[Updates](#updates) below), then writes
+`~/Library/LaunchAgents/io.github.tonyxtyan.afterword.plist`, which runs
+`afterword serve` from that copy, and loads it. The copy is installed and
+tested before the running service is touched, so the clone you run it from
+can go on changing (or move) without affecting the service. A daemon you
+started by hand is stopped first. `--dry-run` prints what it would do, the
+plist and the `launchctl` commands without doing anything. `--dev` runs the
+service with this clone's Python instead (for working on AfterWord itself;
+keep the clone where it is). Run `install-service` again after changing
+`AFTERWORD_HOME`; it rewrites the plist and reloads it. Then:
 
 ```bash
 uv run afterword status    # includes a service line: loaded, pid, last exit
@@ -158,6 +164,67 @@ and Show in Finder. `afterword login off` (or the switch) is `launchctl
 disable`: launchd stops starting the daemon at login, but a running daemon
 keeps running and `afterword start` still works; `afterword login on` undoes
 it, and `afterword login` prints the setting.
+
+#### Updates
+
+Releases are the repository's `vX.Y.Z` tags: a GitHub workflow tags each
+version that reaches `main` with its CHANGELOG entry, and the service picks
+up tags only, never unreleased commits. Only tags on `main` are installed:
+the updater fetches `main` with the tag and refuses a tag whose commit is
+not on it, and records the commit it checked. `install-service` installs the
+release of the code you run it from (or the newest release, if that code is
+not one), with the same optional extras (`qwen`, `kokoro`, `chatterbox`)
+that are installed where you run it. The release the service runs (and the
+one it would roll back to) is never synced again: if you change the extras
+and run `install-service` again on the same release, it says so and the
+new extras come with the next release (`--dev` runs your checkout now).
+With `kokoro`, the UniDic dictionary is copied (cloned, on APFS) from the
+environment you install from, and from each release to the next; if there
+is none to copy, it says so: run `~/.afterword/app/current/.venv/bin/python
+-m unidic download`. Releases before v0.3.6 cannot update themselves, so it
+refuses them (use `--dev` until then):
+
+```
+~/.afterword/app/repo.git          git objects (fetched tags only)
+~/.afterword/app/releases/v0.3.6/  a checkout of the tag, with its own .venv (uv sync --frozen)
+~/.afterword/app/current        -> releases/v0.3.6   (what the LaunchAgent runs)
+~/.afterword/update.json           the updater's state
+```
+
+About 5 minutes after it starts, and then every `check_every_h` hours, the
+daemon runs `git ls-remote --tags` for a newer release. With `[update] mode
+= "auto"` (the default) it prepares it next to the running one (a checkout,
+`uv sync`, and a smoke test: the new `afterword --version` and an import of
+the daemon), waits until nothing is queued, being said or rendered in the
+voice lab (for 30 s, not counting time the Mac sleeps), points `current` at
+it and restarts (launchd starts it again within about 10 s). The update is
+confirmed after a minute of running (awake). If the new release crashes,
+is killed or fails at startup three times before that (restarts, logouts
+and `install-service` do not count: only runs that did not shut down
+cleanly), `current` goes back to the previous release (the last confirmed
+one, which is kept), the event log says so, and that tag is not tried again
+by itself. After an update, the Claude Code and Codex plugins are refreshed
+too when their CLIs are on PATH and the plugin is installed (`claude plugin
+marketplace update` and `claude plugin update afterword@afterword`; `codex
+plugin marketplace upgrade` and `codex plugin add afterword@afterword`, not
+when the Codex plugin is disabled): restart open Claude Code sessions to
+load the new hooks, and Codex asks you to review changed hooks. A failed
+refresh is tried again at the next three checks. `mode = "notify"` only
+reports new releases, and `"off"` does not check; changing the mode while a
+prepared update waits for quiet stops it. A `--dev` service only reports
+them too. Update now (or `afterword update --now`) while an update waits
+for quiet takes it over: with `--force` (the button's "Switch to … now") it
+switches at once.
+
+```bash
+uv run afterword update            # running version, install, mode, latest release, last check
+uv run afterword update --check    # check now
+uv run afterword update --now      # install the newest release now (--force: don't wait for quiet)
+```
+
+The Config page's Daemon section has the same, with Check now and Update
+now buttons and the new release's CHANGELOG entry. `uv` must be installed
+(the one `install-service` found is used, else the one on PATH).
 
 ## Voices and profiles
 
@@ -534,7 +601,8 @@ it shows the last line. **Mute all** sits in the header.
 - **Transcript**: every spoken line, newest first, by voice and folder, with
   a play button where the clip is kept (replayed at the pace it was spoken).
   Filter by text, status, voice, session or "Has audio". Click a line for
-  its raw payload, parsed tags, decision and reason (`session off`,
+  its hook payload (as stored: see [Files](#files)), parsed tags, decision
+  and reason (`session off`,
   `no <say> tag`, `daemon busy`, `duplicate`, …) and timings (hook, hook to
   daemon, synthesis, real-time factor, first chunk, first audio, and whether
   it was streamed); "Timings" shows p50/p95 stats. Prompt and session hooks
@@ -563,13 +631,15 @@ it shows the last line. **Mute all** sits in the header.
 | `~/.afterword/lab/` | voice lab previews and seed-explorer takes (cleared when the daemon restarts) |
 | `~/.afterword/lab/starred/`, `lab/starred.json` | starred takes (kept) |
 | `~/.afterword/state/` | per-session voice state (written by the hook; with alerts on, also the turn's start time and pending permissions). A file with no voice, mute or earlier voice in it is removed after 7 days without changes |
-| `~/.afterword/events.db` | event log (SQLite) shown in the UI; lines older than `[daemon] keep_days` (7 by default, 0 = keep all) are deleted hourly, with their clips |
+| `~/.afterword/events.db` | event log (SQLite) shown in the UI; lines older than `[daemon] keep_days` (7 by default, 0 = keep all) are deleted hourly, with their clips. Each row keeps the spoken text and, of the hook payload, only small fields (session id, hook event, cwd, prompt id, model, permission mode, tool name, notification type, transcript file name, flags and numbers): the prompt, the reply, notification messages and tool input and output are stored as their length (`prompt_len`, …), plus the keys of `tool_input` / `tool_response`, never their text (rows from before 0.3.5 are rewritten this way once, on start). A file SQLite cannot read is moved to `events.db.corrupt-<UTC time>` (with its `-wal` / `-shm`) and a new log is started |
 | `~/.afterword/clips/` | the last `[daemon] history` spoken clips (50 by default), replayable from the log, and none older than `keep_days` |
 | `~/.afterword/afterwordd.log` | daemon text log (rotating) |
 | `~/.afterword/hook.log` | hook log (JSON lines; errors land here, never in Claude Code) |
 | `~/.afterword/daemon.json` | daemon settings changed from the GUI (mute all) |
 | `~/.afterword/seen/` | short-lived markers so each turn is handled once |
 | `~/.afterword/stream/` | the text of messages being written, per session, for early speaking (pruned after 10 minutes) |
+| `~/.afterword/app/` | the service's managed install: `repo.git`, `releases/<tag>/` (the newest two) and the `current` link ([Updates](#updates)) |
+| `~/.afterword/update.json` | the updater's state: last check, newest release, a pending or rolled-back switch, the last plugin refresh |
 
 Environment: `AFTERWORD_HOME` relocates `~/.afterword`; `AFTERWORD_FALLBACK=none`
 disables the `say` fallback; `AFTERWORD_DISABLE=1` makes the hook a no-op;
@@ -588,14 +658,20 @@ uv run pytest -q
 ```
 
 The tests fake every model, so they need mlx-audio (the `qwen` extra) but no
-weights and none of the other extras. CI (`.github/workflows/tests.yml`) runs
-the same thing on an Apple Silicon macOS runner for every pull request and
-push to `main`.
+weights and none of the other extras. They run in parallel (pytest-xdist, four
+workers, set in `addopts`) and take about 40 seconds. To debug one test, run
+it in the foreground with `uv run pytest -n0 tests/test_hook.py -k name -s`
+(or `-p no:xdist -o addopts=""` to leave xdist out entirely). Lint with
+`uv run ruff check` (pyflakes, syntax errors and bugbear only; the hooks are
+checked against Python 3.9). CI (`.github/workflows/tests.yml`) runs ruff and
+then pytest on an Apple Silicon macOS runner for every pull request and push
+to `main`, with three workers (one per vCPU there) and the tests' time
+budgets scaled 3x (`CI` set; `AFTERWORD_TEST_TIME_SCALE` sets the factor).
 
 Tests that need the real models are skipped unless you opt in:
 
 ```bash
-AFTERWORD_LIVE_QWEN=1 uv run pytest -q -k live
+AFTERWORD_LIVE_QWEN=1 uv run pytest -q -m live
 ```
 
 The hooks (`afterword/hooks/`) are stdlib-only and run on Python 3.9+, so they

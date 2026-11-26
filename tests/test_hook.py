@@ -3,7 +3,6 @@ never fails (exit 0, no stdout, bounded time) whatever it is fed."""
 
 import json
 import os
-import shutil
 import socket
 import sys
 import threading
@@ -12,15 +11,15 @@ from pathlib import Path
 
 import pytest
 
-from conftest import TIME_SCALE, HOOK, hook_log, run_hook, stop_payload, wait_for
+from conftest import TIME_SCALE, HOOK, hook_log, run_hook, stop_payload, wait_for, SYSTEM_PYTHON, needs_system_python
 
 # The hook must not wait on a slow daemon or a FIFO (which would take 3 s or
 # forever): 1 s locally, scaled on CI but kept well below that.
-HANG_LIMIT_S = min(1.0 * TIME_SCALE, 2.0)
+HANG_LIMIT_S = min(1.5 * TIME_SCALE, 2.6)  # still below the 3 s hard deadline
 
 # Python startup alone is ~20 ms; this bound is about "never hangs", the
 # real timing is reported by test_hook_is_fast.
-MAX_SECONDS = 2.0
+MAX_SECONDS = 5.0 * TIME_SCALE  # parallel test workers can slow a cold start to ~3 s
 
 
 def assert_clean_exit(proc, elapsed):
@@ -577,7 +576,7 @@ def test_hard_deadline_ends_real_hangs(aw_home, kind):
     elapsed = time.time() - t
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout == b"" and proc.stderr == b""
-    assert 0.3 <= elapsed < 1.5, elapsed
+    assert 0.3 <= elapsed < min(1.5 * TIME_SCALE, 2.6), elapsed
     assert any(r.get("msg") == "hard deadline hit, exiting" for r in hook_log(aw_home))
 
 
@@ -658,10 +657,9 @@ def test_in_process_errors_are_swallowed(aw_home, monkeypatch, capsys):
     assert capsys.readouterr().out == ""
 
 
-SYSTEM_PYTHON = "/usr/bin/python3"
 
 
-@pytest.mark.skipif(not os.path.exists(SYSTEM_PYTHON), reason="no system python3")
+@needs_system_python
 def test_runs_on_system_python(aw_home, say_stub):
     """Hooks are stdlib-only and must work on macOS's stock python3 (3.9)."""
     proc, elapsed = run_hook(
@@ -672,7 +670,7 @@ def test_runs_on_system_python(aw_home, say_stub):
     assert hook_log(aw_home)[-1]["decision"] == "speak"
 
 
-@pytest.mark.skipif(not os.path.exists(SYSTEM_PYTHON), reason="no system python3")
+@needs_system_python
 def test_system_python_reads_config(aw_home, say_stub):
     """Without tomllib (3.9/3.10) the hook still honours fallback = "none"
     and max_chars via its small TOML reader."""

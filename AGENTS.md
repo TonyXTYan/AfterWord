@@ -4,6 +4,15 @@ Notes for agents working in this repo. What AfterWord is and how it works:
 [README.md](README.md), [DESIGN.md](DESIGN.md), [docs/](docs/). Where it goes
 next: [roadmaps/](roadmaps/README.md).
 
+## Tests and lint
+
+- `uv run pytest -q` runs the suite in parallel (`-n 4` in pyproject); add
+  `-n0` to debug serially. `uv run ruff check` must pass (CI runs both).
+- Hook code (`afterword/hooks/`) runs under the stock `/usr/bin/python3`
+  (3.9, `-S -I`): stdlib only, Python 3.9 syntax. Tests check both.
+- Tests never touch the real `~/.afterword`, `launchctl`, Finder or port
+  47800: use the `aw_home` fixture and the fakes in `tests/conftest.py`.
+
 ## Versioning
 
 One version for the whole repo (package, daemon, hooks, both plugins), in
@@ -49,4 +58,9 @@ Bump all of these together; `tests/test_version.py` checks they agree:
 1. Add the new version's entry to [CHANGELOG.md](CHANGELOG.md).
 2. Bump the version in the files above, in the same pull request as the
    change it describes (or a small one right after).
-3. After the merge to `main`, tag the merge commit `vX.Y.Z`.
+3. Merge to `main`. `.github/workflows/release.yml` then tags the merge
+   commit `vX.Y.Z` and makes a GitHub release from the CHANGELOG entry (it
+   fails, and tags nothing, if the entry is missing). Installs managed by
+   `afterword install-service` pick up the new tag on their next check and
+   switch to it when idle, so a merged version bump reaches the user's Mac
+   by itself. Never tag by hand unless the workflow failed.

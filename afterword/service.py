@@ -73,7 +73,8 @@ RESTART_EXIT = 75
 # Passed from the installing shell into the plist when set: where the models
 # were downloaded (Hugging Face honours these) and which Claude config
 # `claude -p` uses for alert phrases. Never secrets: the plist is 0644.
-PASS_ENV = ("HF_HOME", "HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "XDG_CACHE_HOME", "HF_HUB_OFFLINE", "CLAUDE_CONFIG_DIR")
+PASS_ENV = ("HF_HOME", "HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "XDG_CACHE_HOME", "HF_HUB_OFFLINE",
+            "CLAUDE_CONFIG_DIR", "CODEX_HOME")
 
 
 # --------------------------------------------------------------------------- #
@@ -152,11 +153,13 @@ def python_executable() -> str:
 def service_path(python: str) -> str:
     """PATH for the agent: launchd's default is only /usr/bin:/bin:/usr/sbin:/sbin.
     The venv's bin first, then ~/.local/bin and the directory of `claude`
-    (alert generation runs `claude -p`), then Homebrew and the system."""
+    (alert generation runs `claude -p`) and of `codex` (the updater refreshes
+    both plugins), then Homebrew and the system."""
     dirs = [str(Path(python).parent), str(Path.home() / ".local" / "bin")]
-    claude = shutil.which("claude")
-    if claude:
-        dirs.append(str(Path(claude).parent))
+    for tool in ("claude", "codex"):  # the updater refreshes both plugins; codex often lives under nvm/npm
+        found = shutil.which(tool)
+        if found:
+            dirs.append(str(Path(found).parent))
     dirs.extend(SYSTEM_PATH)
     seen: list[str] = []
     for d in dirs:
@@ -179,7 +182,7 @@ def build_plist(python: str | None = None) -> dict[str, Any]:
     log = str(home / LOG_NAME)
     return {
         "Label": LABEL,
-        "ProgramArguments": [py, "-m", "afterword.cli", "serve"],
+        "ProgramArguments": [py, "-P", "-m", "afterword.cli", "serve"],
         "RunAtLoad": True,
         "KeepAlive": {"SuccessfulExit": False},
         "ThrottleInterval": THROTTLE_S,
@@ -575,10 +578,12 @@ def _bootstrap(out=None) -> int:
     return _launch(("bootstrap", domain(), str(plist_path())), out or sys.stdout)
 
 
-def install(dry_run: bool = False, start: bool = True, out=None) -> int:
+def install(dry_run: bool = False, start: bool = True, out=None, python: str | None = None) -> int:
+    """Write the plist for `python` (default: this interpreter; the managed
+    install passes <home>/app/current/.venv/bin/python) and load it."""
     out = out or sys.stdout
     path = plist_path()
-    py = python_executable()
+    py = python or python_executable()
     data = plistlib.dumps(build_plist(py))
     info = service_info()
     if start and info.loaded is None:

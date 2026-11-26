@@ -28,12 +28,13 @@ import os
 import re
 import secrets
 import shutil
-import tempfile
 import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from afterword.hooks import common
 
 from . import qwen, voices
 
@@ -423,15 +424,7 @@ class StarStore:
     def _save(self) -> None:
         self.index.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         text = json.dumps({"version": 1, "stars": list(self.stars.values())}, ensure_ascii=False, indent=1)
-        fd, tmp = tempfile.mkstemp(prefix=".starred-", suffix=".json", dir=str(self.index.parent))
-        try:
-            os.fchmod(fd, 0o600)
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(text)
-            os.replace(tmp, self.index)
-        except BaseException:
-            Path(tmp).unlink(missing_ok=True)
-            raise
+        common.atomic_write(self.index, text)
 
     def path(self, sid: str) -> Path | None:
         if not isinstance(sid, str) or sid not in self.stars:

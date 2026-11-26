@@ -5,11 +5,10 @@ import json
 import os
 import re
 import time
-from pathlib import Path
 
 import pytest
 
-from conftest import TIME_SCALE, ROOT, hook_log, run_hook, stop_payload, wait_for
+from conftest import TIME_SCALE, ROOT, hook_log, run_hook, stop_payload, wait_for, SYSTEM_PYTHON, needs_system_python, require_system_python
 
 CONFIG = """
 [profiles.nova]
@@ -329,7 +328,7 @@ BAD = [b"", b"not json", b"[]", b'{"session_id": 5, "prompt": ["x"]}', b'{"promp
 @pytest.mark.parametrize("stdin", BAD, ids=range(len(BAD)))
 def test_new_events_never_fail(home, event, stdin):
     proc, elapsed = run_hook(stdin, args=(event,), env={"AFTERWORD_VOICE": "nova"})
-    assert proc.returncode == 0 and proc.stderr == b"" and elapsed < 2.0
+    assert proc.returncode == 0 and proc.stderr == b"" and elapsed < 2.0 * TIME_SCALE
     if proc.stdout:
         json.loads(proc.stdout)  # anything printed is valid hook JSON
 
@@ -351,10 +350,9 @@ def test_prompt_hook_with_corrupt_config_and_closed_stdout(home):
     assert proc.returncode == 0
 
 
-SYSTEM_PYTHON = "/usr/bin/python3"
 
 
-@pytest.mark.skipif(not os.path.exists(SYSTEM_PYTHON), reason="no system python3")
+@needs_system_python
 def test_prompt_hook_on_system_python(home):
     proc, _ = run_hook({"session_id": "s9", "prompt": "/afterword:voice nova"}, args=("user-prompt-submit",),
                        python=SYSTEM_PYTHON)
@@ -589,8 +587,7 @@ def test_dotted_profile_names_on_system_python(home):
     import tomllib  # noqa: F401  (3.12 test runner)
 
     (home / "config.toml").write_text('[profiles."nova.v2"]\nvoice = "builtin:Serena"\n[profiles.plain]\nvoice = "builtin:Ryan"\n')
-    if not os.path.exists(SYSTEM_PYTHON):
-        pytest.skip("no system python3")
+    require_system_python()
     proc, _ = run_hook({"session_id": "d1", "prompt": "/afterword:voice nova.v2"}, args=("user-prompt-submit",),
                        python=SYSTEM_PYTHON)
     assert "profile nova.v2" in proc.stdout.decode()
@@ -620,7 +617,6 @@ def test_long_voice_argument_is_not_echoed(home):
 def test_repeated_prompt_without_prompt_id_is_not_dropped(home):
     # No prompt_id: only near-simultaneous duplicates are merged.
     run_hook({"session_id": "r1", "prompt": "/afterword:voice off"}, args=("user-prompt-submit",))
-    import hashlib
 
     for p in (home / "seen").iterdir():
         os.utime(p, (time.time() - 20,) * 2)  # older than the no-id window
