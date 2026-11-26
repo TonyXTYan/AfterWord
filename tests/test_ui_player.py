@@ -96,3 +96,20 @@ def test_stretch_near_one_is_a_copy(stretch):
 
 def test_stretch_is_fast_enough_to_run_on_play(stretch):
     assert stretch["ms_10s_48k"] < 1500
+
+
+def test_a_play_from_silence_opens_the_current_default_output():
+    """A long-lived AudioContext can stay tied to an output that is gone
+    (headphones unplugged): a play that starts from silence gets a fresh one,
+    the old one is closed, and decoding does not depend on either."""
+    script = _script()
+    play = script[script.index("  play() {"):script.index("  pause() {")]
+    assert "awPlayContext()" in play
+    pick = script[script.index("function awPlayContext()"):script.index("let awDecoder")]
+    assert "AW_CTX_IDLE_MS" in pick and "awNewContext()" in pick
+    assert "old.close()" in script[script.index("function awNewContext()"):script.index("function awContext()")]
+    assert "decodeAudioData" not in script[script.index("class AwAudio"):script.index('customElements.define("aw-audio"')]
+    assert "OfflineAudioContext" in script[script.index("function awDecode("):script.index("function awDecode(") + 300]
+    assert 'addEventListener("devicechange"' in script
+    # the clock of a playing clip is read from the context it plays on
+    assert "awCtx.currentTime" not in script

@@ -1715,10 +1715,55 @@ document.addEventListener("aw:speakers", () => {
 // duration, playbackRate, and the play / pause / ended / loadedmetadata
 // events. It draws its own play button, position slider and time. Only one
 // clip plays at a time: play() pauses every other one.
-let awCtx = null;
-function awContext() {
-  if (!awCtx) awCtx = new (window.AudioContext || window.webkitAudioContext)();
+//
+// Output device: an AudioContext opens the system default output when it is
+// made and can stay tied to it, so after headphones come and go a long-lived
+// one may play into a device that is gone (silence until a reload). Like
+// afplay, which opens the default anew for every clip, a play that starts
+// from silence gets a fresh context (playNow), and one made earlier is
+// closed. A devicechange (when the browser reports one) also moves a clip
+// that is playing onto a fresh context. Decoding uses its own offline
+// context, so buffers outlive the context that plays them.
+let awCtx = null, awCtxStale = false;
+const AW_CTX_IDLE_MS = 1500;   // idle at least this long: the next play gets a fresh context
+let awIdleSince = 0;
+function awNewContext() {
+  const old = awCtx;
+  awCtx = new (window.AudioContext || window.webkitAudioContext)();
+  awCtxStale = false;
+  if (old && old.state !== "closed") old.close().catch(() => {});
   return awCtx;
+}
+function awContext() {
+  if (!awCtx || awCtx.state === "closed") return awNewContext();
+  return awCtx;
+}
+// The context for a play about to start: fresh unless a clip is playing now or
+// one stopped a moment ago (a chain of clips keeps one context).
+function awPlayContext() {
+  const busy = [...AwAudio.active].some((a) => a._node);
+  if (!awCtx || awCtx.state === "closed") return awNewContext();
+  // Only inside a click or key press: a context made outside one may start
+  // suspended (Safari), so a play after an await keeps the one it has.
+  const ua = navigator.userActivation;
+  const gesture = !ua || ua.isActive;
+  if (!busy && gesture && (awCtxStale || awCtx.state === "interrupted" || Date.now() - awIdleSince > AW_CTX_IDLE_MS)) return awNewContext();
+  return awCtx;
+}
+let awDecoder = null;   // decodes at 48 kHz; a source node resamples to the device's rate
+function awDecode(ab) {
+  if (!awDecoder) awDecoder = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 1, 48000);
+  return awDecoder.decodeAudioData(ab);
+}
+if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+  navigator.mediaDevices.addEventListener("devicechange", () => {
+    awCtxStale = true;
+    const playing = [...AwAudio.active].filter((a) => a._node);
+    if (!playing.length) return;
+    for (const a of playing) a._halt();
+    awNewContext();
+    for (const a of playing) a._start();
+  });
 }
 // WSOLA time-stretch: rate > 1 is faster, the pitch is kept (what
 // preservesPitch does for a media element). Takes and returns an array of
@@ -1839,7 +1884,7 @@ class AwAudio extends HTMLElement {
     if (playing) this._start();
   }
   get currentTime() {
-    if (this._node) return Math.min(this._dur, this._pos0 + (awCtx.currentTime - this._t0) * this._nodeRate);
+    if (this._node) return Math.min(this._dur, this._pos0 + (this._ctx.currentTime - this._t0) * this._nodeRate);
     return this._pos;
   }
   set currentTime(t) {
@@ -1857,7 +1902,7 @@ class AwAudio extends HTMLElement {
     if (!this._paused) return this._load || Promise.resolve();
     const gen = ++this._gen;
     if (this._ended) { this._pos = 0; this._ended = false; }
-    const ctx = awContext();
+    const ctx = awPlayContext();
     const resumed = ctx.state === "suspended" ? ctx.resume() : Promise.resolve();  // in the click's call stack
     this._paused = false; AwAudio.active.add(this);
     this._paint();
@@ -1886,7 +1931,7 @@ class AwAudio extends HTMLElement {
       const src = this._src;
       const load = fetch(src)
         .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.arrayBuffer(); })
-        .then((ab) => awContext().decodeAudioData(ab))
+        .then((ab) => awDecode(ab))
         .then((buf) => {
           if (this._src !== src) throw new Error("source changed");
           this._buf = buf; this._dur = buf.duration;
@@ -1912,7 +1957,7 @@ class AwAudio extends HTMLElement {
     const b = this._buf, chans = [];
     for (let c = 0; c < b.numberOfChannels; c++) chans.push(b.getChannelData(c));
     const out = stretchChannels(chans, b.sampleRate, r);
-    const sb = awContext().createBuffer(out.length, out[0].length, b.sampleRate);
+    const sb = new AudioBuffer({numberOfChannels: out.length, length: out[0].length, sampleRate: b.sampleRate});
     out.forEach((d, c) => sb.copyToChannel(d, c));
     this._stretched = {rate: r, buf: sb};
     return sb;
@@ -1925,7 +1970,7 @@ class AwAudio extends HTMLElement {
     node.connect(ctx.destination);
     node.onended = () => {
       if (this._node !== node) return;
-      this._node = null; node.disconnect();
+      this._node = null; node.disconnect(); awIdleSince = Date.now();
       this._pos = this._dur; this._ended = true;
       this._paused = true; AwAudio.active.delete(this);
       this._paint();
@@ -1933,14 +1978,14 @@ class AwAudio extends HTMLElement {
       this.dispatchEvent(new Event("ended"));
     };
     node.start(0, Math.min(buf.duration, this._pos / r));
-    this._node = node; this._t0 = ctx.currentTime; this._pos0 = this._pos; this._nodeRate = r;
+    this._node = node; this._ctx = ctx; this._t0 = ctx.currentTime; this._pos0 = this._pos; this._nodeRate = r;
     this._tick();
   }
   _halt() {  // stop the sound, keep the position
     const node = this._node;
     if (!node) return;
     this._pos = this.currentTime;
-    this._node = null;
+    this._node = null; awIdleSince = Date.now();
     node.onended = null;
     try { node.stop(); } catch { /* not started */ }
     node.disconnect();
@@ -3120,7 +3165,7 @@ const Sessions = (() => {
   async function preview(p) {
     if (pv && pv.phase === "render") return;
     if (pv && pv.name === p.name) { player.pause(); return; }
-    try { awContext().resume().catch(() => {}); } catch { /* play() resumes it again */ }
+    try { awPlayContext().resume().catch(() => {}); } catch { /* play() resumes it again */ }
     player.pause();
     const name = p.name;
     const lang = String(p.lang || "").toLowerCase().split(/[-_]/)[0];
