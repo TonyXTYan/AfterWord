@@ -1,0 +1,39 @@
+# Changelog
+
+How versions are numbered: [AGENTS.md](AGENTS.md#versioning). Versions before
+0.3.1 were never tagged; their entries were written afterwards from the git
+history, and the last commit of each is given.
+
+## 0.3.1 (2026-11-26)
+
+- GUI clips follow the system's default output. A play that starts from
+  silence opens the current default device (an old audio context could stay
+  tied to headphones that were gone and play nothing until a reload), and a
+  clip that is playing moves when the browser reports a device change.
+- The version is set in the plugin manifests too, and a test keeps every copy
+  of it in step.
+
+## 0.3.0 (2026-11-26, last commit 21f7718)
+
+More engines and the GUI's second pass ([docs/research-v3.md](docs/research-v3.md)).
+
+- Kokoro, Chatterbox Multilingual and Apple voices next to Qwen3-TTS, mixed
+  per profile and language.
+- GUI v2: transcript, sessions, voice lab workbench and config pages; one
+  colour per voice; clips through Web Audio so media keys stay with music.
+- Claude picks a session's voice from the least-used profiles; voice
+  descriptions; speak anything and replay; export and per-voice stats;
+  keyboard shortcuts and fix-a-word.
+- Speaker colours with a picker, and an Engines mode in the voice lab.
+
+## 0.2.0 (2026-11-25, last commit b7d7089)
+
+[docs/design-v2.md](docs/design-v2.md) and Codex support: pronunciations, a
+voice per language with several `<say>` blocks per reply, streaming playback
+and early speaking, spoken alerts, and the seed explorer.
+
+## 0.1.0 (2026-11-24, last commit b91bbe0)
+
+[DESIGN.md](DESIGN.md), the v1 build: tag parser, hooks with a `say`
+fallback, the daemon (queue, event log, Qwen3-TTS), per-session voice control,
+the Claude Code plugin, and the first GUI.
