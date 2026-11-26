@@ -137,7 +137,7 @@ def say_stub(tmp_path, monkeypatch):
     return record
 
 
-def wait_for(predicate, timeout=5.0, interval=0.02):
+def wait_for(predicate, timeout=5.0 * TIME_SCALE, interval=0.02):
     end = time.time() + timeout
     while time.time() < end:
         value = predicate()
@@ -147,7 +147,7 @@ def wait_for(predicate, timeout=5.0, interval=0.02):
     return predicate()
 
 
-def run_hook(stdin, args=("stop",), env=None, python=None, timeout=15):
+def run_hook(stdin, args=("stop",), env=None, python=None, timeout=15 * TIME_SCALE):
     """Run the hook as Claude Code would. Returns (CompletedProcess, seconds)."""
     if isinstance(stdin, (dict, list)):
         stdin = json.dumps(stdin)
