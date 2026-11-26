@@ -1,6 +1,6 @@
 {
   "name": "afterword",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Spoken replies for Claude Code with local Qwen3-TTS: off by default, per-session voices, triggered only by a <say> tag.",
   "author": {"name": "Tony Yan"},
   "homepage": "https://github.com/TonyXTYan/AfterWord",

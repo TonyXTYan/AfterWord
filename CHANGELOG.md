@@ -4,6 +4,21 @@ How versions are numbered: [AGENTS.md](AGENTS.md#versioning). Versions before
 0.3.1 were never tagged; their entries were written afterwards from the git
 history, and the last commit of each is given.
 
+## 0.3.4 (2026-11-26)
+
+- A Daemon section first on the Config page: whether the daemon runs under
+  launchd or by hand, its pid, uptime and last exit; a **Start at login**
+  switch (`launchctl enable` / `disable`, which keeps the running daemon);
+  **Restart** (under launchd the daemon exits 75 and KeepAlive brings it
+  back; the page waits for the new pid); the event log's size, clips and
+  retention with **Prune now**; the last lines of `afterwordd.log` and
+  `service.log`; **Copy status**; and **Show in Finder** for `~/.afterword`.
+  New endpoints: `GET /api/service`, `POST /api/service` (`login`),
+  `POST /api/service/restart`, `/prune`, `/reveal`, `GET /api/logs/{name}`.
+- `afterword login [on|off]`, and "start at login" in `afterword status`.
+  `start`, `install-service` and `restart` still work with start at login
+  off: they enable the service for the moment and turn login back off.
+
 ## 0.3.3 (2026-11-26)
 
 - The daemon can run as a LaunchAgent: `afterword install-service` writes and
