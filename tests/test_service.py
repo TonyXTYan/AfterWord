@@ -13,6 +13,7 @@ import sys
 import pytest
 
 from afterword import cli, service
+from conftest import TIME_SCALE
 
 REAL_LAUNCHCTL = service.launchctl  # before the autouse fixture replaces it
 
@@ -656,7 +657,13 @@ def test_ui_port_in_use(aw_home, as_service):
         else:
             pytest.fail("the daemon never reported running without the UI")
         assert p.poll() is None
-        assert service._ping_pid() == p.pid
+        # A loaded runner can take more than one 1 s ping to answer: retry.
+        pid, end = None, _time.monotonic() + 10 * TIME_SCALE
+        while pid != p.pid and _time.monotonic() < end:
+            pid = service._ping_pid(timeout=2.0)
+            if pid != p.pid:
+                _time.sleep(0.2)
+        assert pid == p.pid
         p.terminate()
         p.communicate(timeout=20)
         assert p.returncode == 0
