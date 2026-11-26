@@ -65,6 +65,8 @@ early_say = true          # speak a <say> as soon as Claude has written it (Mess
                           # not only when the reply is finished
 max_queue = 16            # queued items beyond this are skipped as "daemon busy"
 history = 50              # clips kept on disk for replay
+keep_days = 7             # days of transcript (events.db) kept; older lines go, with their
+                          # clips. 0 = keep everything
 
 [alerts]
 # Spoken alerts: a short line when Claude needs you (a permission prompt, a
@@ -209,6 +211,7 @@ class DaemonSettings:
     model_fallback: str = "apple"  # a failed model voice: "apple" (then say), "say" or "none"
     max_queue: int = 16
     history: int = 50
+    keep_days: int = 7  # events.db rows older than this are deleted (0 = never)
 
 
 @dataclass(frozen=True)
@@ -394,6 +397,7 @@ def build_config(raw: dict[str, Any]) -> tuple[Config, list[str]]:
         model_fallback=model_fallback,
         max_queue=_num(d.get("max_queue"), int, defaults.max_queue, 1, 1000, "daemon.max_queue", errors),
         history=_num(d.get("history"), int, defaults.history, 0, 10000, "daemon.history", errors),
+        keep_days=_num(d.get("keep_days"), int, defaults.keep_days, 0, 3650, "daemon.keep_days", errors),
     )
 
     profiles: dict[str, Profile] = {}

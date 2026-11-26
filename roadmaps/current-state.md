@@ -45,7 +45,7 @@ README still says "Not built: the optional menu-bar icon", and the outlook label
 | `afterword/ui/index.html` is about 5,600 lines of inline HTML, CSS and JS | Every P1 page (timeline, suggestions, metrics) lands here. 6 `tests/test_ui_*.py` files (engines, explorer, fork, keys, player, speakers) and `tests/test_gui_api.py` depend on it. | Before P1 M4 (timeline). See decision D8. |
 | `afterword/daemon/server.py` (1,532 lines) mixes socket, HTTP, enqueueing and alerts | P1 needs one clean ingestion seam for bus events. | During P1 M2. |
 | `afterword/hooks/afterword_hook.py` is 1,658 lines | Tool hooks will run on every tool call; they should be a small separate entry point. | P1 M3. |
-| `events` table has no schema version, no migrations, no retention | `executescript(SCHEMA)` only creates if missing, so new columns silently do nothing on old databases. `events.db` grows forever. | P1 M1, M2. |
+| `events` table has no schema version or migrations | `executescript(SCHEMA)` only creates if missing, so new columns silently do nothing on old databases. (Retention is done: `[daemon] keep_days`, 7 days by default, pruned hourly.) | P1 M1. |
 | Turn id is parsed but not stored (`server.py`, `fields`) | The timeline can't group a turn without re-parsing payload JSON. | P1 M1. |
 | Raw prompts and payloads stored with only a length cap | Tool events will carry commands and output that may hold secrets. | Redaction before P1 M3. |
 | No daemon service | No launchd agent, no `afterword start|stop`. When the daemon is down, voices fall back to `say`, and that is logged only after the daemon returns and imports the spool (reason text "daemon down: spoken by say fallback"). P2 and P3 need an always-on service. | P0-6. |

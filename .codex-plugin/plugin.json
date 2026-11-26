@@ -1,6 +1,6 @@
 {
   "name": "afterword",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Spoken replies for Codex with local Qwen3-TTS: off by default, per-session voices, triggered only by a <say> tag.",
   "author": {"name": "Tony Yan"},
   "homepage": "https://github.com/TonyXTYan/AfterWord",

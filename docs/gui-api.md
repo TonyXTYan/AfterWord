@@ -199,7 +199,7 @@ queue is full (`daemon busy`; that row is logged as `skipped`).
 ]}
 ```
 Lines whose audio clip is still on disk (the last `history` clips, 50 by
-default), newest first. `?download=1` serves the WAV as an attachment
+default, from the last `keep_days` days, 7 by default), newest first. `?download=1` serves the WAV as an attachment
 (`afterword-41.wav`). Play at `playback_rate` to hear it as it was spoken.
 
 ## Export

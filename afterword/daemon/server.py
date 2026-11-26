@@ -38,6 +38,7 @@ log = logging.getLogger("afterword.daemon")
 SOCKET_LINE_LIMIT = 2 * 1024 * 1024
 SOCKET_READ_TIMEOUT_S = 2.0
 SPOOL_POLL_S = 10.0
+RETENTION_EVERY_S = 3600.0  # how often events older than [daemon] keep_days are pruned
 MAX_TEXT_CHARS = 5000
 UI_DIR = Path(__file__).resolve().parent.parent / "ui"
 SEGMENT_GAP_S = 0.25  # silence between the segments of one item
@@ -1186,6 +1187,35 @@ class Daemon:
                 log.warning("warming %s failed: %s", kind, exc)
                 self.events.insert(kind="system", status="error", reason=f"could not load {model_label(kind)}", error=str(exc))
 
+    def prune_events(self, now: float | None = None) -> int:
+        """Delete events older than [daemon] keep_days and the clips they
+        point at (a clip is only reachable through its row). 0 days keeps
+        everything. Returns how many rows went."""
+        days = self.store.get().daemon.keep_days
+        if days <= 0:
+            return 0
+        cutoff = (time.time() if now is None else now) - days * 86400
+        n, clips = self.events.prune_before(cutoff)
+        root = self.clips_dir.resolve()
+        for c in clips:
+            try:
+                path = Path(c).resolve()
+                if path.parent == root and path.suffix == ".wav":
+                    path.unlink(missing_ok=True)
+            except OSError:
+                log.warning("could not delete clip %s", c, exc_info=True)
+        if n:
+            log.info("pruned %d event(s) older than %d day(s), %d clip(s)", n, days, len(clips))
+        return n
+
+    async def retention_loop(self) -> None:
+        while True:
+            try:
+                await asyncio.to_thread(self.prune_events)
+            except Exception:
+                log.exception("event pruning failed")
+            await asyncio.sleep(RETENTION_EVERY_S)
+
     def _prune_clips(self, keep: int) -> None:
         try:
             clips = sorted(self.clips_dir.glob("*.wav"), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -1429,6 +1459,7 @@ async def run_daemon(port: int | None = None, http: bool = True, on_ready=None) 
         tasks.append(asyncio.create_task(daemon.worker(), name="worker"))
         tasks.append(asyncio.create_task(daemon.spool_poller(), name="spool"))
         tasks.append(asyncio.create_task(daemon.warm_models(), name="warm"))
+        tasks.append(asyncio.create_task(daemon.retention_loop(), name="retention"))
 
         # Our own SIGINT/SIGTERM handling in both modes, so shutdown always
         # runs the cleanup below (uvicorn's own capture re-raises the signal

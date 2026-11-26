@@ -19,10 +19,12 @@ One version for the whole repo (package, daemon, hooks, both plugins), in
   - Each later phase that changes the shape of the system (screen context,
     speech in, the suggester) gets the next major. Ordinary feature work never
     bumps the major.
-- **Minor**: a new feature set or design generation (a roadmap milestone, a
-  new engine, a GUI page), or anything that changes config, the event log or
-  the hook protocol in a way older parts still understand.
-- **Patch**: fixes and small polish that change no format.
+- **Minor**: a new design generation or a large feature set (a roadmap
+  milestone, a new engine, a GUI page), or a change to the event log schema
+  or the hook protocol that older parts still understand.
+- **Patch**: fixes, small polish, and small additions such as a new config
+  setting with a default that keeps things working (0.3.2 added
+  `[daemon] keep_days` as a patch).
 
 The design docs' "v1 / v2 / v3" (`DESIGN.md`, `docs/design-v2.md`,
 `docs/research-v3.md`) name design generations, not releases. They map to

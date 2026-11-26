@@ -16,7 +16,7 @@ Not in P1: screen or mic input, an LLM suggester, a menu-bar panel. Suggestions 
 
 - One `events` table in `afterword/daemon/log.py`, built around speech: `kind` is `hook | test | system | alert`, and `status` is rewritten as speech moves through the queue. Indexes on `session_id` and `clip` only.
 - No schema version. `executescript(SCHEMA)` only creates missing tables, so new columns would silently not appear on existing databases.
-- No retention on `events`. Only clip WAVs (`history = 50`) and state files are pruned.
+- Retention on `events` is by age only: `[daemon] keep_days` (7 by default) is pruned hourly by `Daemon.retention_loop`, with the rows' clips. Clip WAVs are also capped by count (`history = 50`).
 - Hooks today: SessionStart, UserPromptSubmit (sync, 5 s), Stop, PermissionRequest, Notification, MessageDisplay (async). Codex runs four of these synchronously. Not captured: PreToolUse, PostToolUse, SubagentStop, SessionEnd, PreCompact.
 - The daemon parses the turn id (`prompt_id`) but doesn't store it.
 - The Transcript loads `/api/events?limit=500` (`loadEvents` in `afterword/ui/index.html`; 200 is only the API default), and `session_activity()` counts every `kind = 'hook'` row. **Tool events must not go into `events`**: they would push spoken lines off the page, inflate session counts and flood SSE.
@@ -120,7 +120,7 @@ Rules for tool events:
 | `[bus] record` | `"lifecycle"` (the events captured today). `"tools"` adds tool hooks; `"off"` writes nothing. | config; decision D10 |
 | `bus.data` kept | 3 days, then set to NULL | hourly prune in `spool_poller` (`afterword/daemon/server.py`) |
 | `bus` rows kept | 14 days | same |
-| `events` (voice) kept | 90 days or 100k rows | same |
+| `events` (voice) kept | `[daemon] keep_days`, 7 days by default (no row cap) | `Daemon.retention_loop` |
 | `suggestions` and actions kept | 180 days | same |
 | `auto_vacuum` | `INCREMENTAL`, set in the v2 migration with one `VACUUM` | `afterword/daemon/log.py` |
 | Pause | A pause flag stops bus writes; voice keeps working. Shown in the GUI header. | config and GUI |

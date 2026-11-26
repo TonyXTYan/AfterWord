@@ -232,6 +232,27 @@ class EventLog:
             "last_event": {k: ev.get(k) for k in ("id", "ts", "status", "reason", "text")} if ev else None,
         }
 
+    def prune_before(self, cutoff_ts: float, vacuum_at: int = 100) -> tuple[int, list[str]]:
+        """Delete events older than `cutoff_ts` (rows still in flight stay).
+        Returns how many went and the clip paths they pointed at, for the
+        caller to delete. A large prune is followed by VACUUM, so the file
+        shrinks too."""
+        with self._lock:
+            clips = [r["clip"] for r in self._db.execute(
+                "SELECT clip FROM events WHERE ts < ? AND clip IS NOT NULL "
+                "AND status NOT IN ('queued','synthesizing','playing')", (cutoff_ts,)
+            ).fetchall()]
+            n = self._db.execute(
+                "DELETE FROM events WHERE ts < ? AND status NOT IN ('queued','synthesizing','playing')",
+                (cutoff_ts,),
+            ).rowcount
+            if n >= vacuum_at:
+                try:
+                    self._db.execute("VACUUM")
+                except sqlite3.OperationalError:
+                    log.warning("VACUUM after pruning failed", exc_info=True)
+        return n, clips
+
     def forget_clip(self, event_id: int) -> None:
         """The clip file was pruned: stop listing it in history."""
         with self._lock:

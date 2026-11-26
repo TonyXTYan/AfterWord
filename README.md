@@ -520,8 +520,8 @@ it shows the last line. **Mute all** sits in the header.
 | `~/.afterword/lab/` | voice lab previews and seed-explorer takes (cleared when the daemon restarts) |
 | `~/.afterword/lab/starred/`, `lab/starred.json` | starred takes (kept) |
 | `~/.afterword/state/` | per-session voice state (written by the hook; with alerts on, also the turn's start time and pending permissions). A file with no voice, mute or earlier voice in it is removed after 7 days without changes |
-| `~/.afterword/events.db` | event log (SQLite) shown in the UI |
-| `~/.afterword/clips/` | last N spoken clips, replayable from the log |
+| `~/.afterword/events.db` | event log (SQLite) shown in the UI; lines older than `[daemon] keep_days` (7 by default, 0 = keep all) are deleted hourly, with their clips |
+| `~/.afterword/clips/` | the last `[daemon] history` spoken clips (50 by default), replayable from the log, and none older than `keep_days` |
 | `~/.afterword/afterwordd.log` | daemon text log (rotating) |
 | `~/.afterword/hook.log` | hook log (JSON lines; errors land here, never in Claude Code) |
 | `~/.afterword/daemon.json` | daemon settings changed from the GUI (mute all) |

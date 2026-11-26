@@ -4,6 +4,13 @@ How versions are numbered: [AGENTS.md](AGENTS.md#versioning). Versions before
 0.3.1 were never tagged; their entries were written afterwards from the git
 history, and the last commit of each is given.
 
+## 0.3.2 (2026-11-26)
+
+- The event log has a retention limit: `[daemon] keep_days` (7 by default,
+  0 = keep everything). Every hour, and when the daemon starts, lines older
+  than that are deleted from `events.db` together with their clips, and a
+  large prune compacts the file.
+
 ## 0.3.1 (2026-11-26)
 
 - GUI clips follow the system's default output. A play that starts from
