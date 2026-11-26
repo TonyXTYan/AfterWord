@@ -658,7 +658,7 @@ def handle_stop(payload: dict) -> dict:
         "stop_hook_active": bool(payload.get("stop_hook_active")),
         "state_changed": state_changed,
         "config_error": cfg_error,
-        "payload": c.cap_strings(payload),
+        "payload": c.project_payload(payload),
     }
 
     outcome = {"decision": decision, "reason": reason, "text": text, "profile": profile}
@@ -706,7 +706,6 @@ def handle_stop(payload: dict) -> dict:
             outcome["fallback"] = "none"
         spooled = dict(request)
         spooled.pop("alert", None)
-        spooled["payload"] = c.cap_strings(payload, limit=8 * 1024)
         spooled["unreachable"] = str(exc)
         spooled["fallback"] = outcome["fallback"]
         spooled["fallback_error"] = outcome.get("fallback_error")
@@ -718,7 +717,7 @@ def handle_stop(payload: dict) -> dict:
             # The "done" alert gets its own record, like the daemon's own row.
             alert_req = {k: request[k] for k in ("v", "type", "event", "t_hook", "session_id", "cwd", "profile")}
             alert_req.update(t_sent=time.time(), decision="info", reason="alert: done", text="", alert=done,
-                             payload=c.cap_strings(payload, limit=4 * 1024))
+                             payload=c.project_payload(payload))
             got = _alert_down(alerts, cfg, state, alert_req, done, exc)
             outcome["alert_fallback"] = got["fallback"]
     return outcome
@@ -850,7 +849,7 @@ def _early_locked(payload, session_id, message_id, index, final, delta, turn, pr
         "message_id": message_id,
         "says": [i for i, _seg in new],
         "parsed": parsed.to_dict(),
-        "payload": c.cap_strings(payload, limit=4 * 1024),
+        "payload": c.project_payload(payload),
     }
     outcome = {"decision": "speak", "reason": None, "text": text_out, "profile": profile,
                "message_id": message_id, "index": index, "says": request["says"]}
@@ -1240,7 +1239,7 @@ def _notify(event: str, payload: dict, profile, reason: str, state_changed: bool
         "text": "",
         "state_changed": state_changed,
         "no_ack": True,
-        "payload": c.cap_strings(payload, limit=4 * 1024),
+        "payload": c.project_payload(payload),
     }
     try:
         _send_to_daemon(request, wait_ack=False)
@@ -1460,7 +1459,7 @@ def _send_alert(event: str, payload: dict, alert: dict, s: dict, cfg: dict, stat
         "reason": "alert: %s" % alert.get("event"),
         "text": "",
         "alert": alert,
-        "payload": _common.cap_strings(payload, limit=4 * 1024),
+        "payload": _common.project_payload(payload),
     }
     outcome = {"decision": "alert", "reason": request["reason"], "alert": alert}
     try:

@@ -386,7 +386,7 @@ class Daemon:
             text=text,
             attrs=attrs,
             parsed=msg.get("parsed") if isinstance(msg.get("parsed"), dict) else None,
-            payload=common.cap_strings(msg.get("payload")),
+            payload=common.project_payload(msg.get("payload")),
             timings=timings,
             delivery="socket",
             error=_str_or_none(msg.get("config_error")),
@@ -505,7 +505,7 @@ class Daemon:
             hook_event=_str_or_none(msg.get("event"), 64),
             session_id=session_id,
             cwd=_str_or_none(msg.get("cwd")),
-            payload=common.cap_strings(msg.get("payload")),
+            payload=common.project_payload(msg.get("payload")),
             timings=timings,
             delivery="socket",
         )
