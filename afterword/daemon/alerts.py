@@ -314,15 +314,9 @@ class AlertPhrases:
 
     def _write_file(self, data: dict[str, Any]) -> None:
         text = json.dumps(data, ensure_ascii=False, indent=1) + "\n"
-        fd, tmp = tempfile.mkstemp(prefix=".alerts-", suffix=".json", dir=str(self.path.parent))
-        try:
-            os.fchmod(fd, 0o600)
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(text)
-            os.replace(tmp, self.path)
-        except BaseException:
-            Path(tmp).unlink(missing_ok=True)
-            raise
+        from afterword.hooks import common
+
+        common.atomic_write(self.path, text)
         self.reload(force=True)
 
     def save_lang(self, lang: str, pools: dict[str, list[str]] | None) -> dict[str, list[str]]:

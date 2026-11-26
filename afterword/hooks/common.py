@@ -13,6 +13,7 @@ import os
 import re
 import shlex
 import stat
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -560,26 +561,72 @@ def load_state(session_id: object) -> Dict[str, Any]:
     return base
 
 
-def save_state(session_id: object, state: Dict[str, Any]) -> None:
-    """Atomically write session state (write temp file, then rename)."""
+def _fsync(fd: int, durable: bool) -> None:
+    """fsync, or on macOS (durable=True) F_FULLFSYNC, which asks the drive to
+    flush its own cache too; plain fsync there only reaches the drive."""
+    if durable and sys.platform == "darwin":
+        import fcntl
+
+        try:
+            fcntl.fcntl(fd, fcntl.F_FULLFSYNC)
+            return
+        except OSError:
+            pass  # filesystem without F_FULLFSYNC: fall back to fsync
+    os.fsync(fd)
+
+
+def atomic_write(path: Any, data: Any, mode: int = 0o600, durable: bool = False) -> None:
+    """Replace `path` with `data` (str, written as UTF-8, or bytes) so a crash
+    leaves either the old file or the new one, never a torn or empty one.
+
+    Writes a temp file in the same directory, sets `mode`, flushes and fsyncs
+    it, renames it over `path`, then fsyncs the directory so the rename itself
+    survives power loss. durable=True uses F_FULLFSYNC on macOS (slower; for
+    files the user would be upset to lose, like config.toml). The parent
+    directory must exist. The temp file is removed if anything fails.
+    """
     import tempfile
 
-    d = state_dir()
-    d.mkdir(mode=0o700, parents=True, exist_ok=True)
-    state = dict(state)
-    state["session_id"] = session_id
-    state["updated"] = time.time()
-    fd, tmp = tempfile.mkstemp(prefix=".state-", suffix=".tmp", dir=str(d))
+    target = Path(path)
+    if isinstance(data, str):
+        data = data.encode("utf-8")
+    fd, tmp = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent))
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(state, fh, ensure_ascii=False, indent=1)
-        os.replace(tmp, state_file(session_id))
+        try:
+            os.fchmod(fd, mode)
+            view = memoryview(data)
+            while view:
+                view = view[os.write(fd, view):]
+            _fsync(fd, durable)
+        finally:
+            os.close(fd)
+        os.replace(tmp, str(target))
     except BaseException:
         try:
             os.unlink(tmp)
         except OSError:
             pass
         raise
+    try:
+        dfd = os.open(str(target.parent), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        _fsync(dfd, durable)
+    except OSError:
+        pass  # some filesystems refuse to fsync a directory; the rename is already done
+    finally:
+        os.close(dfd)
+
+
+def save_state(session_id: object, state: Dict[str, Any]) -> None:
+    """Atomically write session state (temp file, fsync, rename)."""
+    d = state_dir()
+    d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    state = dict(state)
+    state["session_id"] = session_id
+    state["updated"] = time.time()
+    atomic_write(state_file(session_id), json.dumps(state, ensure_ascii=False, indent=1))
 
 
 STATE_LOCK_WAIT_S = 1.0
@@ -683,21 +730,9 @@ def load_voice_usage() -> Dict[str, Dict[str, Any]]:
 
 
 def _save_voice_usage(profiles: Dict[str, Dict[str, Any]]) -> None:
-    import tempfile
-
     d = home()
     d.mkdir(mode=0o700, parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=".voices-", suffix=".tmp", dir=str(d))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump({"v": 1, "profiles": profiles}, fh, ensure_ascii=False, indent=1)
-        os.replace(tmp, voices_path())
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    atomic_write(voices_path(), json.dumps({"v": 1, "profiles": profiles}, ensure_ascii=False, indent=1))
 
 
 def note_voice(session_id: object, profile: Optional[str], cwd: object = None, now: Optional[float] = None) -> None:

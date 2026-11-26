@@ -179,7 +179,7 @@ def build_plist(python: str | None = None) -> dict[str, Any]:
     log = str(home / LOG_NAME)
     return {
         "Label": LABEL,
-        "ProgramArguments": [py, "-m", "afterword.cli", "serve"],
+        "ProgramArguments": [py, "-P", "-m", "afterword.cli", "serve"],
         "RunAtLoad": True,
         "KeepAlive": {"SuccessfulExit": False},
         "ThrottleInterval": THROTTLE_S,
